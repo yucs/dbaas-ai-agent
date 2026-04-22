@@ -146,7 +146,7 @@ class ServiceDetailResponse(ApiSchema):
 
     name: str = Field(description="服务组名称")
     type: str = Field(description="服务组类型")
-    owner: str | None = Field(default=None, description="服务组所属者")
+    user: str | None = Field(default=None, description="服务组所属用户")
     subsystem: str = Field(description="服务组所属子系统")
     environment: str = Field(description="服务组所在环境，例如 prod、staging、dev、perf")
     siteId: str = Field(description="服务组所属站点 ID")

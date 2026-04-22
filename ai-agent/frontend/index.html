@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dbass-ai-agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div>
+            <p class="eyebrow">Phase 1</p>
+            <h1>dbass-ai-agent</h1>
+          </div>
+          <button id="new-session-button" class="ghost-button">新建会话</button>
+        </div>
+        <div class="identity-card" id="identity-card"></div>
+        <div class="session-list" id="session-list"></div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="chat-header">
+          <div>
+            <p class="eyebrow">当前会话</p>
+            <h2 id="session-title">未选择会话</h2>
+          </div>
+          <div class="header-actions">
+            <span id="session-status" class="status-pill">-</span>
+            <button id="archive-button" class="ghost-button">归档</button>
+            <button id="restore-button" class="ghost-button">恢复</button>
+            <button id="delete-button" class="danger-button">删除</button>
+          </div>
+        </header>
+
+        <section id="flash" class="flash hidden"></section>
+        <section id="messages" class="messages"></section>
+
+        <form id="composer" class="composer">
+          <textarea
+            id="message-input"
+            placeholder="继续在当前 session 中提问..."
+            rows="3"
+          ></textarea>
+          <button id="send-button" type="submit" class="primary-button">发送</button>
+        </form>
+      </main>
+    </div>
+
+    <div id="login-modal" class="modal">
+      <form id="login-form" class="login-card">
+        <p class="eyebrow">简单登录</p>
+        <h2>进入对话页面</h2>
+        <label>
+          用户名
+          <input id="login-user-id" name="user_id" autocomplete="username" required />
+        </label>
+        <label>
+          用户类型
+          <select id="login-role" name="role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>
+        <p class="hint">
+          第一阶段仅做本地身份切换。普通用户默认把 `user_id` 直接作为后端 `user` 使用。
+        </p>
+        <button type="submit" class="primary-button">进入系统</button>
+      </form>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+  </html>

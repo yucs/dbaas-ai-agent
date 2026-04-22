@@ -27,6 +27,8 @@
 - `GET /clusters/{clusterId}`
 - `GET /hosts`
 - `GET /hosts/{hostId}`
+- `GET /users`
+- `GET /users/{user}`
 - `GET /services`
 - `GET /services/{name}`
 - `PUT /services/{name}/resource`
@@ -39,7 +41,9 @@
 - `GET /healthz` 保持免鉴权
 - 其他业务接口都需要 `Authorization: Bearer <token>`
 - `Bearer admin` 表示管理员，可访问全部接口和全部资源
-- `Bearer user:<owner>` 表示普通用户，只能访问自己 owner 下的服务和对应任务
+- `Bearer user:<user>` 表示普通用户，只能访问自己 user 下的服务和对应任务
+- `GET /users` 和 `GET /users/{user}` 中的 `user` 直接等于服务组 `user`
+- 管理员可查看全部用户；普通用户只能查看自己
 - 普通用户无权访问 `sites`、`clusters`、`hosts` 相关平台资源接口
 
 认证示例：
@@ -85,7 +89,9 @@ curl http://127.0.0.1:8000/services
 
 其中：
 
-- `GET /services` 查询当前内存中已加载的服务组，支持按 `owner` 过滤
+- `GET /users` 查询当前已加载服务中出现过的全部用户，用户名即服务组 `user`
+- `GET /users/{user}` 按用户名查询用户详情和其名下服务组摘要
+- `GET /services` 查询当前内存中已加载的服务组，支持按 `user` 过滤
 - `GET /services/{name}` 按服务组名称查询
 - 返回服务组聚合视图，包含站点归属、网络、子服务、单元和备份策略摘要
 - `GET /sites`、`GET /clusters`、`GET /hosts` 查询平台资源拓扑
@@ -167,10 +173,24 @@ curl http://127.0.0.1:8000/services \
   -H 'Authorization: Bearer admin'
 ```
 
-按 owner 查询服务组：
+查询全部用户：
 
 ```bash
-curl 'http://127.0.0.1:8000/services?owner=payment-team-prod' \
+curl http://127.0.0.1:8000/users \
+  -H 'Authorization: Bearer admin'
+```
+
+查询单个用户：
+
+```bash
+curl http://127.0.0.1:8000/users/payment-team-prod \
+  -H 'Authorization: Bearer admin'
+```
+
+按 user 查询服务组：
+
+```bash
+curl 'http://127.0.0.1:8000/services?user=payment-team-prod' \
   -H 'Authorization: Bearer admin'
 ```
 

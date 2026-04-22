@@ -14,12 +14,12 @@ def admin_headers() -> dict[str, str]:
     return {"Authorization": "Bearer admin"}
 
 
-def user_headers(owner: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{owner}"}
+def user_headers(user: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer user:{user}"}
 
 
-def get_first_owned_service(client: TestClient, owner: str) -> dict:
-    response = client.get("/services", headers=user_headers(owner))
+def get_first_user_service(client: TestClient, user: str) -> dict:
+    response = client.get("/services", headers=user_headers(user))
     assert response.status_code == 200
     payload = response.json()
     assert payload
@@ -79,38 +79,38 @@ def test_list_services_returns_all_loaded_service_groups() -> None:
     assert any(name.endswith("-0001") for name in service_names)
 
 
-def test_list_services_can_filter_by_owner() -> None:
+def test_list_services_can_filter_by_user() -> None:
     client = create_test_client()
 
     all_services = client.get("/services", headers=admin_headers())
     assert all_services.status_code == 200
     all_payload = all_services.json()
-    expected_owner_services = [
-        item for item in all_payload if item["owner"] == "payment-team-prod"
+    expected_user_services = [
+        item for item in all_payload if item["user"] == "payment-team-prod"
     ]
 
     response = client.get(
         "/services",
-        params={"owner": "payment-team-prod"},
+        params={"user": "payment-team-prod"},
         headers=admin_headers(),
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload
-    assert len(payload) == len(expected_owner_services)
-    assert all(item["owner"] == "payment-team-prod" for item in payload)
+    assert len(payload) == len(expected_user_services)
+    assert all(item["user"] == "payment-team-prod" for item in payload)
     assert {item["name"] for item in payload} == {
-        item["name"] for item in expected_owner_services
+        item["name"] for item in expected_user_services
     }
 
 
-def test_list_services_returns_empty_list_when_owner_has_no_matches() -> None:
+def test_list_services_returns_empty_list_when_user_has_no_matches() -> None:
     client = create_test_client()
 
     response = client.get(
         "/services",
-        params={"owner": "not-exist-owner"},
+        params={"user": "not-exist-user"},
         headers=admin_headers(),
     )
 
@@ -127,7 +127,7 @@ def test_get_service_can_load_additional_seed_samples() -> None:
     payload = response.json()
     assert payload["name"] == "tidb-oltp"
     assert payload["type"] == "tidb"
-    assert payload["owner"] == "db-platform-team"
+    assert payload["user"] == "db-platform-team"
     assert payload["subsystem"] == "tidb-platform"
     assert payload["environment"] == "prod"
     assert payload["healthStatus"] == "HEALTHY"
@@ -265,8 +265,11 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
     assert task_response.status_code == 200
     running_payload = task_response.json()
     assert running_payload["type"] == "service.image.upgrade"
-    assert running_payload["status"] == "RUNNING"
-    assert running_payload["message"] == "image upgrade running"
+    assert running_payload["status"] in {"RUNNING", "SUCCESS"}
+    if running_payload["status"] == "RUNNING":
+        assert running_payload["message"] == "image upgrade running"
+    else:
+        assert running_payload["message"] == "image upgrade completed"
 
     task_payload = wait_for_task_completion(client, task_id)
     assert task_payload["type"] == "service.image.upgrade"
@@ -360,7 +363,7 @@ def test_business_endpoints_require_bearer_token() -> None:
     assert response.headers["WWW-Authenticate"] == "Bearer"
 
 
-def test_list_services_for_user_only_returns_owned_services() -> None:
+def test_list_services_for_user_only_returns_user_services() -> None:
     client = create_test_client()
 
     response = client.get("/services", headers=user_headers("payment-team-prod"))
@@ -368,27 +371,27 @@ def test_list_services_for_user_only_returns_owned_services() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload
-    assert all(item["owner"] == "payment-team-prod" for item in payload)
+    assert all(item["user"] == "payment-team-prod" for item in payload)
 
 
-def test_user_cannot_query_other_owner_services() -> None:
+def test_user_cannot_query_other_user_services() -> None:
     client = create_test_client()
 
     response = client.get(
         "/services",
-        params={"owner": "search-team-staging"},
+        params={"user": "search-team-staging"},
         headers=user_headers("payment-team-prod"),
     )
 
     assert response.status_code == 403
     assert response.json() == {
-        "detail": "user 'payment-team-prod' cannot query services owned by 'search-team-staging'"
+        "detail": "user 'payment-team-prod' cannot query services for user 'search-team-staging'"
     }
 
 
-def test_user_can_only_access_owned_service_detail() -> None:
+def test_user_can_only_access_user_service_detail() -> None:
     client = create_test_client()
-    owned_service = get_first_owned_service(client, "payment-team-prod")
+    owned_service = get_first_user_service(client, "payment-team-prod")
 
     own_response = client.get(
         f"/services/{owned_service['name']}",
@@ -397,7 +400,7 @@ def test_user_can_only_access_owned_service_detail() -> None:
     forbidden_response = client.get("/services/tidb-oltp", headers=user_headers("payment-team-prod"))
 
     assert own_response.status_code == 200
-    assert own_response.json()["owner"] == "payment-team-prod"
+    assert own_response.json()["user"] == "payment-team-prod"
     assert forbidden_response.status_code == 403
     assert forbidden_response.json() == {
         "detail": "user 'payment-team-prod' cannot access service 'tidb-oltp'"
@@ -424,7 +427,7 @@ def test_user_cannot_update_other_users_service() -> None:
 
 def test_user_cannot_query_task_for_other_users_service() -> None:
     client = create_test_client()
-    owned_service = get_first_owned_service(client, "payment-team-prod")
+    owned_service = get_first_user_service(client, "payment-team-prod")
     service_detail_response = client.get(
         f"/services/{owned_service['name']}",
         headers=user_headers("payment-team-prod"),

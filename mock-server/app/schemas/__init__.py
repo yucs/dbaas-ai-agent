@@ -25,6 +25,7 @@ from .service_detail import (
     UpdateStorageSpecRequest,
 )
 from .task import CreateTaskResponse, Task
+from .user import UserDetailResponse, UserSummary
 
 __all__ = [
     "BackupStrategySummary",
@@ -46,6 +47,8 @@ __all__ = [
     "SiteDetailResponse",
     "SiteSummary",
     "Task",
+    "UserDetailResponse",
+    "UserSummary",
     "UpdateServiceResourceRequest",
     "UpdateServiceStorageRequest",
     "UpdateStorageSpecRequest",

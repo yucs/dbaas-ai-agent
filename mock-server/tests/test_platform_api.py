@@ -14,8 +14,8 @@ def admin_headers() -> dict[str, str]:
     return {"Authorization": "Bearer admin"}
 
 
-def user_headers(owner: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{owner}"}
+def user_headers(user: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer user:{user}"}
 
 
 def test_seed_files_exist_with_normalized_platform_layout() -> None:

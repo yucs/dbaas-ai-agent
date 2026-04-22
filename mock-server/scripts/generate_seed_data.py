@@ -31,22 +31,22 @@ class SiteSpec:
 
 
 SERVICE_PATTERNS: list[dict[str, Any]] = [
-    {"type": "mysql", "name_prefix": "account-mysql", "owner": "account-team-prod", "subsystem": "account", "environments": ("prod",), "weight": 18},
-    {"type": "mysql", "name_prefix": "payment-mysql", "owner": "payment-team-prod", "subsystem": "payment", "environments": ("prod", "staging"), "weight": 16},
-    {"type": "mysql", "name_prefix": "billing-mysql", "owner": "billing-team-prod", "subsystem": "billing", "environments": ("prod", "staging"), "weight": 12},
-    {"type": "tidb", "name_prefix": "order-tidb", "owner": "order-team-prod", "subsystem": "order", "environments": ("prod", "staging"), "weight": 14},
-    {"type": "tidb", "name_prefix": "inventory-tidb", "owner": "inventory-team-prod", "subsystem": "inventory", "environments": ("prod", "staging"), "weight": 12},
-    {"type": "kafka", "name_prefix": "trade-kafka", "owner": "trade-team-staging", "subsystem": "trade", "environments": ("staging", "perf"), "weight": 10},
-    {"type": "kafka", "name_prefix": "message-kafka", "owner": "messaging-team-staging", "subsystem": "messaging", "environments": ("staging", "perf"), "weight": 8},
-    {"type": "influxdb", "name_prefix": "monitor-influxdb", "owner": "monitor-team-prod", "subsystem": "monitor", "environments": ("prod", "perf"), "weight": 10},
-    {"type": "redis", "name_prefix": "session-redis", "owner": "session-team-prod", "subsystem": "session", "environments": ("prod", "staging", "dev"), "weight": 10},
-    {"type": "redis", "name_prefix": "profile-redis", "owner": "profile-team-prod", "subsystem": "profile", "environments": ("prod", "staging", "dev"), "weight": 8},
-    {"type": "mongodb", "name_prefix": "content-mongodb", "owner": "content-team-staging", "subsystem": "content", "environments": ("staging", "dev"), "weight": 8},
-    {"type": "mongodb", "name_prefix": "growth-mongodb", "owner": "growth-team-staging", "subsystem": "growth", "environments": ("staging", "dev"), "weight": 8},
-    {"type": "elasticsearch", "name_prefix": "search-es", "owner": "search-team-staging", "subsystem": "search", "environments": ("staging", "perf"), "weight": 6},
-    {"type": "elasticsearch", "name_prefix": "recommend-es", "owner": "recommend-team-staging", "subsystem": "recommend", "environments": ("staging", "perf"), "weight": 6},
-    {"type": "clickhouse", "name_prefix": "warehouse-clickhouse", "owner": "warehouse-team-prod", "subsystem": "warehouse", "environments": ("prod", "perf"), "weight": 6},
-    {"type": "clickhouse", "name_prefix": "analytics-clickhouse", "owner": "analytics-team-prod", "subsystem": "analytics", "environments": ("prod", "perf"), "weight": 6},
+    {"type": "mysql", "name_prefix": "account-mysql", "user": "account-team-prod", "subsystem": "account", "environments": ("prod",), "weight": 18},
+    {"type": "mysql", "name_prefix": "payment-mysql", "user": "payment-team-prod", "subsystem": "payment", "environments": ("prod", "staging"), "weight": 16},
+    {"type": "mysql", "name_prefix": "billing-mysql", "user": "billing-team-prod", "subsystem": "billing", "environments": ("prod", "staging"), "weight": 12},
+    {"type": "tidb", "name_prefix": "order-tidb", "user": "order-team-prod", "subsystem": "order", "environments": ("prod", "staging"), "weight": 14},
+    {"type": "tidb", "name_prefix": "inventory-tidb", "user": "inventory-team-prod", "subsystem": "inventory", "environments": ("prod", "staging"), "weight": 12},
+    {"type": "kafka", "name_prefix": "trade-kafka", "user": "trade-team-staging", "subsystem": "trade", "environments": ("staging", "perf"), "weight": 10},
+    {"type": "kafka", "name_prefix": "message-kafka", "user": "messaging-team-staging", "subsystem": "messaging", "environments": ("staging", "perf"), "weight": 8},
+    {"type": "influxdb", "name_prefix": "monitor-influxdb", "user": "monitor-team-prod", "subsystem": "monitor", "environments": ("prod", "perf"), "weight": 10},
+    {"type": "redis", "name_prefix": "session-redis", "user": "session-team-prod", "subsystem": "session", "environments": ("prod", "staging", "dev"), "weight": 10},
+    {"type": "redis", "name_prefix": "profile-redis", "user": "profile-team-prod", "subsystem": "profile", "environments": ("prod", "staging", "dev"), "weight": 8},
+    {"type": "mongodb", "name_prefix": "content-mongodb", "user": "content-team-staging", "subsystem": "content", "environments": ("staging", "dev"), "weight": 8},
+    {"type": "mongodb", "name_prefix": "growth-mongodb", "user": "growth-team-staging", "subsystem": "growth", "environments": ("staging", "dev"), "weight": 8},
+    {"type": "elasticsearch", "name_prefix": "search-es", "user": "search-team-staging", "subsystem": "search", "environments": ("staging", "perf"), "weight": 6},
+    {"type": "elasticsearch", "name_prefix": "recommend-es", "user": "recommend-team-staging", "subsystem": "recommend", "environments": ("staging", "perf"), "weight": 6},
+    {"type": "clickhouse", "name_prefix": "warehouse-clickhouse", "user": "warehouse-team-prod", "subsystem": "warehouse", "environments": ("prod", "perf"), "weight": 6},
+    {"type": "clickhouse", "name_prefix": "analytics-clickhouse", "user": "analytics-team-prod", "subsystem": "analytics", "environments": ("prod", "perf"), "weight": 6},
 ]
 
 
@@ -247,7 +247,7 @@ def build_services(
         build_mysql_service(
             name="mysql-xf2",
             site=site_by_id["site-prod-sh-01"],
-            owner="payment-platform-team",
+            user="payment-platform-team",
             subsystem="payment-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -265,7 +265,7 @@ def build_services(
         build_tidb_service(
             name="tidb-oltp",
             site=site_by_id["site-prod-sh-02"],
-            owner="db-platform-team",
+            user="db-platform-team",
             subsystem="tidb-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -278,7 +278,7 @@ def build_services(
         build_kafka_service(
             name="kafka-stream",
             site=site_by_id["site-prod-sh-01"],
-            owner="streaming-platform-team",
+            user="streaming-platform-team",
             subsystem="stream-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -289,7 +289,7 @@ def build_services(
         build_influxdb_service(
             name="influxdb-monitor",
             site=site_by_id["site-prod-sh-01"],
-            owner="observability-platform-team",
+            user="observability-platform-team",
             subsystem="monitor-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -300,7 +300,7 @@ def build_services(
         build_redis_service(
             name="redis-cache",
             site=site_by_id["site-prod-sh-01"],
-            owner="cache-platform-team",
+            user="cache-platform-team",
             subsystem="cache-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -311,7 +311,7 @@ def build_services(
         build_mongodb_service(
             name="mongodb-docs",
             site=site_by_id["site-staging-sh-01"],
-            owner="content-platform-team",
+            user="content-platform-team",
             subsystem="content-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -322,7 +322,7 @@ def build_services(
         build_elasticsearch_service(
             name="elasticsearch-search",
             site=site_by_id["site-staging-sh-01"],
-            owner="search-platform-team",
+            user="search-platform-team",
             subsystem="search-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -333,7 +333,7 @@ def build_services(
         build_clickhouse_service(
             name="clickhouse-warehouse",
             site=site_by_id["site-prod-bj-01"],
-            owner="warehouse-platform-team",
+            user="warehouse-platform-team",
             subsystem="warehouse-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
@@ -357,7 +357,7 @@ def build_services(
                 build_mysql_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("prod", environment),
+                    user=pattern["user"].replace("prod", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -370,7 +370,7 @@ def build_services(
                 build_tidb_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("prod", environment),
+                    user=pattern["user"].replace("prod", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -383,7 +383,7 @@ def build_services(
                 build_kafka_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("staging", environment),
+                    user=pattern["user"].replace("staging", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -396,7 +396,7 @@ def build_services(
                 build_influxdb_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("prod", environment),
+                    user=pattern["user"].replace("prod", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -409,7 +409,7 @@ def build_services(
                 build_redis_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("prod", environment),
+                    user=pattern["user"].replace("prod", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -422,7 +422,7 @@ def build_services(
                 build_mongodb_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("staging", environment),
+                    user=pattern["user"].replace("staging", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -435,7 +435,7 @@ def build_services(
                 build_elasticsearch_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("staging", environment),
+                    user=pattern["user"].replace("staging", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -448,7 +448,7 @@ def build_services(
                 build_clickhouse_service(
                     name=name,
                     site=site,
-                    owner=pattern["owner"].replace("prod", environment),
+                    user=pattern["user"].replace("prod", environment),
                     subsystem=pattern["subsystem"],
                     next_container_ip=next_container_ip,
                     choose_host=choose_host,
@@ -464,7 +464,7 @@ def build_service_base(
     name: str,
     service_type: str,
     site: dict[str, Any],
-    owner: str,
+    user: str,
     subsystem: str,
     architecture: str,
     sharding: bool,
@@ -479,7 +479,7 @@ def build_service_base(
     return {
         "name": name,
         "type": service_type,
-        "owner": owner,
+        "user": user,
         "subsystem": subsystem,
         "siteId": site["id"],
         "architecture": architecture,
@@ -507,7 +507,7 @@ def build_mysql_service(
     *,
     name: str,
     site: dict[str, Any],
-    owner: str,
+    user: str,
     subsystem: str,
     next_container_ip,
     choose_host,
@@ -520,7 +520,7 @@ def build_mysql_service(
         name=name,
         service_type="mysql",
         site=site,
-        owner=owner,
+        user=user,
         subsystem=subsystem,
         architecture="proxy+switch-manager+mysql",
         sharding=False,
@@ -549,7 +549,7 @@ def build_tidb_service(
     *,
     name: str,
     site: dict[str, Any],
-    owner: str,
+    user: str,
     subsystem: str,
     next_container_ip,
     choose_host,
@@ -563,7 +563,7 @@ def build_tidb_service(
         name=name,
         service_type="tidb",
         site=site,
-        owner=owner,
+        user=user,
         subsystem=subsystem,
         architecture="tidb+tikv+pd",
         sharding=False,
@@ -594,8 +594,8 @@ def build_tidb_service(
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_kafka_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="kafka", site=site, owner=owner, subsystem=subsystem, architecture="kafka+zookeeper", sharding=False, sequence_hint=stable_index(name))
+def build_kafka_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="kafka", site=site, user=user, subsystem=subsystem, architecture="kafka+zookeeper", sharding=False, sequence_hint=stable_index(name))
     kafka_units = [
         make_unit(name=name, child_service_type="kafka", unit_id=f"kafka-0{i+1}", role="broker", image="bitnami/kafka", version="3.6.0", cpu=8.0, memory=16.0, data_size=600.0, log_size=80.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies)
         for i in range(3)
@@ -611,8 +611,8 @@ def build_kafka_service(*, name: str, site: dict[str, Any], owner: str, subsyste
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_influxdb_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="influxdb", site=site, owner=owner, subsystem=subsystem, architecture="influxdb", sharding=False, sequence_hint=stable_index(name))
+def build_influxdb_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="influxdb", site=site, user=user, subsystem=subsystem, architecture="influxdb", sharding=False, sequence_hint=stable_index(name))
     units = [
         make_unit(name=name, child_service_type="influxdb", unit_id="influxdb-01", role="primary", image="influxdb", version="2.7.5", cpu=4.0, memory=8.0, data_size=240.0, log_size=40.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies),
         make_unit(name=name, child_service_type="influxdb", unit_id="influxdb-02", role="replica", image="influxdb", version="2.7.5", cpu=4.0, memory=8.0, data_size=240.0, log_size=40.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies),
@@ -623,8 +623,8 @@ def build_influxdb_service(*, name: str, site: dict[str, Any], owner: str, subsy
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_redis_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="redis", site=site, owner=owner, subsystem=subsystem, architecture="redis+sentinel", sharding=False, sequence_hint=stable_index(name))
+def build_redis_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="redis", site=site, user=user, subsystem=subsystem, architecture="redis+sentinel", sharding=False, sequence_hint=stable_index(name))
     redis_units = [
         make_unit(name=name, child_service_type="redis", unit_id="redis-primary-01", role="primary", image="redis", version="7.2.4", cpu=4.0, memory=16.0, data_size=120.0, log_size=20.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies),
         make_unit(name=name, child_service_type="redis", unit_id="redis-replica-01", role="replica", image="redis", version="7.2.4", cpu=4.0, memory=16.0, data_size=120.0, log_size=20.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies),
@@ -642,8 +642,8 @@ def build_redis_service(*, name: str, site: dict[str, Any], owner: str, subsyste
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_mongodb_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="mongodb", site=site, owner=owner, subsystem=subsystem, architecture="mongos+configsvr+shard", sharding=True, sequence_hint=stable_index(name))
+def build_mongodb_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="mongodb", site=site, user=user, subsystem=subsystem, architecture="mongos+configsvr+shard", sharding=True, sequence_hint=stable_index(name))
     mongos_units = [
         make_unit(name=name, child_service_type="mongos", unit_id=f"mongos-0{i+1}", role="router", image="mongodb/mongos", version="7.0.9", cpu=4.0, memory=8.0, data_size=20.0, log_size=20.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies)
         for i in range(2)
@@ -664,8 +664,8 @@ def build_mongodb_service(*, name: str, site: dict[str, Any], owner: str, subsys
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_elasticsearch_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="elasticsearch", site=site, owner=owner, subsystem=subsystem, architecture="elasticsearch+kibana", sharding=False, sequence_hint=stable_index(name))
+def build_elasticsearch_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="elasticsearch", site=site, user=user, subsystem=subsystem, architecture="elasticsearch+kibana", sharding=False, sequence_hint=stable_index(name))
     es_units = [
         make_unit(name=name, child_service_type="elasticsearch", unit_id=f"es-0{i+1}", role="data" if i else "master", image="elasticsearch", version="8.13.4", cpu=8.0, memory=32.0, data_size=700.0, log_size=60.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies)
         for i in range(3)
@@ -680,8 +680,8 @@ def build_elasticsearch_service(*, name: str, site: dict[str, Any], owner: str, 
     return apply_runtime_health(service, allow_anomalies=allow_anomalies)
 
 
-def build_clickhouse_service(*, name: str, site: dict[str, Any], owner: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
-    service = build_service_base(name=name, service_type="clickhouse", site=site, owner=owner, subsystem=subsystem, architecture="clickhouse+keeper", sharding=False, sequence_hint=stable_index(name))
+def build_clickhouse_service(*, name: str, site: dict[str, Any], user: str, subsystem: str, next_container_ip, choose_host, allow_anomalies: bool) -> dict[str, Any]:
+    service = build_service_base(name=name, service_type="clickhouse", site=site, user=user, subsystem=subsystem, architecture="clickhouse+keeper", sharding=False, sequence_hint=stable_index(name))
     clickhouse_units = [
         make_unit(name=name, child_service_type="clickhouse", unit_id=f"clickhouse-0{i+1}", role="replica" if i else "primary", image="clickhouse/clickhouse-server", version="24.4.1", cpu=16.0, memory=64.0, data_size=1400.0, log_size=100.0, site_id=site["id"], next_container_ip=next_container_ip, choose_host=choose_host, allow_anomalies=allow_anomalies)
         for i in range(3)

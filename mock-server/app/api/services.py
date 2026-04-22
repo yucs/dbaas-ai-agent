@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.auth import CurrentUser, ensure_service_access, get_current_user, resolve_service_owner_filter
+from app.auth import CurrentUser, ensure_service_access, get_current_user, resolve_service_user_filter
 from app.schemas import (
     CreateTaskResponse,
     ServiceDetailResponse,
@@ -42,16 +42,16 @@ def get_service(
 @router.get("/services", response_model=list[ServiceDetailResponse])
 def list_services(
     request: Request,
-    owner: str | None = Query(default=None, description="按服务组 owner 精确过滤"),
+    user: str | None = Query(default=None, description="按服务组 user 精确过滤"),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[ServiceDetailResponse]:
-    """查询当前已加载到内存的服务组，可按 owner 过滤。"""
+    """查询当前已加载到内存的服务组，可按 user 过滤。"""
 
     store = get_store(request)
-    effective_owner = resolve_service_owner_filter(current_user, owner)
+    effective_user = resolve_service_user_filter(current_user, user)
     return [
         ServiceDetailResponse.model_validate(service_detail)
-        for service_detail in store.list_service_details(owner=effective_owner)
+        for service_detail in store.list_service_details(user=effective_user)
     ]
 
 

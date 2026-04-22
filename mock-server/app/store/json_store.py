@@ -80,15 +80,41 @@ class JsonDataStore:
                 return None
             return self._public_service_detail(service)
 
-    def list_service_details(self, *, owner: str | None = None) -> list[dict[str, Any]]:
-        """返回当前内存中的服务组详情，可按 owner 过滤。"""
+    def list_service_details(self, *, user: str | None = None) -> list[dict[str, Any]]:
+        """返回当前内存中的服务组详情，可按 user 过滤。"""
 
         with self._lock:
             return [
                 self._public_service_detail(self._services_by_name[name])
                 for name in sorted(self._services_by_name)
-                if owner is None or self._services_by_name[name].get("owner") == owner
+                if user is None or self._services_by_name[name].get("user") == user
             ]
+
+    def list_users(self, *, user: str | None = None) -> list[dict[str, Any]]:
+        """返回用户摘要列表，用户名直接等于服务组 user。"""
+
+        with self._lock:
+            users = [
+                service_user
+                for service_user in sorted(
+                    {
+                        service.get("user")
+                        for service in self._services_by_name.values()
+                        if isinstance(service.get("user"), str) and service.get("user")
+                    }
+                )
+                if user is None or service_user == user
+            ]
+            return [self._public_user_summary(service_user) for service_user in users]
+
+    def get_user(self, user: str) -> dict[str, Any] | None:
+        """返回指定用户详情，用户名直接等于服务组 user。"""
+
+        with self._lock:
+            user_services = self._list_user_services(user)
+            if not user_services:
+                return None
+            return self._public_user_detail(user, user_services)
 
     def list_sites(self) -> list[dict[str, Any]]:
         """返回全部站点摘要。"""
@@ -113,7 +139,7 @@ class JsonDataStore:
                 {
                     "name": service["name"],
                     "type": service["type"],
-                    "owner": service.get("owner"),
+                    "user": service.get("user"),
                     "subsystem": service["subsystem"],
                     "healthStatus": service["healthStatus"],
                 }
@@ -378,6 +404,20 @@ class JsonDataStore:
         if not isinstance(site_id, str) or not site_id:
             raise DataValidationError(f"service '{normalized_service.get('name')}' must have a non-empty 'siteId'")
 
+        raw_user = normalized_service.get("user")
+        raw_owner = normalized_service.pop("owner", None)
+        if raw_user is None:
+            raw_user = raw_owner
+        elif raw_owner is not None and raw_owner != raw_user:
+            raise DataValidationError(
+                f"service '{normalized_service.get('name')}' has mismatched 'user' and legacy 'owner'"
+            )
+        if raw_user is not None and (not isinstance(raw_user, str) or not raw_user):
+            raise DataValidationError(
+                f"service '{normalized_service.get('name')}' must have a non-empty 'user' when provided"
+            )
+        normalized_service["user"] = raw_user
+
         normalized_service.setdefault("healthStatus", "HEALTHY")
         normalized_service.setdefault("subsystem", self._derive_subsystem(normalized_service))
         normalized_service.setdefault("network", self._build_fallback_service_network(site_id, service_index))
@@ -462,12 +502,14 @@ class JsonDataStore:
         if isinstance(subsystem, str) and subsystem:
             return subsystem
 
-        owner = service.get("owner")
-        if isinstance(owner, str):
-            if "-team-" in owner:
-                return owner.split("-team-", 1)[0]
-            if owner.startswith("team-") and len(owner) > len("team-"):
-                return f"{owner[len('team-'):]}-platform"
+        user = service.get("user")
+        if user is None:
+            user = service.get("owner")
+        if isinstance(user, str):
+            if "-team-" in user:
+                return user.split("-team-", 1)[0]
+            if user.startswith("team-") and len(user) > len("team-"):
+                return f"{user[len('team-'):]}-platform"
 
         service_type = service.get("type")
         if isinstance(service_type, str) and service_type:
@@ -679,6 +721,8 @@ class JsonDataStore:
         public_service["siteName"] = site["name"]
         public_service["region"] = site["region"]
         public_service["zone"] = site["zone"]
+        public_service["user"] = public_service.get("user")
+        public_service.pop("owner", None)
 
         for child_service in public_service.get("services", []):
             for unit in child_service.get("units", []):
@@ -688,6 +732,35 @@ class JsonDataStore:
                 unit["storage"] = self._public_unit_storage(unit["storage"], host["_diskById"])
 
         return public_service
+
+    def _public_user_summary(self, user: str) -> dict[str, Any]:
+        """返回用户摘要。"""
+
+        user_services = self._list_user_services(user)
+        return {
+            "user": user,
+            "serviceGroupCount": len(user_services),
+            "environments": sorted(
+                {self._sites_by_id[service["siteId"]]["environment"] for service in user_services}
+            ),
+            "subsystems": sorted({service["subsystem"] for service in user_services}),
+        }
+
+    def _public_user_detail(self, user: str, user_services: list[dict[str, Any]]) -> dict[str, Any]:
+        """返回用户详情。"""
+
+        user_detail = self._public_user_summary(user)
+        user_detail["serviceGroups"] = [
+            {
+                "name": service["name"],
+                "type": service["type"],
+                "user": service.get("user"),
+                "subsystem": service["subsystem"],
+                "healthStatus": service["healthStatus"],
+            }
+            for service in user_services
+        ]
+        return user_detail
 
     def _public_unit_storage(self, storage: dict[str, Any], disk_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """把 seed 里的简化 volume 信息扩成接口响应结构。"""
@@ -701,6 +774,15 @@ class JsonDataStore:
             volume["mediaType"] = disk["mediaType"]
             public_storage[volume_name] = volume
         return public_storage
+
+    def _list_user_services(self, user: str) -> list[dict[str, Any]]:
+        """返回指定用户拥有的服务组。"""
+
+        return [
+            self._services_by_name[name]
+            for name in sorted(self._services_by_name)
+            if self._services_by_name[name].get("user") == user
+        ]
 
     def _collect_host_units(self, host_id: str) -> list[dict[str, Any]]:
         """收集指定主机上的全部单元。"""

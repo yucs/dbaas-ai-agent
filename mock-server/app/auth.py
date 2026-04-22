@@ -15,7 +15,7 @@ class CurrentUser:
     """当前请求用户。"""
 
     role: str
-    owner: str | None = None
+    user: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -39,9 +39,9 @@ def get_current_user(authorization: str | None = Header(default=None)) -> Curren
         return CurrentUser(role="admin")
 
     if token.startswith("user:"):
-        owner = token.removeprefix("user:").strip()
-        if owner:
-            return CurrentUser(role="user", owner=owner)
+        user = token.removeprefix("user:").strip()
+        if user:
+            return CurrentUser(role="user", user=user)
 
     _raise_unauthorized("invalid bearer token")
 
@@ -57,18 +57,18 @@ def require_admin_user(current_user: CurrentUser = Depends(get_current_user)) ->
     )
 
 
-def resolve_service_owner_filter(current_user: CurrentUser, requested_owner: str | None) -> str | None:
-    """解析当前请求可用的 owner 过滤条件。"""
+def resolve_service_user_filter(current_user: CurrentUser, requested_user: str | None) -> str | None:
+    """解析当前请求可用的 user 过滤条件。"""
 
     if current_user.is_admin:
-        return requested_owner
+        return requested_user
 
-    if requested_owner is not None and requested_owner != current_user.owner:
+    if requested_user is not None and requested_user != current_user.user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"user '{current_user.owner}' cannot query services owned by '{requested_owner}'",
+            detail=f"user '{current_user.user}' cannot query services for user '{requested_user}'",
         )
-    return current_user.owner
+    return current_user.user
 
 
 def ensure_service_access(
@@ -88,10 +88,10 @@ def ensure_service_access(
     if current_user.is_admin:
         return service_detail
 
-    if service_detail.get("owner") != current_user.owner:
+    if service_detail.get("user") != current_user.user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"user '{current_user.owner}' cannot access service '{service_name}'",
+            detail=f"user '{current_user.user}' cannot access service '{service_name}'",
         )
     return service_detail
 
@@ -115,6 +115,18 @@ def ensure_task_access(store: JsonDataStore, current_user: CurrentUser, task: di
             detail="task is not bound to an accessible service resource",
         )
     ensure_service_access(store, current_user, resource_name)
+
+
+def ensure_user_access(current_user: CurrentUser, user: str) -> None:
+    """校验当前用户是否可访问指定用户信息。"""
+
+    if current_user.is_admin or current_user.user == user:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"user '{current_user.user}' cannot access user '{user}'",
+    )
 
 
 def _raise_unauthorized(detail: str) -> None:
