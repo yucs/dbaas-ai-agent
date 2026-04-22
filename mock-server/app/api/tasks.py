@@ -1,7 +1,8 @@
 """通用异步任务查询接口。"""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.auth import CurrentUser, ensure_task_access, get_current_user
 from app.schemas import Task
 from app.store import JsonDataStore, TaskNotFoundError
 
@@ -15,7 +16,11 @@ def get_store(request: Request) -> JsonDataStore:
 
 
 @router.get("/tasks/{task_id}", response_model=Task)
-def get_task(task_id: str, request: Request) -> Task:
+def get_task(
+    task_id: str,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Task:
     """按任务 ID 查询通用异步任务状态。"""
 
     store = get_store(request)
@@ -23,4 +28,5 @@ def get_task(task_id: str, request: Request) -> Task:
         task = store.get_task(task_id)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail=f"task '{task_id}' not found") from None
+    ensure_task_access(store, current_user, task)
     return Task.model_validate(task)

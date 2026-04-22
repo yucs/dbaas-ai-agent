@@ -10,6 +10,14 @@ def create_test_client() -> TestClient:
     return TestClient(app)
 
 
+def admin_headers() -> dict[str, str]:
+    return {"Authorization": "Bearer admin"}
+
+
+def user_headers(owner: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer user:{owner}"}
+
+
 def test_seed_files_exist_with_normalized_platform_layout() -> None:
     data_dir = Path(__file__).resolve().parents[1] / "data"
 
@@ -22,9 +30,9 @@ def test_seed_files_exist_with_normalized_platform_layout() -> None:
 def test_list_sites_clusters_and_hosts_returns_platform_inventory() -> None:
     client = create_test_client()
 
-    sites_response = client.get("/sites")
-    clusters_response = client.get("/clusters")
-    hosts_response = client.get("/hosts")
+    sites_response = client.get("/sites", headers=admin_headers())
+    clusters_response = client.get("/clusters", headers=admin_headers())
+    hosts_response = client.get("/hosts", headers=admin_headers())
 
     assert sites_response.status_code == 200
     assert clusters_response.status_code == 200
@@ -51,7 +59,7 @@ def test_list_sites_clusters_and_hosts_returns_platform_inventory() -> None:
 def test_get_site_returns_clusters_and_service_groups() -> None:
     client = create_test_client()
 
-    response = client.get("/sites/site-prod-sh-01")
+    response = client.get("/sites/site-prod-sh-01", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
@@ -66,7 +74,7 @@ def test_get_site_returns_clusters_and_service_groups() -> None:
 def test_get_cluster_returns_hosts_and_service_counts() -> None:
     client = create_test_client()
 
-    response = client.get("/clusters/cluster-site-prod-sh-01-01")
+    response = client.get("/clusters/cluster-site-prod-sh-01-01", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
@@ -79,11 +87,11 @@ def test_get_cluster_returns_hosts_and_service_counts() -> None:
 def test_get_host_returns_disk_and_unit_details() -> None:
     client = create_test_client()
 
-    host_list_response = client.get("/hosts")
+    host_list_response = client.get("/hosts", headers=admin_headers())
     assert host_list_response.status_code == 200
     host_id = next(host["id"] for host in host_list_response.json() if host["unitCount"] > 0)
 
-    response = client.get(f"/hosts/{host_id}")
+    response = client.get(f"/hosts/{host_id}", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
@@ -102,6 +110,21 @@ def test_get_host_returns_disk_and_unit_details() -> None:
 def test_platform_endpoints_return_404_when_resource_not_found() -> None:
     client = create_test_client()
 
-    assert client.get("/sites/not-exist").status_code == 404
-    assert client.get("/clusters/not-exist").status_code == 404
-    assert client.get("/hosts/not-exist").status_code == 404
+    assert client.get("/sites/not-exist", headers=admin_headers()).status_code == 404
+    assert client.get("/clusters/not-exist", headers=admin_headers()).status_code == 404
+    assert client.get("/hosts/not-exist", headers=admin_headers()).status_code == 404
+
+
+def test_non_admin_user_cannot_access_platform_resources() -> None:
+    client = create_test_client()
+
+    sites_response = client.get("/sites", headers=user_headers("payment-team-prod"))
+    clusters_response = client.get("/clusters", headers=user_headers("payment-team-prod"))
+    hosts_response = client.get("/hosts", headers=user_headers("payment-team-prod"))
+
+    assert sites_response.status_code == 403
+    assert clusters_response.status_code == 403
+    assert hosts_response.status_code == 403
+    assert sites_response.json() == {
+        "detail": "platform resources are only available to admin users"
+    }

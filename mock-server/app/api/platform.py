@@ -1,7 +1,8 @@
 """站点、集群、主机查询接口。"""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.auth import CurrentUser, require_admin_user
 from app.schemas import (
     ClusterDetailResponse,
     ClusterSummary,
@@ -22,7 +23,10 @@ def get_store(request: Request) -> JsonDataStore:
 
 
 @router.get("/sites", response_model=list[SiteSummary])
-def list_sites(request: Request) -> list[SiteSummary]:
+def list_sites(
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> list[SiteSummary]:
     """查询全部站点摘要。"""
 
     store = get_store(request)
@@ -30,7 +34,11 @@ def list_sites(request: Request) -> list[SiteSummary]:
 
 
 @router.get("/sites/{site_id}", response_model=SiteDetailResponse)
-def get_site(site_id: str, request: Request) -> SiteDetailResponse:
+def get_site(
+    site_id: str,
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> SiteDetailResponse:
     """按站点 ID 查询站点详情。"""
 
     store = get_store(request)
@@ -42,7 +50,10 @@ def get_site(site_id: str, request: Request) -> SiteDetailResponse:
 
 
 @router.get("/clusters", response_model=list[ClusterSummary])
-def list_clusters(request: Request) -> list[ClusterSummary]:
+def list_clusters(
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> list[ClusterSummary]:
     """查询全部集群摘要。"""
 
     store = get_store(request)
@@ -50,7 +61,11 @@ def list_clusters(request: Request) -> list[ClusterSummary]:
 
 
 @router.get("/clusters/{cluster_id}", response_model=ClusterDetailResponse)
-def get_cluster(cluster_id: str, request: Request) -> ClusterDetailResponse:
+def get_cluster(
+    cluster_id: str,
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> ClusterDetailResponse:
     """按集群 ID 查询集群详情。"""
 
     store = get_store(request)
@@ -62,7 +77,10 @@ def get_cluster(cluster_id: str, request: Request) -> ClusterDetailResponse:
 
 
 @router.get("/hosts", response_model=list[HostSummary])
-def list_hosts(request: Request) -> list[HostSummary]:
+def list_hosts(
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> list[HostSummary]:
     """查询全部主机摘要。"""
 
     store = get_store(request)
@@ -70,7 +88,11 @@ def list_hosts(request: Request) -> list[HostSummary]:
 
 
 @router.get("/hosts/{host_id}", response_model=HostDetailResponse)
-def get_host(host_id: str, request: Request) -> HostDetailResponse:
+def get_host(
+    host_id: str,
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> HostDetailResponse:
     """按主机 ID 查询主机详情。"""
 
     store = get_store(request)

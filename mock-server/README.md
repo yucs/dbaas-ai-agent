@@ -34,6 +34,55 @@
 - `POST /services/{name}/image-upgrade`
 - `GET /tasks/{taskId}`
 
+## 认证与权限
+
+- `GET /healthz` 保持免鉴权
+- 其他业务接口都需要 `Authorization: Bearer <token>`
+- `Bearer admin` 表示管理员，可访问全部接口和全部资源
+- `Bearer user:<owner>` 表示普通用户，只能访问自己 owner 下的服务和对应任务
+- 普通用户无权访问 `sites`、`clusters`、`hosts` 相关平台资源接口
+
+认证示例：
+
+管理员查询任意服务：
+
+```bash
+curl http://127.0.0.1:8000/services/mysql-xf2 \
+  -H 'Authorization: Bearer admin'
+```
+
+普通用户查询自己的服务：
+
+```bash
+curl http://127.0.0.1:8000/services \
+  -H 'Authorization: Bearer user:payment-team-prod'
+```
+
+普通用户访问平台资源会被拒绝：
+
+```bash
+curl http://127.0.0.1:8000/hosts \
+  -H 'Authorization: Bearer user:payment-team-prod'
+```
+
+示例返回：
+
+```json
+{"detail":"platform resources are only available to admin users"}
+```
+
+未携带 Bearer token 会返回 401：
+
+```bash
+curl http://127.0.0.1:8000/services
+```
+
+示例返回：
+
+```json
+{"detail":"missing bearer token"}
+```
+
 其中：
 
 - `GET /services` 查询当前内存中已加载的服务组，支持按 `owner` 过滤
@@ -93,37 +142,50 @@ curl http://127.0.0.1:8000/healthz
 查询服务组：
 
 ```bash
-curl http://127.0.0.1:8000/services/mysql-xf2
+curl http://127.0.0.1:8000/services/mysql-xf2 \
+  -H 'Authorization: Bearer admin'
 ```
 
 查询站点：
 
 ```bash
-curl http://127.0.0.1:8000/sites
+curl http://127.0.0.1:8000/sites \
+  -H 'Authorization: Bearer admin'
 ```
 
 查询主机：
 
 ```bash
-curl http://127.0.0.1:8000/hosts/host-01-01
+curl http://127.0.0.1:8000/hosts/host-01-01 \
+  -H 'Authorization: Bearer admin'
 ```
 
 查询全部服务组：
 
 ```bash
-curl http://127.0.0.1:8000/services
+curl http://127.0.0.1:8000/services \
+  -H 'Authorization: Bearer admin'
 ```
 
 按 owner 查询服务组：
 
 ```bash
-curl 'http://127.0.0.1:8000/services?owner=payment-team-prod'
+curl 'http://127.0.0.1:8000/services?owner=payment-team-prod' \
+  -H 'Authorization: Bearer admin'
+```
+
+普通用户查询自己的服务组：
+
+```bash
+curl http://127.0.0.1:8000/services \
+  -H 'Authorization: Bearer user:payment-team-prod'
 ```
 
 更新资源规格：
 
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
+  -H 'Authorization: Bearer admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -137,6 +199,7 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
 
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
+  -H 'Authorization: Bearer admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -152,6 +215,7 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
 
 ```bash
 curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
+  -H 'Authorization: Bearer admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -164,7 +228,8 @@ curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
 查询通用任务：
 
 ```bash
-curl http://127.0.0.1:8000/tasks/task-0001
+curl http://127.0.0.1:8000/tasks/task-0001 \
+  -H 'Authorization: Bearer admin'
 ```
 
 ## 可选启动参数

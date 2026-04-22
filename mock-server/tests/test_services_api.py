@@ -10,11 +10,27 @@ def create_test_client(task_unit_interval_seconds: float = 0.01) -> TestClient:
     return TestClient(app)
 
 
+def admin_headers() -> dict[str, str]:
+    return {"Authorization": "Bearer admin"}
+
+
+def user_headers(owner: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer user:{owner}"}
+
+
+def get_first_owned_service(client: TestClient, owner: str) -> dict:
+    response = client.get("/services", headers=user_headers(owner))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    return payload[0]
+
+
 def wait_for_task_completion(client: TestClient, task_id: str, timeout_seconds: float = 1.0) -> dict:
     deadline = time.time() + timeout_seconds
     last_payload: dict | None = None
     while time.time() < deadline:
-        response = client.get(f"/tasks/{task_id}")
+        response = client.get(f"/tasks/{task_id}", headers=admin_headers())
         assert response.status_code == 200
         last_payload = response.json()
         if last_payload["status"] != "RUNNING":
@@ -28,6 +44,7 @@ def test_update_service_resource_updates_cpu_memory_and_platform_auto() -> None:
 
     response = client.put(
         "/services/mysql-xf2/resource",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "platformAuto": False,
@@ -47,7 +64,7 @@ def test_update_service_resource_updates_cpu_memory_and_platform_auto() -> None:
 def test_list_services_returns_all_loaded_service_groups() -> None:
     client = create_test_client()
 
-    response = client.get("/services")
+    response = client.get("/services", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
@@ -65,14 +82,18 @@ def test_list_services_returns_all_loaded_service_groups() -> None:
 def test_list_services_can_filter_by_owner() -> None:
     client = create_test_client()
 
-    all_services = client.get("/services")
+    all_services = client.get("/services", headers=admin_headers())
     assert all_services.status_code == 200
     all_payload = all_services.json()
     expected_owner_services = [
         item for item in all_payload if item["owner"] == "payment-team-prod"
     ]
 
-    response = client.get("/services", params={"owner": "payment-team-prod"})
+    response = client.get(
+        "/services",
+        params={"owner": "payment-team-prod"},
+        headers=admin_headers(),
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -87,7 +108,11 @@ def test_list_services_can_filter_by_owner() -> None:
 def test_list_services_returns_empty_list_when_owner_has_no_matches() -> None:
     client = create_test_client()
 
-    response = client.get("/services", params={"owner": "not-exist-owner"})
+    response = client.get(
+        "/services",
+        params={"owner": "not-exist-owner"},
+        headers=admin_headers(),
+    )
 
     assert response.status_code == 200
     assert response.json() == []
@@ -96,7 +121,7 @@ def test_list_services_returns_empty_list_when_owner_has_no_matches() -> None:
 def test_get_service_can_load_additional_seed_samples() -> None:
     client = create_test_client()
 
-    response = client.get("/services/tidb-oltp")
+    response = client.get("/services/tidb-oltp", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
@@ -136,6 +161,7 @@ def test_update_service_storage_updates_only_requested_storage_fields() -> None:
 
     response = client.put(
         "/services/mysql-xf2/storage",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "storage": {
@@ -157,6 +183,7 @@ def test_update_service_resource_returns_404_when_service_not_found() -> None:
 
     response = client.put(
         "/services/not-exist/resource",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "cpu": 4,
@@ -172,6 +199,7 @@ def test_update_service_storage_returns_502_when_child_service_type_not_found() 
 
     response = client.put(
         "/services/mysql-xf2/storage",
+        headers=admin_headers(),
         json={
             "childServiceType": "redis",
             "storage": {
@@ -191,6 +219,7 @@ def test_update_service_resource_returns_422_when_no_update_fields_provided() ->
 
     response = client.put(
         "/services/mysql-xf2/resource",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
         },
@@ -204,6 +233,7 @@ def test_update_service_storage_returns_422_when_no_update_fields_provided() -> 
 
     response = client.put(
         "/services/mysql-xf2/storage",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
         },
@@ -217,6 +247,7 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
 
     create_response = client.post(
         "/services/mysql-xf2/image-upgrade",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "image": "mysql:8.0.37",
@@ -230,7 +261,7 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
     assert list(create_payload.keys()) == ["taskId"]
     task_id = create_payload["taskId"]
 
-    task_response = client.get(f"/tasks/{task_id}")
+    task_response = client.get(f"/tasks/{task_id}", headers=admin_headers())
     assert task_response.status_code == 200
     running_payload = task_response.json()
     assert running_payload["type"] == "service.image.upgrade"
@@ -249,7 +280,7 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
         "version": "8.0.37",
     }
 
-    service_response = client.get("/services/mysql-xf2")
+    service_response = client.get("/services/mysql-xf2", headers=admin_headers())
     service_payload = service_response.json()
     mysql_service = next(service for service in service_payload["services"] if service["type"] == "mysql")
     primary_unit = next(unit for unit in mysql_service["units"] if unit["id"] == "mysql-primary-01")
@@ -265,6 +296,7 @@ def test_create_image_upgrade_task_returns_400_when_unit_not_in_child_service() 
 
     response = client.post(
         "/services/mysql-xf2/image-upgrade",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "image": "mysql:8.0.37",
@@ -281,7 +313,7 @@ def test_create_image_upgrade_task_returns_400_when_unit_not_in_child_service() 
 def test_get_task_returns_404_when_task_not_found() -> None:
     client = create_test_client()
 
-    response = client.get("/tasks/task-9999")
+    response = client.get("/tasks/task-9999", headers=admin_headers())
 
     assert response.status_code == 404
     assert response.json() == {"detail": "task 'task-9999' not found"}
@@ -292,6 +324,7 @@ def test_image_upgrade_task_reports_progress_for_multiple_units() -> None:
 
     create_response = client.post(
         "/services/mysql-xf2/image-upgrade",
+        headers=admin_headers(),
         json={
             "childServiceType": "mysql",
             "image": "mysql:8.0.37",
@@ -305,7 +338,7 @@ def test_image_upgrade_task_reports_progress_for_multiple_units() -> None:
     deadline = time.time() + 1.0
     last_payload: dict | None = None
     while time.time() < deadline:
-        response = client.get(f"/tasks/{task_id}")
+        response = client.get(f"/tasks/{task_id}", headers=admin_headers())
         assert response.status_code == 200
         last_payload = response.json()
         if last_payload["status"] == "SUCCESS":
@@ -315,3 +348,104 @@ def test_image_upgrade_task_reports_progress_for_multiple_units() -> None:
     assert last_payload is not None
     assert last_payload["status"] == "SUCCESS"
     assert last_payload["message"] == "image upgrade completed"
+
+
+def test_business_endpoints_require_bearer_token() -> None:
+    client = create_test_client()
+
+    response = client.get("/services")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "missing bearer token"}
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_list_services_for_user_only_returns_owned_services() -> None:
+    client = create_test_client()
+
+    response = client.get("/services", headers=user_headers("payment-team-prod"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert all(item["owner"] == "payment-team-prod" for item in payload)
+
+
+def test_user_cannot_query_other_owner_services() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/services",
+        params={"owner": "search-team-staging"},
+        headers=user_headers("payment-team-prod"),
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "user 'payment-team-prod' cannot query services owned by 'search-team-staging'"
+    }
+
+
+def test_user_can_only_access_owned_service_detail() -> None:
+    client = create_test_client()
+    owned_service = get_first_owned_service(client, "payment-team-prod")
+
+    own_response = client.get(
+        f"/services/{owned_service['name']}",
+        headers=user_headers("payment-team-prod"),
+    )
+    forbidden_response = client.get("/services/tidb-oltp", headers=user_headers("payment-team-prod"))
+
+    assert own_response.status_code == 200
+    assert own_response.json()["owner"] == "payment-team-prod"
+    assert forbidden_response.status_code == 403
+    assert forbidden_response.json() == {
+        "detail": "user 'payment-team-prod' cannot access service 'tidb-oltp'"
+    }
+
+
+def test_user_cannot_update_other_users_service() -> None:
+    client = create_test_client()
+
+    response = client.put(
+        "/services/tidb-oltp/resource",
+        headers=user_headers("payment-team-prod"),
+        json={
+            "childServiceType": "tidb",
+            "cpu": 8,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "user 'payment-team-prod' cannot access service 'tidb-oltp'"
+    }
+
+
+def test_user_cannot_query_task_for_other_users_service() -> None:
+    client = create_test_client()
+    owned_service = get_first_owned_service(client, "payment-team-prod")
+    service_detail_response = client.get(
+        f"/services/{owned_service['name']}",
+        headers=user_headers("payment-team-prod"),
+    )
+    assert service_detail_response.status_code == 200
+    child_service_type = service_detail_response.json()["services"][0]["type"]
+
+    create_response = client.post(
+        f"/services/{owned_service['name']}/image-upgrade",
+        headers=user_headers("payment-team-prod"),
+        json={
+            "childServiceType": child_service_type,
+            "image": "mysql:8.0.37",
+        },
+    )
+    assert create_response.status_code == 200
+    task_id = create_response.json()["taskId"]
+
+    response = client.get(f"/tasks/{task_id}", headers=user_headers("search-team-staging"))
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": f"user 'search-team-staging' cannot access service '{owned_service['name']}'"
+    }
