@@ -63,6 +63,40 @@ DeepAgent 原生支持：
 - `summary.json`
 - `approvals.jsonl`
 
+## 1.2 为什么仍然保留 Session 层
+
+即使后续接入 DeepAgent checkpointer，Session 层仍然有必要保留。
+
+原因不是重复保存会话，而是为了在产品层和 AI 运行时之间建立一个清晰边界。
+
+可以把它理解成两层：
+
+- Session
+  - 面向产品层
+  - 负责历史列表、标题、预览、归档、删除、当前窗口切换
+- Thread / Checkpointer
+  - 面向 DeepAgent 运行时
+  - 负责持续对话、中断恢复、审批恢复、执行状态持久化
+
+因此，Session 不只是为了管理页面会话，也是为了把产品层和具体 AI 框架解耦。
+
+这样做有两个直接好处：
+
+- 页面不需要直接依赖 DeepAgent / LangGraph 的内部线程结构
+- 后续如果从 DeepAgent 演进到其他 AI runtime，产品层 Session 模型仍然可以保留
+
+换句话说：
+
+- `session_id` 是产品层主键
+- `thread_id` 是 AI 运行时主键
+
+第一阶段和后续阶段都建议保持：
+
+- 一个 `session_id`
+- 对应一个 `thread_id`
+
+这样页面切换、历史管理和运行时恢复可以各自独立演进，而不会互相绑死。
+
 ## 2. 第一阶段设计目标
 
 第一阶段优先满足“简单可用、结构清晰、后续可迁移”。
