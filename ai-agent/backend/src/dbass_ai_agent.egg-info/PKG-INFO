@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: dbass-ai-agent
+Version: 0.1.0
+Summary: Phase 1 backend for the dbass AI agent.
+Requires-Python: >=3.11
+Requires-Dist: deepagents
+Requires-Dist: fastapi>=0.111.0
+Requires-Dist: httpx>=0.28.0
+Requires-Dist: langchain-openai
+Requires-Dist: langgraph-checkpoint-sqlite
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: pydantic>=2.0.0

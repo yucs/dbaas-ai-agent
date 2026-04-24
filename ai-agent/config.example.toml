@@ -1,28 +1,55 @@
 [app]
+# 应用名称，用于服务标识、日志或界面展示。
 name = "dbass-ai-agent"
 
 [server]
+# 后端服务监听地址；本机开发通常使用 127.0.0.1，对外提供服务可改为 0.0.0.0。
 host = "127.0.0.1"
+# 后端服务监听端口；启动 API 服务时会占用该端口。
 port = 8010
 
 [paths]
+# 用户数据根目录；相对路径会以当前配置文件所在目录为基准解析。
 data_root = "./data/users"
+# 运行时数据目录；用于保存临时状态、运行产物等服务内部数据。
 runtime_root = "./data/runtime"
+# 前端静态资源目录；后端需要托管前端页面时会从这里读取文件。
 frontend_root = "./frontend"
+# 检查点数据库文件路径；用于持久化会话或图执行状态。
 checkpoint_db = "./data/runtime/checkpoints.sqlite"
+# 系统提示词文件路径；启动 agent 时会读取这里的系统级提示词。
 system_prompt_path = "./backend/prompts/system.md"
+# 上下文压缩提示词文件路径；触发压缩时会读取这里的压缩规则。
 compression_prompt_path = "./backend/prompts/compression.md"
 
 [model]
+# 模型供应商类型；当前使用 OpenAI 兼容接口。
 provider_kind = "openai_compatible"
-model = "deepseek-3.2"
-base_url = "https://your-llm-endpoint.example.com/v1"
+# DeepSeek 官方 API 当前标准模型名为 `deepseek-v4-flash` / `deepseek-v4-pro`。
+# 如果你使用 DeepSeek 官方接口，建议优先显式写当前模型名，而不是继续依赖 `deepseek-chat`
+# 这类兼容别名。
+# 模型名称；需与 base_url 指向的模型服务支持的名称一致。
+model = "deepseek-v4-flash"
+# OpenAI 兼容接口的基础地址；通常以 /v1 结尾。
+base_url = "https://api.deepseek.com/v1"
+# 模型服务 API Key；请替换为你自己的密钥，生产环境建议用私密配置或环境注入方式管理。
 api_key = "replace-with-your-api-key"
+# 模型上下文窗口大小，单位为 token；用于估算何时需要压缩上下文。
 context_window = 131072
+# 单次模型回复允许生成的最大 token 数。
 max_output_tokens = 8192
+# 显式关闭 thinking，可保持与兼容别名 `deepseek-chat` 更接近的行为。
+# 如果后续要切 `deepseek-v4-pro` 并启用思考模式，可改为 true，
+# 但要先确认上层 agent/tool-call 流程已经兼容 reasoning_content。
+# 是否启用模型思考模式；启用前需确认上层 agent/tool-call 流程兼容 reasoning_content。
+thinking_enabled = false
 
 [compression]
+# 是否启用上下文压缩；开启后会在接近上下文窗口上限时压缩历史消息。
 enabled = true
+# 触发压缩的软阈值，单位为 token；通常小于 context_window。
 soft_trigger_tokens = 98304
+# 压缩时保留的最近消息数量；这些消息会原样保留以维持最新上下文。
 keep_recent_messages = 6
+# 压缩摘要允许使用的最大 token 数。
 summary_max_tokens = 2048

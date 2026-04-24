@@ -1,0 +1,7 @@
+deepagents
+fastapi>=0.111.0
+httpx>=0.28.0
+langchain-openai
+langgraph-checkpoint-sqlite
+uvicorn>=0.30.0
+pydantic>=2.0.0

@@ -20,14 +20,16 @@
 - 长会话压缩由项目自定义包装的 `SummarizationMiddleware` 完成
 - 压缩提示词和阈值由项目自己的 `config.toml` 控制
 - 压缩发生时会输出后端 `INFO` 日志
+- 如果当前请求走 SSE 流式接口，会发送压缩开始和完成提醒事件
 - 不再维护 `summary.json`
-- 不向前端额外发送 `context_compressed` 之类的事件
+- 不向前端发送摘要正文
 
 换句话说：
 
 - `Session` 是产品层真相
 - `thread_id + checkpoint` 是运行时真相
 - 压缩只改变模型后续看到的上下文，不改变页面聊天记录
+- 压缩提醒是临时运行事件，不是聊天消息
 
 ## 3. 当前实现链路
 
@@ -37,11 +39,12 @@
 User
   -> routes_chat.py
   -> SessionService.append_user_message(...)
-  -> DeepAgentRuntime.generate_reply(...)
-  -> agent.invoke(..., config={"configurable": {"thread_id": thread_id}})
+  -> DeepAgentRuntime.stream_reply(...)
+  -> agent.stream(..., stream_mode="messages", config={"configurable": {"thread_id": thread_id}})
   -> SummarizationMiddleware（必要时压缩）
+  -> SSE compression_started/compression_completed/token/done events
   -> SessionService.append_assistant_message(...)
-  -> Response
+  -> messages.jsonl
 ```
 
 相关代码：
@@ -95,15 +98,21 @@ DeepAgents 自己会在 `create_deep_agent()` 内部创建 `SummarizationMiddlew
 当前项目并不是直接使用 DeepAgents 默认生成的 middleware 实例，
 而是在应用层生成一个自定义包装类后，再替换 DeepAgents 内部的 factory。
 
-当前这个包装层已经做了两件事：
+当前这个包装层已经做了三件事：
 
 - 使用项目自己的压缩提示词
 - 在压缩真正发生时输出 `INFO` 日志
+- 在当前请求注册了监听器时，发布压缩通知
 
 对应代码见 [factory.py](./backend/src/dbass_ai_agent/agent/factory.py)：
 
 - `_build_logged_summarization_middleware_class()`
 - `build_summarization_middleware_factory()`
+
+压缩通知的请求级隔离见：
+
+- [compression_events.py](./backend/src/dbass_ai_agent/agent/compression_events.py)
+- [runtime.py](./backend/src/dbass_ai_agent/agent/runtime.py)
 
 ## 5. 当前已经生效的压缩配置
 
@@ -164,7 +173,7 @@ Session 目录当前仍然只保留：
 
 所以压缩影响的是模型上下文，不是产品层记录。
 
-## 8. 压缩日志
+## 8. 压缩日志与前端提醒
 
 当前实现已经在压缩真正发生时输出后端日志。
 
@@ -187,6 +196,23 @@ Session 目录当前仍然只保留：
 会话上下文已压缩 thread_id=... summarized_messages=... keep=('messages', 6) trigger=('tokens', 98304) history_path=... summary_chars=...
 ```
 
+如果当前消息请求走的是 SSE 流式接口，还会额外发送：
+
+```text
+event: compression_started
+data: {"run_id":"...","mode":"deepagent","message":"上下文较长，正在整理早期内容。","details":{"phase":"started","summarized_messages":2,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":null}}
+
+event: compression_completed
+data: {"run_id":"...","mode":"deepagent","message":"上下文已自动压缩，本会话会继续使用同一个 Session。","details":{"phase":"completed","summarized_messages":2,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":512}}
+```
+
+这些事件只用于页面提示：
+
+- 不写入 `messages.jsonl`
+- 不展示摘要正文
+- 不作为 `session_events` 持久化
+- 不改变当前 `session_id` 或 `thread_id`
+
 ## 9. 当前可扩展钩子
 
 当前代码已经验证了一种稳定的扩展方式：
@@ -197,18 +223,17 @@ Session 目录当前仍然只保留：
 当前这个钩子已经用于：
 
 - `logger.info(...)`
+- SSE `compression_started` / `compression_completed` 提醒事件
 
 后续如果需要，也可以沿同一位置扩展：
 
 - metrics / tracing
-- SSE 压缩提醒事件
-- 前端 toast / banner 所需的后端事件
 - 审计侧的非持久化通知动作
 
 但当前实现仍建议遵守两个约束：
 
 - 不要再回到全局 `SESSION_META` 这类共享状态
-- 如果增加 SSE / 前端提醒，应基于当前请求或当前 `thread_id` 的上下文做隔离
+- SSE / 前端提醒必须基于当前请求和当前 `thread_id` 的上下文做隔离
 
 ## 10. 当前没有做什么
 
@@ -217,7 +242,6 @@ Session 目录当前仍然只保留：
 - `summary.json`
 - 项目侧 `summary_store`
 - `on_summary` 回调驱动的业务层摘要落盘
-- 前端压缩提醒事件
 - 独立的长期记忆系统
 - `session_events` / facts store
 - 基于压缩触发的新 `thread_id`

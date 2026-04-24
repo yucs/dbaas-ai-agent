@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "/Users/yucs/work/dbscale-ai-agent/ai-agent/backend/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/ai-agent/backend/src"
+  ],
+  "python.analysis.indexing": true,
+  "python.analysis.autoSearchPaths": true
+}

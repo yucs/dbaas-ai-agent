@@ -135,6 +135,75 @@ async function api(path, options = {}) {
   return payload;
 }
 
+function parseSseBlock(block) {
+  const lines = block.split(/\r?\n/);
+  let eventName = "message";
+  const dataLines = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+
+    const separator = line.indexOf(":");
+    const field = separator === -1 ? line : line.slice(0, separator);
+    const rawValue = separator === -1 ? "" : line.slice(separator + 1);
+    const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+
+    if (field === "event") {
+      eventName = value;
+    }
+    if (field === "data") {
+      dataLines.push(value);
+    }
+  }
+
+  if (!dataLines.length) {
+    return null;
+  }
+
+  return {
+    eventName,
+    payload: JSON.parse(dataLines.join("\n")),
+  };
+}
+
+async function readSseResponse(response, onEvent) {
+  if (!response.body) {
+    throw new Error("当前浏览器不支持流式响应。");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+
+    for (const block of blocks) {
+      const parsed = parseSseBlock(block);
+      if (parsed) {
+        onEvent(parsed.eventName, parsed.payload);
+      }
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    const parsed = parseSseBlock(tail);
+    if (parsed) {
+      onEvent(parsed.eventName, parsed.payload);
+    }
+  }
+}
+
 function renderIdentity() {
   if (!state.auth) {
     elements.identityCard.innerHTML = `
@@ -209,9 +278,9 @@ function renderCurrentSession() {
   elements.messages.innerHTML = detail.messages
     .map(
       (message) => `
-        <article class="message ${message.role} ${message.pending ? "pending" : ""}">
+        <article class="message ${message.role} ${message.pending ? "pending" : ""} ${message.error ? "error" : ""}">
           <div class="message-meta">
-            <span>${message.pending && message.role === "assistant" ? "助手思考中" : message.role === "assistant" ? "助手" : "用户"}</span>
+            <span>${message.error ? "发送失败" : message.pending && message.role === "assistant" ? "助手思考中" : message.role === "assistant" ? "助手" : "用户"}</span>
             <span>${formatTime(message.created_at)}</span>
           </div>
           <div class="message-content ${message.typing ? "typing" : ""}">${messageToHtml(message.content)}</div>
@@ -274,7 +343,7 @@ function appendOptimisticMessages(content) {
   const optimisticAssistant = {
     message_id: buildLocalId("msg-assistant"),
     role: "assistant",
-    content: "助手正在思考...",
+    content: "",
     created_at: now,
     pending: true,
     typing: true,
@@ -323,10 +392,16 @@ function applyMessageResponse(payload, optimisticRefs) {
     nextMessages.push(message);
   }
 
-  if (!replacedUser) {
+  if (
+    !replacedUser &&
+    !nextMessages.some((message) => message.message_id === payload.user_message.message_id)
+  ) {
     nextMessages.push(payload.user_message);
   }
-  if (!replacedAssistant) {
+  if (
+    !replacedAssistant &&
+    !nextMessages.some((message) => message.message_id === payload.assistant_message.message_id)
+  ) {
     nextMessages.push(payload.assistant_message);
   }
 
@@ -339,6 +414,132 @@ function applyMessageResponse(payload, optimisticRefs) {
   upsertSessionItem(payload.session, payload.assistant_message.content);
   renderSessions();
   renderCurrentSession();
+}
+
+function applyStreamUserMessage(payload, optimisticRefs, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId || !optimisticRefs) {
+    return;
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    messages: state.currentSession.messages.map((message) =>
+      message.message_id === optimisticRefs.optimisticUserId ? payload.user_message : message,
+    ),
+  };
+  renderCurrentSession();
+}
+
+function applyStreamToken(payload, optimisticRefs, sessionId) {
+  const delta = payload.delta || "";
+  if (!delta || !state.currentSession || state.currentSessionId !== sessionId || !optimisticRefs) {
+    return;
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    messages: state.currentSession.messages.map((message) => {
+      if (message.message_id !== optimisticRefs.optimisticAssistantId) {
+        return message;
+      }
+      return {
+        ...message,
+        content: `${message.content || ""}${delta}`,
+        pending: true,
+        typing: true,
+      };
+    }),
+  };
+  renderCurrentSession();
+}
+
+function applyStreamError(message, optimisticRefs, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId || !optimisticRefs) {
+    return false;
+  }
+
+  let updated = false;
+  state.currentSession = {
+    ...state.currentSession,
+    messages: state.currentSession.messages.map((item) => {
+      if (item.message_id !== optimisticRefs.optimisticAssistantId) {
+        return item;
+      }
+      updated = true;
+      return {
+        ...item,
+        content: `本轮回复失败：${message}`,
+        pending: false,
+        typing: false,
+        error: true,
+      };
+    }),
+  };
+
+  if (updated) {
+    renderCurrentSession();
+  }
+  return updated;
+}
+
+async function streamMessageResponse(sessionId, content, optimisticRefs) {
+  const response = await fetch(`/api/v1/sessions/${sessionId}/messages/stream`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || "请求失败");
+  }
+
+  let completed = false;
+
+  await readSseResponse(response, (eventName, payload) => {
+    if (eventName === "user_message") {
+      applyStreamUserMessage(payload, optimisticRefs, sessionId);
+      return;
+    }
+
+    if (eventName === "token") {
+      applyStreamToken(payload, optimisticRefs, sessionId);
+      return;
+    }
+
+    if (eventName === "compression_started" || eventName === "compression_completed") {
+      showFlash(payload.message || "上下文已自动整理，本会话会继续正常进行。");
+      return;
+    }
+
+    if (eventName === "error") {
+      const message = payload.detail || "流式响应失败";
+      const stage = payload.stage ? ` (${payload.stage})` : "";
+      const error = new Error(`${message}${stage}`);
+      error.streamError = true;
+      throw error;
+    }
+
+    if (eventName === "done") {
+      completed = true;
+      if (payload.warning === "mock-server-disabled") {
+        showFlash("这是 DBAAS 相关请求，当前阶段后台尚未启用 mock-server 调用能力。");
+      }
+      if (optimisticRefs && state.currentSessionId === sessionId) {
+        applyMessageResponse(payload, optimisticRefs);
+      } else if (payload.session && payload.assistant_message) {
+        upsertSessionItem(payload.session, payload.assistant_message.content);
+        renderSessions();
+      }
+    }
+  });
+
+  if (!completed) {
+    throw new Error("流式响应提前结束。");
+  }
 }
 
 async function fetchSessions() {
@@ -469,6 +670,7 @@ async function sendMessage(event) {
     return;
   }
 
+  const sessionId = state.currentSessionId;
   const optimisticRefs = appendOptimisticMessages(content);
   elements.messageInput.value = "";
   state.sending = true;
@@ -476,25 +678,24 @@ async function sendMessage(event) {
   clearFlash();
 
   try {
-    const payload = await api(`/api/v1/sessions/${state.currentSessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ content }),
-    });
-
-    if (payload.warning === "mock-server-disabled") {
-      showFlash("这是 DBAAS 相关请求，当前阶段后台尚未启用 mock-server 调用能力。");
-    }
-
-    if (optimisticRefs) {
-      applyMessageResponse(payload, optimisticRefs);
-    } else {
+    await streamMessageResponse(sessionId, content, optimisticRefs);
+    if (!optimisticRefs) {
       await reconcileCurrentSession();
     }
   } catch (error) {
     if (!elements.messageInput.value.trim()) {
       elements.messageInput.value = content;
     }
-    await reconcileCurrentSession();
+    const handledLocally = applyStreamError(
+      error.message || "发送失败",
+      optimisticRefs,
+      sessionId,
+    );
+    if (handledLocally) {
+      await fetchSessions();
+    } else {
+      await reconcileCurrentSession();
+    }
     showFlash(error.message || "发送失败", "error");
   } finally {
     state.sending = false;

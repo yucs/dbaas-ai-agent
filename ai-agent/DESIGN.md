@@ -15,7 +15,7 @@
 - 整个项目默认面向私有部署的大模型
 - 不以公有云 API 作为唯一前提
 - 当前优先考虑接入私有部署的 DeepSeek、Qwen 等模型
-- 具体模型名以实际部署平台上的模型标识为准，例如 `deepseek-3.2`
+- 具体模型名以实际部署平台上的模型标识为准，例如 `deepseek-v4-flash`、`deepseek-v4-pro`
 
 同时需要补充一个现实约定：
 
@@ -31,7 +31,38 @@
 第一阶段的后端对接目标是本仓库中的本地 `mock-server`。
 后续同一套架构应能够平滑切换到真实的 DBAAS 控制面接口。
 
-## 1.1 文档分工
+## 1.1 模型推理模式兼容约束
+
+当前模型接入层已经支持通过 OpenAI-compatible 方式接入 DeepSeek 官方 API，
+例如 `deepseek-v4-flash`、`deepseek-v4-pro`。
+
+但需要明确一个运行时边界：
+
+- 当前项目优先保证普通对话与现有 DeepAgent 主链路稳定
+- `deepseek-v4-pro` 在 `thinking = false` 时，可视为当前兼容路径
+- `deepseek-v4-pro` 在 `thinking = true` 且发生 tool calling 时，暂不作为当前阶段目标
+
+原因是 DeepSeek 的 thinking mode 在 tool calling 场景下，
+后续请求需要继续携带本轮生成的 `reasoning_content`。
+而当前项目仍沿用：
+
+- `DeepAgent`
+- `LangChain`
+- `langchain_openai.ChatOpenAI`
+
+这条通用 OpenAI-compatible 链路。
+
+在当前实现里，这条链路还没有把 `reasoning_content` 的提取、
+持久化与后续轮次回传作为项目级兼容能力来收敛。
+
+因此当前设计约定为：
+
+- 先支持非 thinking 模式下的稳定运行
+- 将 `v4-pro thinking + tool calling` 兼容性改造明确延后
+- 等后续真正进入该改造时，再决定是引入 DeepSeek 专用模型适配层，
+  还是在现有 agent/runtime 消息链路中补齐 `reasoning_content` 往返支持
+
+## 1.2 文档分工
 
 当前设计文档按下面的层次拆分：
 
@@ -49,10 +80,12 @@
   - 说明登录页、会话页和当前阶段前端交互边界
 - [PHASE3.md](./PHASE3.md)
   - 说明当前这一轮压缩接入的阶段状态与验收边界
+- [PHASE4.md](./PHASE4.md)
+  - 说明 FastAPI + SSE 流式对话和压缩提醒的阶段状态
 
 这些文档分别回答不同问题，避免把总设计、会话结构、接口细节、前端交互、上下文压缩和记忆边界混在一起。
 
-## 1.2 能力边界
+## 1.3 能力边界
 
 为了避免后续讨论混淆，需要先区分“DeepAgent 原生支持的能力”和“本项目需要自己开发的能力”。
 
@@ -77,7 +110,7 @@ DeepAgent 原生支持：
 - 对外 HTTP API 与 SSE 协议
 - 本地文件存储布局和后续数据迁移方案
 
-## 1.3 第一阶段身份与后端认证约定
+## 1.4 第一阶段身份与后端认证约定
 
 第一阶段需要区分“本地产品用户”与“调用 `mock-server` 时的后端身份”。
 
@@ -164,14 +197,14 @@ DeepAgent 原生支持：
 ### 4.1 Agent 运行时
 
 - 基于 Deep Agents 构建
-- 后续支持流式响应
+- 已支持流式响应
 - 支持未来扩展子 Agent 或复杂工作流
 - 支持通过工具调用执行 DBAAS 操作
 - 支持对接私有部署的大模型服务
 
 ### 4.2 用户交互
 
-- 后续支持 SSE 流式输出
+- 已支持 FastAPI + SSE 流式输出
 - 支持非 DBAAS 问题由大模型直接回答
 - 支持同步结果和异步结果两类返回
 
@@ -348,13 +381,13 @@ DeepAgent 原生支持：
 前端应消费本项目定义的稳定 SSE 事件协议，
 而不是直接依赖底层运行时的原始事件格式。
 
-但需要明确：
+当前约定：
 
-- SSE 属于后续阶段的体验增强项
-- 当前阶段的核心目标是先跑通真实模型、多用户、多 Session 和真实 `thread_id`
-- 因此当前可以先采用非流式请求/响应模型
-- 等真实模型链路稳定后，再补项目侧 SSE 封装
-- 这一调整只影响交互体验，不影响当前阶段的核心能力闭环
+- 普通 JSON 消息接口继续保留
+- 前端主路径使用项目侧封装后的 SSE 接口
+- 底层 DeepAgent streaming 事件不直接暴露给页面
+- 压缩提醒通过项目侧 `compression_started` / `compression_completed` 事件表达
+- 这一调整只影响交互体验，不改变 Session、`thread_id` 和消息落盘模型
 
 ## 6. 高层架构
 
@@ -498,22 +531,27 @@ Session 摘要应聚焦执行上下文，建议包含：
 6. 人工进行批准或拒绝
 7. 运行时恢复同一个 Session/Thread
 
-## 10. 建议的 SSE 事件类型
+## 10. SSE 事件类型
 
-建议对外统一输出以下事件：
+当前第四阶段已经落地的对话流事件包括：
 
-- `session.created`
-- `message.delta`
-- `message.completed`
+- `user_message`
+- `started`
+- `token`
+- `compression_started`
+- `compression_completed`
+- `done`
+- `error`
+
+后续接入 DBAAS tools、审批和异步任务后，可以在同一 SSE 协议下继续扩展：
+
 - `tool.called`
 - `tool.completed`
 - `approval.required`
 - `approval.resolved`
 - `run.paused`
 - `run.resumed`
-- `run.completed`
 - `run.failed`
-- `session.summary.updated`
 
 ## 11. 初始目录方向
 

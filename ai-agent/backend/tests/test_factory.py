@@ -20,10 +20,12 @@ if str(SRC_ROOT) not in sys.path:
 
 from dbass_ai_agent.agent.factory import (  # noqa: E402
     _build_logged_summarization_middleware_class,
+    _build_chat_model,
     build_runtime_artifacts,
     build_summarization_middleware_factory,
     patch_deepagents_summarization_factory,
 )
+from dbass_ai_agent.agent.compression_events import capture_compression_notices  # noqa: E402
 from dbass_ai_agent.config import Settings  # noqa: E402
 
 
@@ -92,6 +94,65 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             self.assertIs(kwargs["model"], main_model)
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
             self.assertEqual(kwargs["system_prompt"], "system prompt")
+
+    def test_build_chat_model_can_disable_thinking_for_provider_specific_compat(self) -> None:
+        settings = Settings(
+            model="deepseek-v4-pro",
+            base_url="https://api.deepseek.com/v1",
+            api_key="test-key",
+            thinking_enabled=False,
+        )
+        http_client = Mock(name="http_client")
+        http_async_client = Mock(name="http_async_client")
+
+        with patch("langchain_openai.ChatOpenAI") as chat_openai_mock:
+            _build_chat_model(
+                settings,
+                http_client=http_client,
+                http_async_client=http_async_client,
+                max_completion_tokens=4096,
+            )
+
+        chat_openai_mock.assert_called_once_with(
+            model="deepseek-v4-pro",
+            api_key="test-key",
+            base_url="https://api.deepseek.com/v1",
+            temperature=0.2,
+            max_completion_tokens=4096,
+            extra_body={"thinking": {"type": "disabled"}},
+            http_client=http_client,
+            http_async_client=http_async_client,
+            http_socket_options=(),
+        )
+
+    def test_build_chat_model_omits_thinking_toggle_by_default(self) -> None:
+        settings = Settings(
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            api_key="test-key",
+        )
+        http_client = Mock(name="http_client")
+        http_async_client = Mock(name="http_async_client")
+
+        with patch("langchain_openai.ChatOpenAI") as chat_openai_mock:
+            _build_chat_model(
+                settings,
+                http_client=http_client,
+                http_async_client=http_async_client,
+                max_completion_tokens=2048,
+            )
+
+        chat_openai_mock.assert_called_once_with(
+            model="deepseek-chat",
+            api_key="test-key",
+            base_url="https://api.deepseek.com/v1",
+            temperature=0.2,
+            max_completion_tokens=2048,
+            extra_body=None,
+            http_client=http_client,
+            http_async_client=http_async_client,
+            http_socket_options=(),
+        )
 
 
 class SummarizationFactoryTests(unittest.TestCase):
@@ -180,6 +241,36 @@ class SummarizationFactoryTests(unittest.TestCase):
             any("summarized_messages=2" in line for line in captured.output),
             captured.output,
         )
+
+    def test_logged_summarization_middleware_publishes_compression_notice(self) -> None:
+        LoggedSummarizationMiddleware = _build_logged_summarization_middleware_class()
+        summary_model = FakeListChatModel(
+            responses=["压缩摘要"],
+            profile=ModelProfile(max_input_tokens=1024),
+        )
+        middleware = LoggedSummarizationMiddleware(
+            model=summary_model,
+            backend="backend",
+            trigger=("tokens", 100),
+            keep=("messages", 2),
+            summary_prompt="custom compression prompt",
+        )
+        messages_to_summarize = [
+            HumanMessage(content="第一轮问题"),
+            AIMessage(content="第一轮回复"),
+        ]
+        notices = []
+
+        with capture_compression_notices(notices.append):
+            middleware._create_summary(messages_to_summarize)
+
+        self.assertEqual(len(notices), 2)
+        self.assertEqual([notice.phase for notice in notices], ["started", "completed"])
+        self.assertEqual(notices[0].summarized_messages, 2)
+        self.assertEqual(notices[0].keep, "('messages', 2)")
+        self.assertEqual(notices[0].trigger, "('tokens', 100)")
+        self.assertIsNone(notices[0].summary_chars)
+        self.assertEqual(notices[1].summary_chars, 4)
 
 
 if __name__ == "__main__":

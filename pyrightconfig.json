@@ -1,0 +1,12 @@
+{
+  "venvPath": "ai-agent/backend",
+  "venv": ".venv",
+  "include": [
+    "ai-agent/backend/src",
+    "ai-agent/backend/tests"
+  ],
+  "extraPaths": [
+    "ai-agent/backend/src"
+  ],
+  "pythonVersion": "3.14"
+}

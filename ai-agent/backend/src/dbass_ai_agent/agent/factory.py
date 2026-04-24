@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from dbass_ai_agent.agent.compression_events import CompressionNotice, publish_compression_notice
 from dbass_ai_agent.config import Settings
 
 from .prompt import load_compression_prompt, load_system_prompt
@@ -29,31 +30,75 @@ class RuntimeArtifacts:
     http_async_client: httpx.AsyncClient
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeResources:
+    connection: sqlite3.Connection
+    checkpointer: Any
+    http_client: httpx.Client
+    http_async_client: httpx.AsyncClient
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeModels:
+    main: Any
+    summary: Any
+
+
 def _build_logged_summarization_middleware_class() -> type[Any]:
     from deepagents.middleware.summarization import SummarizationMiddleware
 
     class LoggedSummarizationMiddleware(SummarizationMiddleware):
         """App-specific wrapper that emits an info log when compression occurs."""
 
-        def _log_compression(self, messages_to_summarize: list[Any], summary: str) -> None:
+        def _before_summarize(self, messages_to_summarize: list[Any]) -> None:
+            publish_compression_notice(
+                CompressionNotice(
+                    phase="started",
+                    thread_id=self._get_thread_id(),
+                    summarized_messages=len(messages_to_summarize),
+                    keep=str(self._lc_helper.keep),
+                    trigger=str(self._lc_helper.trigger),
+                    history_path=self._get_history_path(),
+                )
+            )
+
+        def _on_summary(self, messages_to_summarize: list[Any], summary: str) -> None:
+            thread_id = self._get_thread_id()
+            history_path = self._get_history_path()
+            summarized_messages = len(messages_to_summarize)
+            summary_chars = len(summary)
             logger.info(
-                "会话上下文已压缩 thread_id=%s summarized_messages=%d keep=%s trigger=%s history_path=%s summary_chars=%d",
-                self._get_thread_id(),
-                len(messages_to_summarize),
+                "会话上下文已压缩 thread_id=%s summarized_messages=%d keep=%s "
+                "trigger=%s history_path=%s summary_chars=%d",
+                thread_id,
+                summarized_messages,
                 self._lc_helper.keep,
                 self._lc_helper.trigger,
-                self._get_history_path(),
-                len(summary),
+                history_path,
+                summary_chars,
+            )
+            publish_compression_notice(
+                CompressionNotice(
+                    phase="completed",
+                    thread_id=thread_id,
+                    summarized_messages=summarized_messages,
+                    keep=str(self._lc_helper.keep),
+                    trigger=str(self._lc_helper.trigger),
+                    history_path=history_path,
+                    summary_chars=summary_chars,
+                )
             )
 
         def _create_summary(self, messages_to_summarize: list[Any]) -> str:
+            self._before_summarize(messages_to_summarize)
             summary = super()._create_summary(messages_to_summarize)
-            self._log_compression(messages_to_summarize, summary)
+            self._on_summary(messages_to_summarize, summary)
             return summary
 
         async def _acreate_summary(self, messages_to_summarize: list[Any]) -> str:
+            self._before_summarize(messages_to_summarize)
             summary = await super()._acreate_summary(messages_to_summarize)
-            self._log_compression(messages_to_summarize, summary)
+            self._on_summary(messages_to_summarize, summary)
             return summary
 
     return LoggedSummarizationMiddleware
@@ -79,6 +124,31 @@ def delete_thread_checkpoint(settings: Settings, thread_id: str) -> None:
 
 
 def build_runtime_artifacts(settings: Settings) -> RuntimeArtifacts:
+    _validate_runtime_settings(settings)
+    create_deep_agent, sqlite_saver_cls = _load_runtime_dependencies()
+    resources = _create_runtime_resources(settings, sqlite_saver_cls=sqlite_saver_cls)
+    models = _build_runtime_models(
+        settings,
+        http_client=resources.http_client,
+        http_async_client=resources.http_async_client,
+    )
+    agent = _create_runtime_agent(
+        settings,
+        create_deep_agent=create_deep_agent,
+        model=models.main,
+        summary_model=models.summary,
+        checkpointer=resources.checkpointer,
+    )
+
+    return RuntimeArtifacts(
+        agent=agent,
+        connection=resources.connection,
+        http_client=resources.http_client,
+        http_async_client=resources.http_async_client,
+    )
+
+
+def _validate_runtime_settings(settings: Settings) -> None:
     if settings.provider_kind != "openai_compatible":
         raise AgentFactoryError(
             f"当前仅支持 openai_compatible provider，收到: {settings.provider_kind}"
@@ -91,6 +161,8 @@ def build_runtime_artifacts(settings: Settings) -> RuntimeArtifacts:
     if not settings.api_key:
         raise AgentFactoryError("缺少模型配置 `model.api_key`。")
 
+
+def _load_runtime_dependencies() -> tuple[Callable[..., Any], type[Any]]:
     try:
         from deepagents import create_deep_agent
         from langgraph.checkpoint.sqlite import SqliteSaver
@@ -100,45 +172,67 @@ def build_runtime_artifacts(settings: Settings) -> RuntimeArtifacts:
             "langgraph-checkpoint-sqlite。"
         ) from exc
 
+    return create_deep_agent, SqliteSaver
+
+
+def _create_runtime_resources(
+    settings: Settings,
+    *,
+    sqlite_saver_cls: type[Any],
+) -> RuntimeResources:
     checkpoint_path = settings.checkpoint_db
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     connection = sqlite3.connect(checkpoint_path, check_same_thread=False)
-    checkpointer = SqliteSaver(connection)
-    http_client = httpx.Client(trust_env=False)
-    http_async_client = httpx.AsyncClient(trust_env=False)
-
-    model = _build_chat_model(
-        settings,
-        http_client=http_client,
-        http_async_client=http_async_client,
-        max_completion_tokens=settings.max_output_tokens,
-    )
-    summary_model = _build_chat_model(
-        settings,
-        http_client=http_client,
-        http_async_client=http_async_client,
-        max_completion_tokens=max(1, settings.summary_max_tokens),
+    return RuntimeResources(
+        connection=connection,
+        checkpointer=sqlite_saver_cls(connection),
+        http_client=httpx.Client(trust_env=False),
+        http_async_client=httpx.AsyncClient(trust_env=False),
     )
 
+
+def _build_runtime_models(
+    settings: Settings,
+    *,
+    http_client: httpx.Client,
+    http_async_client: httpx.AsyncClient,
+) -> RuntimeModels:
+    return RuntimeModels(
+        main=_build_chat_model(
+            settings,
+            http_client=http_client,
+            http_async_client=http_async_client,
+            max_completion_tokens=settings.max_output_tokens,
+        ),
+        summary=_build_chat_model(
+            settings,
+            http_client=http_client,
+            http_async_client=http_async_client,
+            max_completion_tokens=max(1, settings.summary_max_tokens),
+        ),
+    )
+
+
+def _create_runtime_agent(
+    settings: Settings,
+    *,
+    create_deep_agent: Callable[..., Any],
+    model: Any,
+    summary_model: Any,
+    checkpointer: Any,
+) -> Any:
     system_prompt = load_system_prompt(settings.system_prompt_path)
     summarization_factory = build_summarization_middleware_factory(
         settings,
         summary_model=summary_model,
     )
     with patch_deepagents_summarization_factory(summarization_factory):
-        agent = create_deep_agent(
+        return create_deep_agent(
             model=model,
             checkpointer=checkpointer,
             system_prompt=system_prompt,
         )
-
-    return RuntimeArtifacts(
-        agent=agent,
-        connection=connection,
-        http_client=http_client,
-        http_async_client=http_async_client,
-    )
 
 
 def _build_chat_model(
@@ -150,12 +244,21 @@ def _build_chat_model(
 ) -> Any:
     from langchain_openai import ChatOpenAI
 
+    extra_body = None
+    if settings.thinking_enabled is not None:
+        extra_body = {
+            "thinking": {
+                "type": "enabled" if settings.thinking_enabled else "disabled",
+            }
+        }
+
     return ChatOpenAI(
         model=settings.model,
         api_key=settings.api_key,
         base_url=settings.base_url,
         temperature=0.2,
         max_completion_tokens=max_completion_tokens,
+        extra_body=extra_body,
         http_client=http_client,
         http_async_client=http_async_client,
         http_socket_options=(),

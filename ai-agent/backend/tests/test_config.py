@@ -45,6 +45,7 @@ class SettingsFromFileTests(unittest.TestCase):
                     api_key = "test-key"
                     context_window = 65536
                     max_output_tokens = 4096
+                    thinking_enabled = false
 
                     [compression]
                     enabled = false
@@ -66,6 +67,7 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.api_key, "test-key")
             self.assertEqual(settings.context_window, 65536)
             self.assertEqual(settings.max_output_tokens, 4096)
+            self.assertFalse(settings.thinking_enabled)
             self.assertFalse(settings.compression_enabled)
             self.assertEqual(settings.soft_trigger_tokens, 50000)
             self.assertEqual(settings.keep_recent_messages, 8)

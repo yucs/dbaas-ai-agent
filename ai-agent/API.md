@@ -10,7 +10,7 @@
 这意味着：
 
 - 页面发送消息时，需要复用当前 Session 对应的 `thread_id`
-- 当前主链路先使用普通请求/响应返回
+- 当前前端主链路使用 SSE 流式返回
 - 命中人工确认时，需要暂停运行并在确认后恢复同一个 thread
 
 本阶段重点覆盖：
@@ -19,7 +19,7 @@
 - 登录后加载用户历史 Session 列表
 - 打开指定 Session 到当前窗口
 - Session 下继续发送消息
-- 预留后续 SSE 扩展路径
+- 提供 SSE 流式消息接口
 - 支持审批查询与审批决策
 
 ## 1.1 能力边界
@@ -378,11 +378,80 @@ POST /api/v1/sessions/{session_id}/messages
 }
 ```
 
-### 5.2 为什么项目侧仍然要封装 SSE
+### 5.2 流式发送消息
+
+```http
+POST /api/v1/sessions/{session_id}/messages/stream
+Accept: text/event-stream
+```
+
+#### 作用
+
+用于在当前窗口继续对话，并通过 SSE 返回运行过程。
+
+#### 请求体示例
+
+```json
+{
+  "content": "继续分析这个问题"
+}
+```
+
+#### 当前事件类型
+
+- `user_message`
+  - 用户消息已经写入 `messages.jsonl`
+- `started`
+  - 本轮运行开始
+- `token`
+  - assistant 文本增量
+- `compression_started`
+  - 当前运行即将开始上下文压缩
+- `compression_completed`
+  - 当前运行的上下文压缩已经完成
+- `done`
+  - assistant 消息已经写入 `messages.jsonl`
+- `error`
+  - 当前运行失败
+
+#### `error` 事件示例
+
+```text
+event: error
+data: {"detail":"函数调用失败：mock_tool 参数 invalid","error_type":"function_error","stage":"tool_call"}
+```
+
+错误事件约定：
+
+- 本轮不会写入 assistant 消息
+- 已写入的 user 消息保留
+- `detail` 是脱敏后的前端可展示错误
+- 完整异常和 traceback 只写入后端日志
+- `error_type` 用于区分 `function_error`、`timeout_error`、`provider_error` 等类别
+- `stage` 用于标记错误发生阶段
+
+#### 压缩事件示例
+
+```text
+event: compression_started
+data: {"run_id":"run_001","mode":"deepagent","message":"上下文较长，正在整理早期内容。","details":{"phase":"started","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":null}}
+
+event: compression_completed
+data: {"run_id":"run_001","mode":"deepagent","message":"上下文已自动压缩，本会话会继续使用同一个 Session。","details":{"phase":"completed","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":1200}}
+```
+
+压缩事件只用于提醒页面：
+
+- 不写入 `messages.jsonl`
+- 不展示摘要正文
+- 不改变 `session_id`
+- 不改变 `thread_id`
+
+### 5.3 为什么项目侧仍然要封装 SSE
 
 DeepAgent 原生支持 streaming，但它提供的是 Agent 运行时层面的流式事件。
 
-本项目面对的是页面侧集成，因此仍然建议在项目侧封装一层 SSE。
+本项目面对的是页面侧集成，因此仍然需要在项目侧封装一层 SSE。
 
 原因如下：
 
@@ -418,14 +487,14 @@ DeepAgent 原生更偏运行时语义，例如：
 - 项目对外 SSE 流
   - 用于服务前端页面
 
-第一阶段不需要做得很重，完全可以只是一个轻量转换层：
+当前第四阶段实现仍然是一个轻量转换层：
 
 - 从 DeepAgent `stream()` 中读取原始事件
 - 转换成项目定义的事件名
 - 补充 `session_id`、`run_id` 等页面需要的字段
 - 再通过 SSE 返回给前端
 
-### 5.3 获取某次运行的 SSE 事件流
+### 5.4 后续独立运行事件流
 
 ```http
 GET /api/v1/sessions/{session_id}/runs/{run_id}/events
@@ -434,7 +503,13 @@ Accept: text/event-stream
 
 #### 作用
 
-前端在发送消息后，订阅本次运行的实时事件。
+这是后续为长任务、审批恢复和断线重连预留的独立运行事件流。
+
+当前第四阶段前端主路径不使用这个接口，而是直接使用：
+
+```http
+POST /api/v1/sessions/{session_id}/messages/stream
+```
 
 #### 建议事件类型
 

@@ -228,6 +228,15 @@ p {
   background: #f8f1e4;
 }
 
+.message.error {
+  background: #fff2ef;
+  border-color: #d49b92;
+}
+
+.message.error .message-content {
+  color: #7a2d22;
+}
+
 .message-meta {
   margin-bottom: 8px;
   color: var(--muted);

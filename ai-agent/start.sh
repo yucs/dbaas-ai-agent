@@ -8,8 +8,8 @@ APP_MODULE="dbass_ai_agent.main:app"
 APP_DIR="${BACKEND_DIR}/src"
 CONFIG_FILE="${SCRIPT_DIR}/config.toml"
 
-if [[ -x "${SCRIPT_DIR}/../mock-server/.venv/bin/python" ]]; then
-  PYTHON_BIN="${SCRIPT_DIR}/../mock-server/.venv/bin/python"
+if [[ -x "${BACKEND_DIR}/.venv/bin/python" ]]; then
+  PYTHON_BIN="${BACKEND_DIR}/.venv/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python3)"
 else

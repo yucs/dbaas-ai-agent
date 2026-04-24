@@ -30,6 +30,7 @@ class Settings:
     checkpoint_db: Path = APP_ROOT / "data" / "runtime" / "checkpoints.sqlite"
     context_window: int = 131072
     max_output_tokens: int = 8192
+    thinking_enabled: bool | None = None
     system_prompt_path: Path = APP_ROOT / "backend" / "prompts" / "system.md"
     compression_prompt_path: Path = APP_ROOT / "backend" / "prompts" / "compression.md"
     provider_kind: str = "openai_compatible"
@@ -77,6 +78,7 @@ class Settings:
             ),
             context_window=context_window,
             max_output_tokens=max_output_tokens,
+            thinking_enabled=_get_optional_bool(model, "thinking_enabled"),
             system_prompt_path=_resolve_path(
                 base_dir,
                 _get_string(paths, "system_prompt_path", "./backend/prompts/system.md"),
@@ -159,6 +161,15 @@ def _get_bool(config: Mapping[str, Any], key: str, default: bool) -> bool:
     value = config.get(key)
     if value is None:
         return default
+    if not isinstance(value, bool):
+        raise ConfigError(f"配置项 `{key}` 必须是布尔值。")
+    return value
+
+
+def _get_optional_bool(config: Mapping[str, Any], key: str) -> bool | None:
+    value = config.get(key)
+    if value is None:
+        return None
     if not isinstance(value, bool):
         raise ConfigError(f"配置项 `{key}` 必须是布尔值。")
     return value

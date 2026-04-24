@@ -66,6 +66,7 @@
 - `[model].base_url`
 - `[model].api_key`
 - `[model].provider_kind`
+- `[model].thinking_enabled`
 - `[paths].checkpoint_db`
 - `[paths].system_prompt_path`
 - `[paths].data_root`
@@ -79,6 +80,7 @@
 - `model + base_url + api_key` 是真实运行时的必填核心参数
 - `provider_kind` 当前仅支持 `openai_compatible`
 - `context_window` 与 `max_output_tokens` 已进入配置模型
+- `thinking_enabled` 可用于显式控制支持 thinking mode 的模型
 - 其中 `max_output_tokens` 已用于模型创建
 - `context_window` 当前主要作为预算配置保留，后续再用于更完整的上下文工程控制
 
@@ -197,7 +199,7 @@
 - 还没有接通 `mock-server` 实时查询
 - 还没有接通 `mock-server` 变更操作
 - 还没有接通审批中断恢复闭环
-- 还没有接通 SSE 流式返回
+- SSE 流式返回未在第二阶段完成，已在第四阶段通过消息流接口补齐
 - 还没有引入子 agent
 - 还没有引入长期记忆
 
@@ -233,17 +235,22 @@
 
 ### 5.2 `P2C`：SSE 流式返回
 
-当前 SSE 路由已经预留，但实现状态仍然是：
+第二阶段时 SSE 路由只是预留：
 
 - `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
   - 返回 `501 Not Implemented`
 
-因此第二阶段目前仍是：
+因此第二阶段当时仍是：
 
 - 真实 DeepAgent
 - 非流式接口返回
 
-这和当前代码完全一致，也符合现阶段排错边界更清晰的目标。
+第四阶段已经补齐当前前端主路径：
+
+- `POST /api/v1/sessions/{session_id}/messages/stream`
+  - 返回 `text/event-stream`
+
+独立 runs event stream 仍保留为后续长任务与断线重连方向。
 
 ### 5.3 `P2D`：DBAAS tools 与审批闭环
 
