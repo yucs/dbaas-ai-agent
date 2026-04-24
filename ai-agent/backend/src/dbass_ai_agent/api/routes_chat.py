@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from dbass_ai_agent.agent.runtime import DemoAgentRuntime
+from dbass_ai_agent.agent.runtime import AgentInvocationError, DeepAgentRuntime
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.sessions.service import SessionService
 
@@ -19,17 +19,20 @@ def send_message(
     payload: SendMessageRequest,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
-    agent_runtime: DemoAgentRuntime = Depends(get_agent_runtime),
+    agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
 ) -> SendMessageResponse:
     user_message = session_service.append_user_message(identity, session_id, payload.content)
     session = session_service.get_session(identity, session_id).meta
-    history = session_service.get_messages(identity, session_id)
-    reply = agent_runtime.generate_reply(
-        identity=identity,
-        session=session,
-        user_message=user_message,
-        history=history,
-    )
+    try:
+        reply = agent_runtime.generate_reply(
+            session=session,
+            user_message=user_message,
+        )
+    except AgentInvocationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
     assistant_message = session_service.append_assistant_message(identity, session_id, reply.content)
     latest_session = session_service.get_session(identity, session_id).meta
     return SendMessageResponse(

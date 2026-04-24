@@ -15,7 +15,7 @@
 - 整个项目默认面向私有部署的大模型
 - 不以公有云 API 作为唯一前提
 - 当前优先考虑接入私有部署的 DeepSeek、Qwen 等模型
-- 具体模型名以实际部署平台上的模型标识为准，例如 `deepseek-3.4`
+- 具体模型名以实际部署平台上的模型标识为准，例如 `deepseek-3.2`
 
 同时需要补充一个现实约定：
 
@@ -41,10 +41,16 @@
   - 说明多用户、多 Session 的存储与加载方式
 - [API.md](./API.md)
   - 说明页面与后端之间的接口契约
+- [CONTEXT_ARCHITECTURE.md](./CONTEXT_ARCHITECTURE.md)
+  - 说明当前已经生效的上下文压缩实现
 - [MEMORY.md](./MEMORY.md)
-  - 说明会话记忆与压缩策略
+  - 说明当前记忆边界，以及未来如需引入事实层时的约束
+- [FRONTEND.md](./FRONTEND.md)
+  - 说明登录页、会话页和当前阶段前端交互边界
+- [PHASE3.md](./PHASE3.md)
+  - 说明当前这一轮压缩接入的阶段状态与验收边界
 
-这四份文档分别回答不同问题，避免把总设计、会话结构、接口细节和记忆策略混在一起。
+这些文档分别回答不同问题，避免把总设计、会话结构、接口细节、前端交互、上下文压缩和记忆边界混在一起。
 
 ## 1.2 能力边界
 
@@ -158,14 +164,14 @@ DeepAgent 原生支持：
 ### 4.1 Agent 运行时
 
 - 基于 Deep Agents 构建
-- 支持流式响应
+- 后续支持流式响应
 - 支持未来扩展子 Agent 或复杂工作流
 - 支持通过工具调用执行 DBAAS 操作
 - 支持对接私有部署的大模型服务
 
 ### 4.2 用户交互
 
-- 支持 SSE 流式输出
+- 后续支持 SSE 流式输出
 - 支持非 DBAAS 问题由大模型直接回答
 - 支持同步结果和异步结果两类返回
 
@@ -197,22 +203,50 @@ DeepAgent 原生支持：
 - 每个 Session 都应可恢复
 - 支持历史会话加载与查看
 
-### 4.5 记忆与压缩
+### 4.5 上下文压缩与记忆
 
-本项目的“记忆”有意限制为“操作记录记忆”。
+当前阶段在“上下文压缩”和“记忆”之间，优先实现的是上下文压缩。
 
-具体的记忆与压缩策略将单独维护在 [MEMORY.md](./MEMORY.md) 中，
-便于后续按阶段灵活调整，而不影响总设计文档的稳定性。
+也就是说：
 
-这意味着：
+- 先解决长会话下模型本次调用应该看到什么
+- 优先把压缩留在 `SummarizationMiddleware` 与原 `thread_id` 内部
+- 优先通过 `SummarizationMiddleware` 在原 `thread_id` 内压缩上下文
+- 不在当前阶段同时落完整 `session_events` 和复杂 memory 系统
 
-- 保留操作历史
-- 保留审批历史
-- 保留任务进度历史
-- 将对话噪音压缩为结构化会话摘要
-- 不把记忆当作实时资源状态的事实来源
+当前优先方案进一步明确为：
 
-DBAAS 实时状态必须始终从后端接口读取。
+- 优先使用项目自定义包装的 `SummarizationMiddleware` 在原 `thread_id` 内做上下文压缩
+- 不因上下文压缩而切换新的 `thread_id`
+- 仅在用户显式删除 Session 时，才删除对应 `thread_id` 的运行时数据
+
+这里所说的“自定义压缩”，当前已经有明确含义：
+
+- 继续使用 `create_deep_agent()`
+- 接管 DeepAgents 内部的 summarization factory
+- 使用项目自己的压缩提示词
+- 使用项目自己的压缩阈值和保留窗口
+- 在自定义包装层里追加日志等钩子动作
+- 后续可在同一钩子位置扩展 SSE / 前端提醒等非持久化动作
+
+本项目在系统能力上仍然需要：
+
+- 自定义压缩
+- 自定义记忆
+
+但阶段上应按下面顺序推进：
+
+1. 当前阶段先实现上下文压缩
+2. 后续 Tool、审批、异步任务进入主链路后，再推进完整记忆实现
+
+其中：
+
+- 上下文压缩设计统一以 [CONTEXT_ARCHITECTURE.md](./CONTEXT_ARCHITECTURE.md) 为准
+- 记忆边界和未来事实层约束统一以 [MEMORY.md](./MEMORY.md) 为准
+
+无论是压缩还是记忆，都必须遵守同一条原则：
+
+- DBAAS 实时状态必须始终从后端接口读取
 
 ## 5. 设计原则
 
@@ -223,11 +257,62 @@ DBAAS 实时状态必须始终从后端接口读取。
 - `session_id`：面向用户的会话 ID
 - `thread_id`：Deep Agent 的执行线程 ID
 
+同时还需要区分第三类对象：
+
+- 运行时压缩状态：由 `SummarizationMiddleware` 在同一个 `thread_id` 内维护
+
+三者职责应分别收敛为：
+
+- `Session`
+  - 负责页面展示、审计、记录与产品层管理
+- `thread_id`
+  - 负责 DeepAgent 运行时状态、续跑与中断恢复
+- 运行时压缩状态
+  - 负责长会话下的内部上下文收缩
+  - 不单独投影成产品层文件
+
 建议第一阶段采用：
 
 - 一个 `session` 对应一个 `thread`
 
 这样可以让会话恢复、审批中断与历史管理更简单。
+
+当前实现中，`session_id` 与 `thread_id` 的命名规则也保持一致，便于排查和人工定位：
+
+- `session_id` 形如：
+  - `sess_<user_id片段>_<14位时间戳>_<6位随机数>`
+- `thread_id` 形如：
+  - `thread_<user_id片段>_<14位时间戳>_<6位随机数>`
+
+其中：
+
+- 两者共享完全相同的后缀
+- 只通过前缀区分产品层 Session 和运行时 Thread
+- 这样在日志、文件和调试过程中，可以一眼看出某个 `session_id` 对应的 `thread_id`
+
+示例：
+
+- `sess_admin1_20260423022500_827225`
+- `thread_admin1_20260423022500_827225`
+
+同时，删除 Session 时也应同步删除该 Session 绑定的 `thread_id` 运行时数据。
+
+也就是说，`delete session` 不只是删除产品层文件：
+
+- 删除 `index.json` 中的记录
+- 删除 Session 目录
+- 删除 SQLite checkpointer 中该 `thread_id` 对应的 DeepAgent 持久化数据
+
+这样可以避免出现“页面中的 Session 已删除，但 DeepAgent 运行时线程仍然残留”的孤儿数据。
+
+但这里需要明确区分两种场景：
+
+- `delete session`
+  - 用户显式删除整个 Session
+  - 可以同步清理该 Session 绑定的运行时线程数据
+- `context compression`
+  - 优先在原 `thread_id` 内通过 `SummarizationMiddleware` 完成
+  - 不应因此切换或删除旧 `thread_id`
 
 ### 5.2 记忆以操作为中心，而不是以知识为中心
 
@@ -263,6 +348,14 @@ DBAAS 实时状态必须始终从后端接口读取。
 前端应消费本项目定义的稳定 SSE 事件协议，
 而不是直接依赖底层运行时的原始事件格式。
 
+但需要明确：
+
+- SSE 属于后续阶段的体验增强项
+- 当前阶段的核心目标是先跑通真实模型、多用户、多 Session 和真实 `thread_id`
+- 因此当前可以先采用非流式请求/响应模型
+- 等真实模型链路稳定后，再补项目侧 SSE 封装
+- 这一调整只影响交互体验，不影响当前阶段的核心能力闭环
+
 ## 6. 高层架构
 
 ### 6.1 核心分层
@@ -271,7 +364,7 @@ DBAAS 实时状态必须始终从后端接口读取。
    - Session 接口
    - Chat 接口
    - Approval 接口
-   - SSE 流接口
+   - 后续扩展 SSE 流接口
 
 2. Agent Runtime 层
    - Deep Agent graph 组装
@@ -300,18 +393,14 @@ DBAAS 实时状态必须始终从后端接口读取。
 如果请求明确不属于 DBAAS 领域，则由模型直接回答，
 不调用任何 DBAAS 工具。
 
-示例：
-
-- “你是谁？”
-- “什么是 MySQL？”
-
 ### 7.2 DBAAS 只读请求
 
 对于只读类 DBAAS 问题：
 
 - 识别相关领域资源
 - 必要时调用对应读工具
-- 以流式方式回传进度与最终答案
+- 当前阶段可以先同步返回结果
+- 后续再扩展为流式回传进度与最终答案
 
 只读工具不需要人工审批。
 
@@ -338,17 +427,17 @@ DBAAS 实时状态必须始终从后端接口读取。
 
 ## 8. Session、记忆与压缩模型
 
-本章节给出总原则，具体的字段、压缩触发条件、摘要结构和调整方式
-统一以 [MEMORY.md](./MEMORY.md) 为准。
+本章节给出总原则。
+当前真实压缩实现统一以 [CONTEXT_ARCHITECTURE.md](./CONTEXT_ARCHITECTURE.md) 为准，
+未来如果需要独立事实层，再参考 [MEMORY.md](./MEMORY.md)。
 
 ### 8.1 最小持久化对象
 
-第一阶段建议至少持久化以下对象：
+当前实现与后续方向可分为两层：
 
 - `sessions`
-- `session_events`
-- `session_summaries`
 - `approval_requests`
+- 后续可选的 `session_events`
 
 ### 8.2 Session 事件
 
@@ -365,7 +454,7 @@ Session 记忆建议采用事件化方式保存。
 - `tool_call_executed`
 - `task_created`
 - `task_status_changed`
-- `session_summary_updated`
+- `session_context_compacted`
 
 ### 8.3 压缩策略
 
@@ -374,7 +463,7 @@ Session 记忆建议采用事件化方式保存。
 建议策略：
 
 - 保留最近一段原始消息
-- 将更早的对话压缩为结构化 Session 摘要
+- 将更早的对话压缩到原 `thread_id` 内部的运行时摘要
 - 绝不丢失重要操作记录和审批记录
 
 ### 8.4 摘要结构

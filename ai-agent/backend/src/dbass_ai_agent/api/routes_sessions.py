@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from dbass_ai_agent.agent.factory import AgentFactoryError, delete_thread_checkpoint
 from dbass_ai_agent.identity.models import Identity
-from dbass_ai_agent.infra.ids import new_thread_id
 from dbass_ai_agent.sessions.service import SessionService
 
-from .deps import get_current_identity, get_session_service
+from .deps import get_app_settings, get_current_identity, get_session_service
 from .schemas import (
     ApprovalsResponse,
     CreateSessionRequest,
@@ -38,7 +38,6 @@ def create_session(
         session=session_service.create_session(
             identity,
             title=payload.title,
-            thread_id=new_thread_id(),
         )
     )
 
@@ -85,6 +84,15 @@ def delete_session(
     session_id: str,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
+    settings=Depends(get_app_settings),
 ) -> DeleteSessionResponse:
+    detail = session_service.get_session(identity, session_id)
+    try:
+        delete_thread_checkpoint(settings, detail.meta.thread_id)
+    except AgentFactoryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     deleted_session_id = session_service.delete_session(identity, session_id)
     return DeleteSessionResponse(session_id=deleted_session_id)

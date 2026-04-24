@@ -15,9 +15,7 @@ from .models import (
     SessionDetail,
     SessionIndexItem,
     SessionMeta,
-    SessionSummary,
 )
-from .summary_store import SummaryStore
 
 
 class SessionRepository:
@@ -26,13 +24,11 @@ class SessionRepository:
         data_root: Path,
         index_store: IndexStore,
         message_store: MessageStore,
-        summary_store: SummaryStore,
         approval_store: ApprovalStore,
     ) -> None:
         self.data_root = data_root
         self.index_store = index_store
         self.message_store = message_store
-        self.summary_store = summary_store
         self.approval_store = approval_store
 
     def list_index(self, user_id: str) -> list[SessionIndexItem]:
@@ -67,15 +63,6 @@ class SessionRepository:
             message,
         )
 
-    def load_summary(self, user_id: str, session_id: str) -> SessionSummary:
-        return self.summary_store.load(build_session_paths(self.data_root, user_id, session_id).summary_path)
-
-    def save_summary(self, user_id: str, session_id: str, summary: SessionSummary) -> None:
-        self.summary_store.save(
-            build_session_paths(self.data_root, user_id, session_id).summary_path,
-            summary,
-        )
-
     def load_approvals(self, user_id: str, session_id: str) -> list[ApprovalRecord]:
         return self.approval_store.load(
             build_session_paths(self.data_root, user_id, session_id).approvals_path,
@@ -85,7 +72,6 @@ class SessionRepository:
         return SessionDetail(
             meta=self.load_meta(user_id, session_id),
             messages=self.load_messages(user_id, session_id),
-            summary=self.load_summary(user_id, session_id),
             approvals=self.load_approvals(user_id, session_id),
         )
 

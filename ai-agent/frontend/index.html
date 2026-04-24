@@ -4,20 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>dbass-ai-agent</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=frontend-20260423-1" />
   </head>
   <body>
-    <div class="shell">
+    <div class="layout">
       <aside class="sidebar">
-        <div class="sidebar-header">
+        <div class="sidebar-top">
           <div>
-            <p class="eyebrow">Phase 1</p>
+            <p class="eyebrow">DBAAS AI Assistant</p>
             <h1>dbass-ai-agent</h1>
           </div>
-          <button id="new-session-button" class="ghost-button">新建会话</button>
+          <button id="new-session-button" class="ghost-button" type="button">新建会话</button>
         </div>
-        <div class="identity-card" id="identity-card"></div>
-        <div class="session-list" id="session-list"></div>
+
+        <section id="identity-card" class="identity-card"></section>
+
+        <section class="sidebar-section">
+          <div class="section-heading">
+            <span>我的会话</span>
+          </div>
+          <div id="session-list" class="session-list"></div>
+        </section>
       </aside>
 
       <main class="main-panel">
@@ -25,12 +32,11 @@
           <div>
             <p class="eyebrow">当前会话</p>
             <h2 id="session-title">未选择会话</h2>
+            <p id="session-subtitle" class="subtitle">请选择或创建一个会话。</p>
           </div>
-          <div class="header-actions">
+          <div class="chat-actions">
             <span id="session-status" class="status-pill">-</span>
-            <button id="archive-button" class="ghost-button">归档</button>
-            <button id="restore-button" class="ghost-button">恢复</button>
-            <button id="delete-button" class="danger-button">删除</button>
+            <button id="delete-button" class="danger-button" type="button">删除</button>
           </div>
         </header>
 
@@ -38,38 +44,45 @@
         <section id="messages" class="messages"></section>
 
         <form id="composer" class="composer">
-          <textarea
-            id="message-input"
-            placeholder="继续在当前 session 中提问..."
-            rows="3"
-          ></textarea>
-          <button id="send-button" type="submit" class="primary-button">发送</button>
+          <label class="composer-label" for="message-input">继续提问</label>
+          <div class="composer-row">
+            <textarea
+              id="message-input"
+              rows="4"
+              placeholder="继续在当前 Session 中提问..."
+            ></textarea>
+            <button id="send-button" class="primary-button" type="submit">发送</button>
+          </div>
         </form>
       </main>
     </div>
 
-    <div id="login-modal" class="modal">
+    <div id="login-modal" class="modal hidden">
       <form id="login-form" class="login-card">
         <p class="eyebrow">简单登录</p>
         <h2>进入对话页面</h2>
-        <label>
-          用户名
+
+        <label class="field">
+          <span>用户名</span>
           <input id="login-user-id" name="user_id" autocomplete="username" required />
         </label>
-        <label>
-          用户类型
+
+        <label class="field">
+          <span>用户类型</span>
           <select id="login-role" name="role">
             <option value="user">普通用户</option>
             <option value="admin">管理员</option>
           </select>
         </label>
+
         <p class="hint">
-          第一阶段仅做本地身份切换。普通用户默认把 `user_id` 直接作为后端 `user` 使用。
+          当前阶段只做本地登录。普通用户默认将 `user_id` 直接作为后端 `user` 使用。
         </p>
-        <button type="submit" class="primary-button">进入系统</button>
+
+        <button class="primary-button" type="submit">进入系统</button>
       </form>
     </div>
 
-    <script src="/app.js" defer></script>
+    <script src="/app.js?v=frontend-20260423-1" defer></script>
   </body>
-  </html>
+</html>

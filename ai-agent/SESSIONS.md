@@ -60,7 +60,6 @@ DeepAgent 原生支持：
 在此基础上，DBAAS Agent 会增加一些 AI 运行时相关扩展，例如：
 
 - `thread_id`
-- `summary.json`
 - `approvals.jsonl`
 
 ## 1.2 为什么仍然保留 Session 层
@@ -74,9 +73,16 @@ DeepAgent 原生支持：
 - Session
   - 面向产品层
   - 负责历史列表、标题、预览、归档、删除、当前窗口切换
+  - 负责原始记录、审计留痕和产品层管理
 - Thread / Checkpointer
   - 面向 DeepAgent 运行时
   - 负责持续对话、中断恢复、审批恢复、执行状态持久化
+
+还需要补充一个运行时约束：
+
+- 长会话压缩优先发生在同一个 `thread_id` 内
+- 由 `SummarizationMiddleware` 与 checkpoint 负责维持运行时上下文
+- 不再单独持久化 `summary.json`
 
 因此，Session 不只是为了管理页面会话，也是为了把产品层和具体 AI 框架解耦。
 
@@ -89,6 +95,7 @@ DeepAgent 原生支持：
 
 - `session_id` 是产品层主键
 - `thread_id` 是 AI 运行时主键
+- 压缩状态属于运行时内部细节，不单独作为产品层主键或文件对象
 
 第一阶段和后续阶段都建议保持：
 
@@ -96,6 +103,13 @@ DeepAgent 原生支持：
 - 对应一个 `thread_id`
 
 这样页面切换、历史管理和运行时恢复可以各自独立演进，而不会互相绑死。
+
+当前优先策略进一步明确为：
+
+- 长会话压缩优先在原 `thread_id` 内完成
+- 优先使用 `SummarizationMiddleware`
+- 不因压缩而切换新的 `thread_id`
+- 仅在用户显式删除 Session 时，才清理对应 `thread_id`
 
 ## 2. 第一阶段设计目标
 
@@ -123,7 +137,6 @@ ai-agent/
           <session_id>/
             meta.json
             messages.jsonl
-            summary.json
             approvals.jsonl
 ```
 
@@ -227,23 +240,11 @@ ai-agent/
 示例：
 
 ```json
-{"id":"msg_001","role":"user","content":"查看 mysql-xf2 状态","created_at":"2026-04-22T12:00:01Z"}
-{"id":"msg_002","role":"assistant","content":"我先帮你查询 mysql-xf2 的状态。","created_at":"2026-04-22T12:00:02Z"}
+{"message_id":"msg_001","role":"user","content":"查看 mysql-xf2 状态","created_at":"2026-04-22T12:00:01Z"}
+{"message_id":"msg_002","role":"assistant","content":"我先帮你查询 mysql-xf2 的状态。","created_at":"2026-04-22T12:00:02Z"}
 ```
 
-### 5.3 `summary.json`
-
-保存当前 Session 的压缩摘要。
-
-该文件用于：
-
-- 恢复长会话上下文
-- 快速生成预览
-- 后续对接记忆压缩策略
-
-具体摘要结构以 [MEMORY.md](./MEMORY.md) 为准。
-
-### 5.4 `approvals.jsonl`
+### 5.3 `approvals.jsonl`
 
 保存当前 Session 的审批记录。
 
@@ -317,7 +318,7 @@ ai-agent/
 1. 用户点击某个 `session_id`
 2. 后端读取 `meta.json`
 3. 后端读取 `messages.jsonl`
-4. 后端按需读取 `summary.json`
+4. 后端读取 `approvals.jsonl`
 5. 将该 Session 内容返回给前端
 6. 前端将其加载到当前窗口
 
@@ -332,11 +333,21 @@ ai-agent/
 
 1. 前端向当前 `session_id` 发送用户消息
 2. 后端将消息追加到 `messages.jsonl`
-3. Agent 在对应 `thread_id` 上继续执行
-4. 返回 SSE 流式结果
+3. Agent 优先在当前活动 `thread_id` 上继续执行
+4. 返回本轮 assistant 消息结果
 5. 将 assistant 消息继续追加到 `messages.jsonl`
 6. 更新 `meta.json.updated_at`
 7. 更新 `index.json` 中该条目的 `updated_at`、`last_message_at` 和 `preview`
+
+如果后续为了上下文压缩切换到新的 `thread_id`：
+当前不作为优先方案。
+
+当前更推荐的做法是：
+
+- 优先在原 `thread_id` 内通过 `SummarizationMiddleware` 完成压缩
+- Session 继续绑定原活动线程
+- 压缩状态不再额外落盘到 Session 目录
+- 压缩不会触发线程切换
 
 ## 8. 创建、归档、删除策略
 
@@ -348,7 +359,7 @@ ai-agent/
 - 创建对应目录
 - 写入 `meta.json`
 - 创建空的 `messages.jsonl`
-- 初始化 `summary.json`
+- 创建空的 `approvals.jsonl`
 - 在 `index.json` 中追加一条记录
 
 ### 8.2 归档 Session
@@ -380,6 +391,7 @@ ai-agent/
 
 - 从 `index.json` 中移除该 Session
 - 删除 `data/users/<user_id>/sessions/<session_id>/` 目录
+- 同步删除该 Session 绑定的 `thread_id` 运行时数据
 - 页面刷新后不再出现在历史列表中
 - 需要可恢复能力时，应使用 `archive`
 
@@ -401,7 +413,16 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 
 - 页面上的“打开某个历史 Session”
 - 本质上是加载该 `session_id` 的会话内容
-- 如果继续提问，则复用其 `thread_id`
+- 如果继续提问，则使用其当前活动 `thread_id`
+
+但这里需要区分：
+
+- `delete session`
+  - 可以清理对应运行时线程数据
+- `context compression`
+  - 优先在原 `thread_id` 内完成
+  - 不应额外生成产品层摘要文件
+  - 不应因此清理当前 `thread_id`
 
 这可以很好地支持：
 
@@ -464,7 +485,6 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
 data/users/<user_id>/sessions/<session_id>/messages.jsonl
-data/users/<user_id>/sessions/<session_id>/summary.json
 data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 

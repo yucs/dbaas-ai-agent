@@ -1,10 +1,14 @@
-# DBAAS 智能助手第一阶段计划
+# DBAAS 智能助手第一阶段说明
 
 ## 1. 文档目的
 
-本文档用于收敛第一阶段的 MVP 目标、范围、边界和实现顺序。
+本文档不再只是“第一阶段准备做什么”，而是根据当前仓库中的实际实现，收敛第一阶段已经落地的产品基座能力、实现细节和边界。
 
-这份文档不替代总设计文档，而是作为“当前先做什么”的执行基线。
+需要特别说明：
+
+- 当前主干代码已经继续演进到第二阶段，AI runtime 已升级为真实 DeepAgent
+- 但多用户、多 Session、文件投影、前端登录与会话页这些基础能力，仍然属于第一阶段交付成果
+- 因此本文档描述的是“当前代码中仍然有效的第一阶段能力基座”
 
 相关文档：
 
@@ -12,430 +16,258 @@
 - [SESSIONS.md](./SESSIONS.md)
 - [API.md](./API.md)
 - [MEMORY.md](./MEMORY.md)
+- [PHASE2.md](./PHASE2.md)
 
-## 2. 第一阶段目标
+## 2. 第一阶段当前结论
 
-第一阶段的核心目标不是完整实现 DBAAS 操作助手，而是先做出一个可运行的最小版本，重点验证：
+截至当前代码版本，第一阶段目标已经完成，且形成了后续第二阶段继续演进的稳定基座。
 
-- 多用户
-- 多 Session
-- 登录后进入对话页
-- 可以查看自己的历史 Session
-- 可以创建和切换 Session
-- 选中某个 Session 后，可以基于该 Session 继续问答
-- 初版 AI 后台可以回答一般问题
+第一阶段已经验证并保留下来的核心能力包括：
 
-## 3. 第一阶段用户流程
+- 本地登录
+- 多用户隔离
+- 多 Session 管理
+- Session 历史加载
+- 在当前 Session 中持续问答
+- `session_id -> thread_id` 绑定
+- 本地文件投影
+- 简单但可用的聊天前端
 
-第一阶段页面流程建议如下：
+第一阶段最重要的价值已经从“做一个 demo”变成：
 
-1. 用户进入登录页
-2. 输入用户名
-3. 选择用户类型
-   - `admin`
-   - `user`
-4. 登录成功后进入对话页
-5. 页面左侧展示当前用户的历史 Session 列表
-6. 用户可以：
-   - 新建 Session
-   - 打开历史 Session
-   - 归档 Session
-   - 删除 Session
-     删除后会直接移除 Session 目录
-7. 用户在当前窗口继续输入问题
-8. 后端基于当前 Session 对应的 `thread_id` 继续执行
+- 让产品层 Session 模型稳定下来
+- 让前端交互和后端接口先收敛
+- 为第二阶段替换真实 runtime 时尽量不重写页面和 Session 管理逻辑
 
-## 4. 第一阶段页面范围
+## 3. 第一阶段目标与当前实现对应
 
-### 4.1 登录页
+### 3.1 用户与登录
 
-第一阶段只需要一个非常简单的登录页：
+当前前端已经落地一个本地登录流程：
 
-- 用户名输入框
-- 用户类型选择框
-- 登录按钮
+- 通过登录弹窗输入 `user_id`
+- 选择用户类型：
+  - `user`
+  - `admin`
+- 登录后把身份信息保存到浏览器本地 `localStorage`
+- 后续请求通过请求头传给后端：
+  - `X-User-Id`
+  - `X-User-Role`
+  - `X-User`
 
-第一阶段不需要真正接入统一登录系统。
+当前实现中的身份规则是：
 
-页面提交的信息即可形成当前产品层身份快照，例如：
+- 普通用户
+  - 默认 `user = user_id`
+- 管理员
+  - 允许只传 `user_id`
+  - `X-User` 可为空
 
-- `user_id`
-- `role`
-- `user`
+后端还补充了安全校验：
 
-建议规则：
+- `user_id`、`user` 仅允许字母、数字、点、下划线和中划线
+- 长度限制为 64
+- 非法请求头直接返回 `400`
 
-- 如果用户类型为 `user`
-  - 第一阶段可简化为 `user = user_id`
-- 如果用户类型为 `admin`
-  - 后端对接 `mock-server` 时使用 `admin`
+这比最初只强调“简单登录”更完整，已经具备了可持续复用的最小身份入口。
 
-### 4.2 对话页
+### 3.2 对话页和会话列表
 
-对话页第一阶段建议包含以下最小区域：
+当前前端已经实现一个静态单页聊天壳：
 
-- 左侧 Session 列表
-- 新建 Session 按钮
-- 当前 Session 标题
-- 消息列表区域
-- 输入框
-- 发送按钮
-- 可选的归档/删除按钮
+- 左侧展示当前用户自己的 Session 列表
+- 顶部展示当前身份
+- 支持新建 Session
+- 支持打开历史 Session
+- 支持删除 Session
+- 右侧展示当前会话消息
+- 底部输入框继续提问
 
-第一阶段不需要复杂样式，重点是交互流程跑通。
+实际实现比最初计划多了几项体验优化：
 
-## 5. 第一阶段后端范围
+- 登录后自动拉取当前用户会话
+- 如果当前用户还没有会话，自动创建第一条 Session
+- Session 列表按最后消息时间倒序显示
+- 发送消息时前端先插入乐观消息和“助手正在思考”占位
+- 返回 DBAAS 边界提示时，会在页面顶部显示 flash 提示
+- 支持切换用户并清空本地登录态
 
-### 5.1 需要实现的能力
+### 3.3 多用户与多 Session
 
-- 登录后的本地用户上下文初始化
-- 多用户 Session 目录管理
-- Session 列表读取
-- Session 详情读取
-- 新建 Session
-- 归档 Session
-- 删除 Session
-- 当前 Session 下发送消息
-- 简单的流式或准流式返回
-- 基于 DeepAgent 的初版 AI 后台
+第一阶段最关键的“多用户、多 Session”能力已经在当前代码中稳定落地：
 
-### 5.2 初版 AI 后台要求
+- Session 目录按 `user_id` 隔离
+- 用户只能访问自己的 Session
+- 后端对 `session_id` 做格式校验
+- Session 不存在、越权访问、非法 ID 都统一返回“Session 不存在”
 
-第一阶段 AI 后台只要求：
+当前已经支持的 Session 生命周期包括：
 
-- 能回答普通问题
-- 能在同一个 Session 下持续对话
-- 能结合当前 Session 继续窗口问答
+- 创建
+- 列表读取
+- 详情读取
+- 归档
+- 恢复
+- 删除
 
-第一阶段暂不要求：
+需要说明的是：
 
-- 真正接 `mock-server` 做 DBAAS 查询
-- 真正接 `mock-server` 做 DBAAS 变更
-- 强制人工确认的完整流程闭环
-- 完整异步任务跟踪
+- 后端已提供 `archive` / `restore` API
+- 当前前端主页面优先暴露的是“打开”和“删除”
+- 也就是说，归档能力已经在服务层和接口层具备，但前端还没有把归档按钮作为当前主交互
 
-## 6. 与 DeepAgent 的关系
+## 4. 第一阶段后端已落地能力
 
-第一阶段仍然默认项目基于 DeepAgent 实现。
+### 4.1 Session 服务层
 
-但这里要明确：
+当前 `sessions/service.py` 已经把第一阶段的核心会话逻辑收敛下来，包括：
 
-- 第一阶段重点验证的是 Session 模型和基本问答流程
-- 不是第一时间把 DBAAS tools 和审批流全部接完
+- 创建 Session 时同时生成 `session_id` 和 `thread_id`
+- 写入 `meta.json`
+- 更新 `index.json`
+- 读取 Session 详情
+- 读取消息历史
+- 归档 / 恢复 / 删除
+- 追加用户消息
+- 追加助手消息
 
-因此第一阶段建议：
+在实现过程中又补上了几项很实用的优化：
 
-- 保留 `session_id -> thread_id` 绑定模型
-- AI 对话仍通过 DeepAgent runtime 驱动
-- 先不启用真正的 DBAAS tool 调用
+- Session 默认标题为 `新对话`
+- 当用户第一次发送消息后，自动用首条问题生成标题
+- `index.json` 中的 `preview` 自动截断到 80 个字符
+- `updated_at` 与 `last_message_at` 会随消息自动更新
+- 如果一个已归档 Session 收到新消息，会先自动恢复成 `active`
 
-## 7. 第一阶段对 mock-server 的处理策略
+这些优化让左侧会话列表能真正承担“产品层投影”的职责，而不只是存一份原始索引。
 
-第一阶段如果用户问到了 DBAAS 查询或 DBAAS 操作，不要求真正调用 `mock-server`。
+### 4.2 文件投影结构
 
-建议行为：
-
-- 后端先识别这是 DBAAS 场景问题
-- 给出明确提示：
-  - 当前第一阶段后台尚未启用 `mock-server` 调用能力
-  - 当前版本仅支持基础问答和 Session 管理
-
-这样做的好处：
-
-- 不阻塞第一阶段页面与 Session 能力落地
-- 避免半完成状态下出现错误或误导
-- 方便后续第二阶段逐步接入 DBAAS tools
-
-## 8. 第一阶段 Session 规则
-
-第一阶段继续沿用现有 Session 设计：
-
-- 一个 `session_id`
-- 对应一个 `thread_id`
-
-页面选择某个 Session 后：
-
-- 先读取该 Session 的历史消息
-- 加载到当前窗口
-- 后续继续发问时复用原来的 `thread_id`
-
-这正是第一阶段最重要的验证点之一。
-
-## 9. 第一阶段推荐接口范围
-
-建议第一阶段至少实现以下接口：
-
-- `GET /api/v1/sessions`
-- `POST /api/v1/sessions`
-- `GET /api/v1/sessions/{session_id}`
-- `POST /api/v1/sessions/{session_id}/messages`
-- `POST /api/v1/sessions/{session_id}/archive`
-- `POST /api/v1/sessions/{session_id}/restore`
-- `DELETE /api/v1/sessions/{session_id}`
-
-如果流式能力一起做，则补充：
-
-- `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
-
-## 10. 第一阶段本地存储范围
-
-建议第一阶段继续使用本地目录：
+当前仍然沿用第一阶段确定的本地文件结构：
 
 ```text
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
 data/users/<user_id>/sessions/<session_id>/messages.jsonl
-data/users/<user_id>/sessions/<session_id>/summary.json
 data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
-其中第一阶段重点使用：
+其中已经实际接入并参与主流程的是：
 
 - `index.json`
 - `meta.json`
 - `messages.jsonl`
+- `approvals.jsonl`
 
-`summary.json` 和 `approvals.jsonl` 可以先保留结构，但实现上不必一次做重。
+这里的“接入”含义是：
 
-## 11. 第一阶段建议代码组织结构
+- 这些文件已经进入统一仓储读取链路
+- 页面和服务层都直接围绕它们组织当前 Session 视图
+- 长会话压缩属于运行时内部能力，不再额外投影成 Session 文件
 
-第一阶段建议采用“前后端分目录、后端按职责分层、本地数据独立存放”的组织方式。
+### 4.3 `session_id` 与 `thread_id` 绑定
 
-推荐目录如下：
+第一阶段确立的“一条 Session 绑定一条 Thread”的规则仍然成立，而且当前实现比早期约定更清晰：
 
-```text
-ai-agent/
-  DESIGN.md
-  SESSIONS.md
-  API.md
-  MEMORY.md
-  PHASE1.md
+- `session_id` 形如：
+  - `sess_<scope>`
+- `thread_id` 形如：
+  - `thread_<scope>`
+- 两者共享同一段时间戳与随机后缀
 
-  data/
-    users/
-      <user_id>/
-        sessions/
-          index.json
-          <session_id>/
-            meta.json
-            messages.jsonl
-            summary.json
-            approvals.jsonl
+这样做的实际好处是：
 
-  backend/
-    pyproject.toml
-    src/dbass_ai_agent/
-      main.py
-      config.py
+- 日志和数据目录更容易排查
+- 可以直接从 Session 快速定位对应 Thread
+- 第二阶段接入真实 DeepAgent 后无需重构产品层主键模型
 
-      api/
-        deps.py
-        schemas.py
-        routes_sessions.py
-        routes_chat.py
-        routes_runs.py
+## 5. 第一阶段接口落地情况
 
-      sessions/
-        models.py
-        service.py
-        repository.py
-        index_store.py
-        message_store.py
-        summary_store.py
-        approval_store.py
-        thread_binding.py
+当前已经落地的接口包括：
 
-      agent/
-        runtime.py
-        prompt.py
-        dbaas_guard.py
+- `GET /api/v1/sessions`
+- `POST /api/v1/sessions`
+- `GET /api/v1/sessions/{session_id}`
+- `GET /api/v1/sessions/{session_id}/approvals`
+- `POST /api/v1/sessions/{session_id}/messages`
+- `POST /api/v1/sessions/{session_id}/archive`
+- `POST /api/v1/sessions/{session_id}/restore`
+- `DELETE /api/v1/sessions/{session_id}`
+- `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
 
-      identity/
-        models.py
-        resolver.py
+其中需要特别说明：
 
-      infra/
-        paths.py
-        ids.py
-        clock.py
+- SSE 事件接口目前仍返回 `501 Not Implemented`
+- 也就是说接口路径已经预留，但第一阶段主链路仍然是普通请求响应
 
-  frontend/
-    index.html
-    styles.css
-    app.js
-```
+## 6. 第一阶段前端实现优化
 
-### 11.1 组织原则
+和最初“能用就行”的目标相比，当前前端已经做了几项对真实使用更有帮助的增强：
 
-- `data/`
-  - 保存真实 Session 数据
-  - 不与代码目录混放
-- `backend/`
-  - 负责 HTTP API、Session 管理、DeepAgent 对接和本地文件读写
-- `frontend/`
-  - 负责登录页、对话页、Session 列表和消息展示
-  - 第一阶段为了降低依赖，先采用静态单页实现
+- 登录态持久化
+- 首次登录自动进入首个可用会话
+- 新建会话后自动切换到新会话
+- 删除当前会话后自动切换到剩余第一条会话
+- 消息发送失败时自动回收乐观状态并提示错误
+- 页面中明确提示“当前页面只显示当前登录用户自己的会话”
 
-### 11.2 后端职责建议
+另外，主应用入口也做了两项工程化处理：
 
-- `main.py`
-  - 应用入口
-  - 组装路由与配置
-- `api/`
-  - 只负责对外接口
-  - 不直接写文件
-- `sessions/`
-  - 负责 Session 模型、Session 生命周期和本地会话数据读写
-  - 是第一阶段最核心的业务模块
-- `agent/`
-  - 负责 DeepAgent runtime 封装
-  - 第一阶段先支持普通问答
-  - 对 DBAAS 问题返回“尚未启用 mock-server 调用”的提示
-- `identity/`
-  - 负责当前用户身份解析
-  - 例如从请求头中提取 `user_id`、`role`、`user`
-- `infra/`
-  - 放路径、ID 生成、时间工具等基础能力
+- 静态资源通过后端统一托管
+- `index.html`、`app.js`、`styles.css` 返回时都带 `no-store` 等禁止缓存头
 
-### 11.3 前端职责建议
+这解决了开发联调时前端缓存导致页面与代码不一致的问题。
 
-- `frontend/index.html`
-  - 提供简单登录页和对话页骨架
-- `frontend/styles.css`
-  - 提供第一阶段页面样式
-- `frontend/app.js`
-  - 管理登录状态、Session 列表加载、当前会话切换和发送消息
-  - 通过请求头把 `user_id`、`role`、`user` 传给后端
+## 7. 第一阶段非目标与当前边界
 
-### 11.4 核心文件职责说明
+当前主干中，以下内容仍然不属于第一阶段交付范围：
 
-建议把第一阶段真正关键的文件职责写清楚：
-
-- `api/routes_sessions.py`
-  - 提供 Session 列表、详情、新建、归档、恢复、删除接口
-- `api/routes_chat.py`
-  - 提供当前 Session 下发送消息接口
-- `api/routes_runs.py`
-  - 如果第一阶段引入 SSE，则放运行流接口
-- `api/deps.py`
-  - 统一解析当前用户身份
-
-- `sessions/service.py`
-  - Session 管理的业务入口
-  - 负责把多个 Session 操作串成完整流程
-  - 例如：
-    - 创建新 Session
-    - 加载某个 Session
-    - 校验 Session 是否属于当前用户
-    - 归档、恢复、删除
-    - archived Session 收到新消息时先自动 restore
-    - 更新 `index.json` 中的 `preview`、`updated_at`、`last_message_at`
-
-- `sessions/repository.py`
-  - Session 数据读写的统一入口
-  - 对上层屏蔽底层文件组织细节
-
-- `sessions/index_store.py`
-  - 负责读写 `index.json`
-  - 支撑左侧历史 Session 列表
-
-- `sessions/message_store.py`
-  - 负责读写 `messages.jsonl`
-  - 支撑历史消息加载与新消息追加
-
-- `sessions/summary_store.py`
-  - 负责读写 `summary.json`
-  - 第一阶段可以先保持轻量
-
-- `sessions/approval_store.py`
-  - 负责读写 `approvals.jsonl`
-  - 第一阶段可先保留结构，不要求完整闭环
-
-- `sessions/thread_binding.py`
-  - 负责维护 `session_id -> thread_id` 关系
-  - 保证页面选中历史 Session 后可以继续在原会话上下文中对话
-
-- `agent/runtime.py`
-  - 对 DeepAgent 的最小封装
-  - 第一阶段先支持普通问答
-
-- `agent/dbaas_guard.py`
-  - 识别 DBAAS 相关问题
-  - 当前阶段统一返回“mock-server 调用尚未启用”的提示
-
-- `identity/resolver.py`
-  - 统一把外部传入的身份信息整理成内部身份模型
-  - 例如：
-    - `user_id`
-    - `role`
-    - `user`
-
-### 11.5 第一阶段最小实现建议
-
-如果希望第一版尽快跑通，可以把代码组织收敛到下面这个最小核心：
-
-- 后端
-  - `api/routes_sessions.py`
-  - `api/routes_chat.py`
-  - `sessions/service.py`
-  - `sessions/repository.py`
-  - `sessions/index_store.py`
-  - `sessions/message_store.py`
-  - `agent/runtime.py`
-  - `identity/resolver.py`
-- 前端
-  - `frontend/index.html`
-  - `frontend/styles.css`
-  - `frontend/app.js`
-
-这样既能保持结构清晰，也不会在第一阶段把工程拆得太重。
-
-## 12. 第一阶段非目标
-
-以下内容明确不属于第一阶段核心目标：
-
-- 真正打通 `mock-server` 查询能力
-- 真正打通 `mock-server` 变更能力
-- 完整审批流
-- 完整异步任务流
-- 复杂前端设计
-- 完整权限体系
+- 真正接通 `mock-server` 的实时查询
+- 真正接通 `mock-server` 的变更操作
+- 完整审批闭环
+- SSE 流式事件
+- 长期记忆
 - 跨 Session 检索
+- 复杂前端工作流
 
-## 13. 推荐实现顺序
+第一阶段对 DBAAS 问题的定位仍然是：
 
-建议按下面顺序推进：
+- 产品壳、会话模型和本地投影先跑稳
+- 真实 DBAAS tools 放到后续阶段逐步接入
 
-1. 搭建最小前后端骨架
-   - 登录页
-   - 对话页
-   - Session 目录读写
+## 8. 与当前主干的衔接说明
 
-2. 跑通多用户多 Session
-   - 登录后看到自己的 Session 列表
-   - 可以新建和切换 Session
-   - 可以归档和删除 Session
+虽然当前代码已经进入第二阶段，第一阶段文档仍然需要保留两点事实：
 
-3. 跑通当前窗口继续问答
-   - 加载历史消息
-   - 复用 `thread_id`
-   - 新消息写入本地文件
+1. 第一阶段交付的重点从来不是“某个特定模型实现”，而是产品层 Session 基座。
+2. 第二阶段之所以能把 demo runtime 替换成真实 DeepAgent，而前端和 Session API 基本不重写，正是因为第一阶段这层基座已经先收敛稳定。
 
-4. 接入初版 DeepAgent 后台
-   - 先支持普通问答
-   - 对 DBAAS 问题返回“尚未启用 mock-server 调用”的提示
+同时，当前主干还在第一阶段删除流程上补了一项跨阶段优化：
 
-5. 视情况补充 SSE
-   - 如果第一阶段希望页面体验更接近真实聊天产品，则加入 SSE
-   - 否则可先用简单请求响应跑通主流程
+- 删除 Session 时，不仅删除产品层目录
+- 还会同步清理该 Session 对应的 DeepAgent `thread_id` checkpoint 数据
 
-## 14. 当前建议结论
+这项能力严格来说属于第二阶段 runtime 接入后的增强，但它让第一阶段定义的“删除 Session”在当前代码中变成了真正更完整的删除语义。
 
-第一阶段应该先聚焦这件事：
+## 9. 第一阶段完成标准
 
-- 做一个简单可运行的多用户、多 Session 聊天产品壳
-- 用它验证 Session 列表、历史加载、继续问答和 `thread_id` 绑定
-- 让初版 AI 后台先具备基础问答能力
-- DBAAS 与 `mock-server` 集成延后到下一阶段
+如果从当前实现倒推第一阶段是否完成，答案是“已完成”，完成标准包括：
 
-如果第一阶段把这几件事跑通，第二阶段再接 DBAAS tools、审批流和异步任务，会稳很多。
+- 用户可本地登录进入系统
+- 每个用户拥有自己独立的 Session 列表
+- 可以新建、打开、删除自己的 Session
+- 历史消息可重新加载到当前窗口
+- 同一个 Session 能持续对话
+- Session 与 Thread 的绑定关系稳定保存
+- 文件投影结构已经形成并可持续演进
+- 第二阶段升级 runtime 时无需推翻这套产品层结构
+
+## 10. 当前建议结论
+
+第一阶段文档现在应当被理解为：
+
+- 它描述的是已经验证成功的产品基座
+- 不是一份待办清单
+- 后续所有第二阶段、第三阶段能力，都应尽量复用这套多用户、多 Session、文件投影和页面交互基础
+
+如果后续继续演进，第一阶段这份文档原则上不再扩充新的 runtime 细节，而是只维护“产品层基座”相关内容。

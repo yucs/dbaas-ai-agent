@@ -1,0 +1,28 @@
+[app]
+name = "dbass-ai-agent"
+
+[server]
+host = "127.0.0.1"
+port = 8010
+
+[paths]
+data_root = "./data/users"
+runtime_root = "./data/runtime"
+frontend_root = "./frontend"
+checkpoint_db = "./data/runtime/checkpoints.sqlite"
+system_prompt_path = "./backend/prompts/system.md"
+compression_prompt_path = "./backend/prompts/compression.md"
+
+[model]
+provider_kind = "openai_compatible"
+model = "deepseek-3.2"
+base_url = "https://your-llm-endpoint.example.com/v1"
+api_key = "replace-with-your-api-key"
+context_window = 131072
+max_output_tokens = 8192
+
+[compression]
+enabled = true
+soft_trigger_tokens = 98304
+keep_recent_messages = 6
+summary_max_tokens = 2048

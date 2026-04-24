@@ -1,9 +1,12 @@
+const STORAGE_KEY = "dbass-auth";
+
 const state = {
   auth: null,
   sessions: [],
   currentSessionId: null,
   currentSession: null,
   sending: false,
+  bootstrapping: false,
 };
 
 const elements = {
@@ -14,9 +17,8 @@ const elements = {
   identityCard: document.getElementById("identity-card"),
   sessionList: document.getElementById("session-list"),
   sessionTitle: document.getElementById("session-title"),
+  sessionSubtitle: document.getElementById("session-subtitle"),
   sessionStatus: document.getElementById("session-status"),
-  archiveButton: document.getElementById("archive-button"),
-  restoreButton: document.getElementById("restore-button"),
   deleteButton: document.getElementById("delete-button"),
   newSessionButton: document.getElementById("new-session-button"),
   messages: document.getElementById("messages"),
@@ -26,27 +28,89 @@ const elements = {
   flash: document.getElementById("flash"),
 };
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function messageToHtml(value) {
+  return escapeHtml(value).replaceAll("\n", "<br />");
+}
+
+function formatTime(value) {
+  if (!value) {
+    return "-";
+  }
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function truncatePreview(content) {
+  return String(content || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function sortSessions(items) {
+  return [...items].sort((left, right) => {
+    const leftValue = left.last_message_at || left.updated_at || "";
+    const rightValue = right.last_message_at || right.updated_at || "";
+    return rightValue.localeCompare(leftValue);
+  });
+}
+
+function buildLocalId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function showFlash(message, kind = "info") {
+  elements.flash.classList.remove("hidden");
+  elements.flash.dataset.kind = kind;
+  elements.flash.textContent = message;
+}
+
+function clearFlash() {
+  elements.flash.classList.add("hidden");
+  elements.flash.dataset.kind = "";
+  elements.flash.textContent = "";
+}
+
+function openLoginModal() {
+  elements.loginModal.classList.remove("hidden");
+}
+
+function closeLoginModal() {
+  elements.loginModal.classList.add("hidden");
+}
+
 function loadAuth() {
-  const saved = window.localStorage.getItem("dbass-auth");
+  const saved = window.localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     return null;
   }
+
   try {
     return JSON.parse(saved);
   } catch {
-    window.localStorage.removeItem("dbass-auth");
+    window.localStorage.removeItem(STORAGE_KEY);
     return null;
   }
 }
 
 function saveAuth(auth) {
-  window.localStorage.setItem("dbass-auth", JSON.stringify(auth));
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+}
+
+function clearAuth() {
+  window.localStorage.removeItem(STORAGE_KEY);
 }
 
 function authHeaders() {
   if (!state.auth) {
     return {};
   }
+
   return {
     "X-User-Id": state.auth.user_id,
     "X-User-Role": state.auth.role,
@@ -71,41 +135,31 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function formatTime(value) {
-  if (!value) {
-    return "-";
-  }
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
-}
-
-function showFlash(message, kind = "info") {
-  elements.flash.classList.remove("hidden");
-  elements.flash.textContent = message;
-  elements.flash.dataset.kind = kind;
-}
-
-function clearFlash() {
-  elements.flash.classList.add("hidden");
-  elements.flash.textContent = "";
-}
-
 function renderIdentity() {
   if (!state.auth) {
-    elements.identityCard.innerHTML = "";
+    elements.identityCard.innerHTML = `
+      <div class="empty-state">请先登录。</div>
+    `;
     return;
   }
+
   elements.identityCard.innerHTML = `
     <p class="eyebrow">当前身份</p>
-    <h2>${state.auth.user_id}</h2>
-    <div class="identity-row"><span>角色</span><strong>${state.auth.role}</strong></div>
-    <div class="identity-row"><span>后端 user</span><strong>${state.auth.user || "-"}</strong></div>
-    <div class="session-item-actions">
-      <button data-action="switch-user" class="ghost-button">切换用户</button>
+    <h2>${escapeHtml(state.auth.user_id)}</h2>
+    <div class="identity-row"><span>角色</span><strong>${escapeHtml(state.auth.role)}</strong></div>
+    <div class="identity-row"><span>后端 user</span><strong>${escapeHtml(state.auth.user || "-")}</strong></div>
+    <div class="session-actions">
+      <button data-action="switch-user" class="ghost-button" type="button">切换用户</button>
     </div>
   `;
 }
 
 function renderSessions() {
+  if (!state.auth) {
+    elements.sessionList.innerHTML = `<div class="empty-state">请先登录后查看会话。</div>`;
+    return;
+  }
+
   if (!state.sessions.length) {
     elements.sessionList.innerHTML = `<div class="empty-state">当前用户还没有历史会话。</div>`;
     return;
@@ -114,19 +168,16 @@ function renderSessions() {
   elements.sessionList.innerHTML = state.sessions
     .map(
       (item) => `
-        <article class="session-item ${item.session_id === state.currentSessionId ? "active" : ""}" data-session-id="${item.session_id}">
-          <div class="session-item-title">${escapeHtml(item.title)}</div>
-          <div class="session-item-preview">${escapeHtml(item.preview || "暂无预览")}</div>
-          <div class="session-item-footer">
-            <span>${item.status}</span>
+        <article class="session-item ${item.session_id === state.currentSessionId ? "active" : ""}" data-session-id="${escapeHtml(item.session_id)}">
+          <div class="session-title">${escapeHtml(item.title)}</div>
+          <div class="session-preview">${escapeHtml(item.preview || "暂无预览")}</div>
+          <div class="session-meta">
+            <span>${escapeHtml(item.status)}</span>
             <span>${formatTime(item.last_message_at || item.updated_at)}</span>
           </div>
-          <div class="session-item-actions">
-            <button data-action="open" data-session-id="${item.session_id}" class="ghost-button">打开</button>
-            <button data-action="${item.status === "archived" ? "restore" : "archive"}" data-session-id="${item.session_id}" class="ghost-button">
-              ${item.status === "archived" ? "恢复" : "归档"}
-            </button>
-            <button data-action="delete" data-session-id="${item.session_id}" class="danger-button">删除</button>
+          <div class="session-actions">
+            <button data-action="open" data-session-id="${escapeHtml(item.session_id)}" class="ghost-button" type="button">打开</button>
+            <button data-action="delete" data-session-id="${escapeHtml(item.session_id)}" class="danger-button" type="button">删除</button>
           </div>
         </article>
       `,
@@ -135,15 +186,19 @@ function renderSessions() {
 }
 
 function renderCurrentSession() {
-  const detail = state.currentSession;
-  if (!detail) {
+  if (!state.currentSession) {
     elements.sessionTitle.textContent = "未选择会话";
+    elements.sessionSubtitle.textContent = state.auth
+      ? "请选择或创建一个会话。"
+      : "请先登录。";
     elements.sessionStatus.textContent = "-";
     elements.messages.innerHTML = `<div class="empty-state">请选择或创建一个会话。</div>`;
     return;
   }
 
+  const detail = state.currentSession;
   elements.sessionTitle.textContent = detail.meta.title;
+  elements.sessionSubtitle.textContent = "当前页面只显示当前登录用户自己的会话。";
   elements.sessionStatus.textContent = detail.meta.status;
 
   if (!detail.messages.length) {
@@ -154,12 +209,12 @@ function renderCurrentSession() {
   elements.messages.innerHTML = detail.messages
     .map(
       (message) => `
-        <article class="message ${message.role}">
+        <article class="message ${message.role} ${message.pending ? "pending" : ""}">
           <div class="message-meta">
-            <span>${message.role === "assistant" ? "助手" : "用户"}</span>
+            <span>${message.pending && message.role === "assistant" ? "助手思考中" : message.role === "assistant" ? "助手" : "用户"}</span>
             <span>${formatTime(message.created_at)}</span>
           </div>
-          <div>${escapeHtml(message.content).replaceAll("\n", "<br />")}</div>
+          <div class="message-content ${message.typing ? "typing" : ""}">${messageToHtml(message.content)}</div>
         </article>
       `,
     )
@@ -169,31 +224,126 @@ function renderCurrentSession() {
 }
 
 function setComposerState() {
-  const disabled = !state.currentSessionId || state.sending;
-  elements.messageInput.disabled = disabled;
-  elements.sendButton.disabled = disabled;
-  elements.archiveButton.disabled = !state.currentSessionId;
-  elements.restoreButton.disabled = !state.currentSessionId;
-  elements.deleteButton.disabled = !state.currentSessionId;
+  const noSession = !state.currentSessionId;
+  const disableActions = noSession || state.bootstrapping;
+
+  elements.messageInput.disabled = disableActions;
+  elements.sendButton.disabled = disableActions || state.sending;
+  elements.sendButton.textContent = state.sending ? "发送中..." : "发送";
+  elements.newSessionButton.disabled = state.bootstrapping || !state.auth;
+  elements.deleteButton.disabled = noSession || state.bootstrapping;
 }
 
-function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+function upsertSessionItem(meta, preview) {
+  const nextItem = {
+    session_id: meta.session_id,
+    title: meta.title,
+    status: meta.status,
+    updated_at: meta.updated_at,
+    last_message_at: meta.last_message_at,
+    preview: truncatePreview(preview),
+  };
+
+  const index = state.sessions.findIndex((item) => item.session_id === meta.session_id);
+  if (index === -1) {
+    state.sessions = sortSessions([nextItem, ...state.sessions]);
+  } else {
+    const nextSessions = [...state.sessions];
+    nextSessions[index] = nextItem;
+    state.sessions = sortSessions(nextSessions);
+  }
 }
 
-function findSessionTitle(sessionId) {
-  const matched = state.sessions.find((item) => item.session_id === sessionId);
-  return matched?.title || sessionId;
+function removeSessionItem(sessionId) {
+  state.sessions = state.sessions.filter((item) => item.session_id !== sessionId);
 }
 
-async function refreshSessions() {
+function appendOptimisticMessages(content) {
+  if (!state.currentSession) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const optimisticUser = {
+    message_id: buildLocalId("msg-user"),
+    role: "user",
+    content,
+    created_at: now,
+    pending: true,
+  };
+  const optimisticAssistant = {
+    message_id: buildLocalId("msg-assistant"),
+    role: "assistant",
+    content: "助手正在思考...",
+    created_at: now,
+    pending: true,
+    typing: true,
+  };
+
+  state.currentSession = {
+    ...state.currentSession,
+    meta: {
+      ...state.currentSession.meta,
+      updated_at: now,
+      last_message_at: now,
+    },
+    messages: [...state.currentSession.messages, optimisticUser, optimisticAssistant],
+  };
+
+  upsertSessionItem(state.currentSession.meta, content);
+  renderSessions();
+  renderCurrentSession();
+
+  return {
+    optimisticUserId: optimisticUser.message_id,
+    optimisticAssistantId: optimisticAssistant.message_id,
+  };
+}
+
+function applyMessageResponse(payload, optimisticRefs) {
+  if (!state.currentSession) {
+    return;
+  }
+
+  const nextMessages = [];
+  let replacedUser = false;
+  let replacedAssistant = false;
+
+  for (const message of state.currentSession.messages) {
+    if (message.message_id === optimisticRefs.optimisticUserId) {
+      nextMessages.push(payload.user_message);
+      replacedUser = true;
+      continue;
+    }
+    if (message.message_id === optimisticRefs.optimisticAssistantId) {
+      nextMessages.push(payload.assistant_message);
+      replacedAssistant = true;
+      continue;
+    }
+    nextMessages.push(message);
+  }
+
+  if (!replacedUser) {
+    nextMessages.push(payload.user_message);
+  }
+  if (!replacedAssistant) {
+    nextMessages.push(payload.assistant_message);
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    meta: payload.session,
+    messages: nextMessages,
+  };
+
+  upsertSessionItem(payload.session, payload.assistant_message.content);
+  renderSessions();
+  renderCurrentSession();
+}
+
+async function fetchSessions() {
   const payload = await api("/api/v1/sessions");
-  state.sessions = payload.items || [];
+  state.sessions = sortSessions(payload.items || []);
   renderSessions();
 }
 
@@ -211,60 +361,105 @@ async function createSession() {
     method: "POST",
     body: JSON.stringify({ title: null }),
   });
-  await refreshSessions();
+  await fetchSessions();
   await loadSession(payload.session.meta.session_id);
 }
 
-async function ensureInitialSession() {
-  await refreshSessions();
-  if (!state.sessions.length) {
-    await createSession();
-    return;
+async function initializeAfterLogin() {
+  state.bootstrapping = true;
+  setComposerState();
+  clearFlash();
+
+  try {
+    await fetchSessions();
+    if (state.sessions.length) {
+      await loadSession(state.sessions[0].session_id);
+    } else {
+      await createSession();
+    }
+  } finally {
+    state.bootstrapping = false;
+    setComposerState();
   }
-  await loadSession(state.sessions[0].session_id);
 }
 
-async function handleAction(action, sessionId) {
+async function reconcileCurrentSession() {
+  await fetchSessions();
+  if (!state.currentSessionId) {
+    renderCurrentSession();
+    return;
+  }
+
+  const stillExists = state.sessions.some((item) => item.session_id === state.currentSessionId);
+  if (!stillExists) {
+    state.currentSessionId = null;
+    state.currentSession = null;
+    renderCurrentSession();
+    return;
+  }
+
+  await loadSession(state.currentSessionId);
+}
+
+function switchUser() {
+  clearAuth();
+  state.auth = null;
+  state.sessions = [];
+  state.currentSessionId = null;
+  state.currentSession = null;
+  state.sending = false;
+  state.bootstrapping = false;
+  renderIdentity();
+  renderSessions();
+  renderCurrentSession();
+  setComposerState();
+  clearFlash();
+  openLoginModal();
+}
+
+async function handleDelete(sessionId) {
+  const target = state.sessions.find((item) => item.session_id === sessionId);
+  const title = target?.title || sessionId;
+  const confirmed = window.confirm(`确认删除会话“${title}”吗？删除后不可恢复。`);
+  if (!confirmed) {
+    return;
+  }
+
+  await api(`/api/v1/sessions/${sessionId}`, { method: "DELETE" });
+  removeSessionItem(sessionId);
+
+  if (state.currentSessionId === sessionId) {
+    state.currentSessionId = null;
+    state.currentSession = null;
+    if (state.sessions.length) {
+      await loadSession(state.sessions[0].session_id);
+    } else {
+      renderSessions();
+      renderCurrentSession();
+      setComposerState();
+    }
+    return;
+  }
+
+  renderSessions();
+}
+
+async function handleSessionAction(action, sessionId) {
+  clearFlash();
+
   if (action === "open") {
     await loadSession(sessionId);
     return;
   }
 
-  if (action === "archive") {
-    await api(`/api/v1/sessions/${sessionId}/archive`, { method: "POST" });
-  }
-
-  if (action === "restore") {
-    await api(`/api/v1/sessions/${sessionId}/restore`, { method: "POST" });
-  }
-
   if (action === "delete") {
-    const confirmed = window.confirm(
-      `确认删除会话“${findSessionTitle(sessionId)}”吗？删除后将直接移除本地 Session 目录，且无法恢复。`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    await api(`/api/v1/sessions/${sessionId}`, { method: "DELETE" });
-  }
-
-  await refreshSessions();
-
-  if (action === "delete" && sessionId === state.currentSessionId) {
-    if (state.sessions.length) {
-      await loadSession(state.sessions[0].session_id);
-    } else {
-      state.currentSessionId = null;
-      state.currentSession = null;
-      renderCurrentSession();
-    }
-  } else if (state.currentSessionId) {
-    await loadSession(state.currentSessionId);
+    await handleDelete(sessionId);
   }
 }
 
 async function sendMessage(event) {
   event.preventDefault();
+
   if (!state.currentSessionId || state.sending) {
     return;
   }
@@ -274,6 +469,8 @@ async function sendMessage(event) {
     return;
   }
 
+  const optimisticRefs = appendOptimisticMessages(content);
+  elements.messageInput.value = "";
   state.sending = true;
   setComposerState();
   clearFlash();
@@ -283,82 +480,65 @@ async function sendMessage(event) {
       method: "POST",
       body: JSON.stringify({ content }),
     });
-    elements.messageInput.value = "";
+
     if (payload.warning === "mock-server-disabled") {
-      showFlash("命中了 DBAAS 相关问题，当前阶段已明确提示 mock-server 后台尚未启用。");
+      showFlash("这是 DBAAS 相关请求，当前阶段后台尚未启用 mock-server 调用能力。");
     }
-    await refreshSessions();
-    await loadSession(payload.session.session_id);
+
+    if (optimisticRefs) {
+      applyMessageResponse(payload, optimisticRefs);
+    } else {
+      await reconcileCurrentSession();
+    }
   } catch (error) {
-    showFlash(error.message, "error");
+    if (!elements.messageInput.value.trim()) {
+      elements.messageInput.value = content;
+    }
+    await reconcileCurrentSession();
+    showFlash(error.message || "发送失败", "error");
   } finally {
     state.sending = false;
     setComposerState();
   }
 }
 
-async function bootstrapApp() {
+async function bootstrap() {
   state.auth = loadAuth();
-  renderIdentity();
-  setComposerState();
-
-  if (!state.auth) {
-    elements.loginModal.classList.remove("hidden");
-    return;
-  }
-
-  elements.loginModal.classList.add("hidden");
-  await ensureInitialSession();
-}
-
-function switchUser() {
-  window.localStorage.removeItem("dbass-auth");
-  state.auth = null;
-  state.sessions = [];
-  state.currentSessionId = null;
-  state.currentSession = null;
   renderIdentity();
   renderSessions();
   renderCurrentSession();
   setComposerState();
-  elements.loginModal.classList.remove("hidden");
+
+  if (!state.auth) {
+    openLoginModal();
+    return;
+  }
+
+  closeLoginModal();
+  await initializeAfterLogin();
 }
 
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
   const userId = elements.loginUserId.value.trim();
   const role = elements.loginRole.value;
   if (!userId) {
     return;
   }
+
   state.auth = {
     user_id: userId,
     role,
     user: role === "user" ? userId : "",
   };
+
   saveAuth(state.auth);
+  closeLoginModal();
   renderIdentity();
-  elements.loginModal.classList.add("hidden");
-  clearFlash();
-  await ensureInitialSession();
-});
-
-elements.newSessionButton.addEventListener("click", async () => {
-  clearFlash();
-  await createSession();
-});
-
-elements.sessionList.addEventListener("click", async (event) => {
-  const target = event.target.closest("button[data-action]");
-  const article = event.target.closest("[data-session-id]");
-  if (target) {
-    event.stopPropagation();
-    await handleAction(target.dataset.action, target.dataset.sessionId);
-    return;
-  }
-  if (article) {
-    await loadSession(article.dataset.sessionId);
-  }
+  renderSessions();
+  renderCurrentSession();
+  await initializeAfterLogin();
 });
 
 elements.identityCard.addEventListener("click", (event) => {
@@ -369,26 +549,36 @@ elements.identityCard.addEventListener("click", (event) => {
   switchUser();
 });
 
-elements.archiveButton.addEventListener("click", async () => {
-  if (state.currentSessionId) {
-    await handleAction("archive", state.currentSessionId);
-  }
+elements.newSessionButton.addEventListener("click", async () => {
+  clearFlash();
+  await createSession();
 });
 
-elements.restoreButton.addEventListener("click", async () => {
-  if (state.currentSessionId) {
-    await handleAction("restore", state.currentSessionId);
+elements.sessionList.addEventListener("click", async (event) => {
+  const actionButton = event.target.closest("button[data-action]");
+  if (actionButton) {
+    event.stopPropagation();
+    await handleSessionAction(actionButton.dataset.action, actionButton.dataset.sessionId);
+    return;
   }
+
+  const article = event.target.closest("[data-session-id]");
+  if (!article) {
+    return;
+  }
+  await handleSessionAction("open", article.dataset.sessionId);
 });
 
 elements.deleteButton.addEventListener("click", async () => {
-  if (state.currentSessionId) {
-    await handleAction("delete", state.currentSessionId);
+  if (!state.currentSessionId) {
+    return;
   }
+  await handleDelete(state.currentSessionId);
 });
 
 elements.composer.addEventListener("submit", sendMessage);
 
-bootstrapApp().catch((error) => {
+bootstrap().catch((error) => {
   showFlash(error.message || "初始化失败", "error");
+  openLoginModal();
 });

@@ -8,7 +8,6 @@ from dbass_ai_agent.sessions.models import (
     SessionDetail,
     SessionIndexItem,
     SessionMeta,
-    SessionMessageResult,
 )
 
 

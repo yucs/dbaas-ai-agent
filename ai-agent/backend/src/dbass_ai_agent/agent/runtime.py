@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from dbass_ai_agent.identity.models import Identity
+from dbass_ai_agent.config import Settings
 from dbass_ai_agent.infra.ids import new_run_id
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta
 
-from .dbaas_guard import build_not_supported_message, looks_like_dbaas_question
+from .dbaas_guard import build_not_supported_message, classify_dbaas_request
+from .factory import RuntimeArtifacts, build_runtime_artifacts
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,58 +19,90 @@ class AgentReply:
     warning: str | None = None
 
 
-class DemoAgentRuntime:
+class AgentInvocationError(RuntimeError):
+    """Raised when invoking the DeepAgent runtime fails."""
+
+
+class DeepAgentRuntime:
+    def __init__(self, settings: Settings) -> None:
+        self.artifacts: RuntimeArtifacts = build_runtime_artifacts(settings)
+
     def generate_reply(
         self,
         *,
-        identity: Identity,
         session: SessionMeta,
         user_message: ChatMessage,
-        history: list[ChatMessage],
     ) -> AgentReply:
         question = user_message.content.strip()
+        classification = classify_dbaas_request(question)
 
-        if looks_like_dbaas_question(question):
+        if classification == "dbaas_realtime":
             return AgentReply(
                 run_id=new_run_id(),
                 content=build_not_supported_message(),
-                mode="demo",
+                mode="deepagent",
                 warning="mock-server-disabled",
             )
 
-        reply = self._reply_for_general_question(identity, session, question, history)
-        return AgentReply(run_id=new_run_id(), content=reply, mode="demo")
+        try:
+            reply = self._invoke_agent(session.thread_id, question)
+        except Exception as exc:  # pragma: no cover - provider/network/runtime specific
+            raise AgentInvocationError("调用真实 DeepAgent 运行时失败。") from exc
 
-    def _reply_for_general_question(
-        self,
-        identity: Identity,
-        session: SessionMeta,
-        question: str,
-        history: list[ChatMessage],
-    ) -> str:
-        normalized = question.lower()
-
-        if any(keyword in normalized for keyword in {"你是谁", "who are you", "介绍一下你"}):
-            return (
-                "我是 dbaas 智能助手的第一阶段演示版，当前重点是多用户、多 session 和继续问答能力。"
-                "现在普通问题可以直接回答，DBAAS 后台调用后续再接入。"
-            )
-
-        if "mysql" in normalized:
-            return (
-                "MySQL 是一种常见的开源关系型数据库管理系统，支持结构化数据存储、事务处理、索引查询和主从复制等能力。"
-                "它常用于业务系统、网站和中后台服务。"
-            )
-
-        if any(keyword in normalized for keyword in {"session", "会话"}):
-            return (
-                f"当前你在会话 `{session.session_id}` 中继续提问，后端会复用同一个 `thread_id`，"
-                "并把消息记录到当前用户目录下的本地 session 文件里。"
-            )
-
-        turns = len([message for message in history if message.role == "user"])
-        return (
-            "当前后端已经接好多用户、多 session 和本地会话存储，"
-            f"现在处于 demo 问答模式。你是 `{identity.user_id}`，当前会话已经记录了 {turns} 轮用户发言。"
-            f"关于“{question}”，下一阶段接入真实 DeepAgent 模型后可以给出更完整的回答。"
+        return AgentReply(
+            run_id=new_run_id(),
+            content=reply,
+            mode="deepagent",
         )
+
+    async def aclose(self) -> None:
+        self.artifacts.http_client.close()
+        await self.artifacts.http_async_client.aclose()
+        self.artifacts.connection.close()
+
+    def _invoke_agent(self, thread_id: str, prompt: str) -> str:
+        result = self.artifacts.agent.invoke(
+            {"messages": [{"role": "user", "content": prompt}]},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+        return self._extract_text(result)
+
+    def _extract_text(self, result: Any) -> str:
+        messages = result.get("messages", [])
+        if not messages:
+            return "当前模型没有返回可展示的消息。"
+
+        last_message = messages[-1]
+        content = getattr(last_message, "content", "")
+        return self._content_to_text(content)
+
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                        continue
+                    nested_text = item.get("content")
+                    if isinstance(nested_text, str):
+                        parts.append(nested_text)
+                        continue
+                    if item.get("type") == "text" and isinstance(item.get("value"), str):
+                        parts.append(item["value"])
+                        continue
+                else:
+                    text = getattr(item, "text", None)
+                    if isinstance(text, str):
+                        parts.append(text)
+            merged = "\n".join(part.strip() for part in parts if part and part.strip())
+            if merged:
+                return merged
+        return str(content)

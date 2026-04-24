@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -41,10 +41,6 @@ class SessionIndexItem(BaseModel):
     preview: str = ""
 
 
-class SessionSummary(BaseModel):
-    summary: str = ""
-
-
 class ApprovalRecord(BaseModel):
     approval_id: str
     status: Literal["pending", "approved", "rejected"] = "pending"
@@ -55,15 +51,4 @@ class ApprovalRecord(BaseModel):
 class SessionDetail(BaseModel):
     meta: SessionMeta
     messages: list[ChatMessage] = Field(default_factory=list)
-    summary: SessionSummary = Field(default_factory=SessionSummary)
     approvals: list[ApprovalRecord] = Field(default_factory=list)
-
-
-class SessionMessageResult(BaseModel):
-    session: SessionMeta
-    user_message: ChatMessage
-    assistant_message: ChatMessage
-    run_id: str
-    mode: Literal["demo", "deepagent"]
-    warning: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)

@@ -6,9 +6,9 @@ from fastapi import HTTPException, status
 
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.clock import utc_now
-from dbass_ai_agent.infra.ids import new_message_id, new_session_id
+from dbass_ai_agent.infra.ids import new_message_id, new_session_thread_ids
 
-from .models import ChatMessage, SessionDetail, SessionIndexItem, SessionMeta, SessionSummary
+from .models import ChatMessage, SessionDetail, SessionIndexItem, SessionMeta
 from .repository import SessionRepository
 from .thread_binding import ThreadBinding
 
@@ -30,11 +30,11 @@ class SessionService:
         identity: Identity,
         *,
         title: str | None,
-        thread_id: str,
     ) -> SessionDetail:
         now = utc_now()
+        session_id, thread_id = new_session_thread_ids(identity.user_id)
         meta = SessionMeta(
-            session_id=new_session_id(),
+            session_id=session_id,
             user_id=identity.user_id,
             role=identity.role,
             user=identity.user,
@@ -45,7 +45,6 @@ class SessionService:
             updated_at=now,
         )
         self.repository.save_meta(meta)
-        self.repository.save_summary(meta.user_id, meta.session_id, SessionSummary())
         self.repository.upsert_index_item(
             meta.user_id,
             SessionIndexItem(

@@ -10,7 +10,7 @@
 这意味着：
 
 - 页面发送消息时，需要复用当前 Session 对应的 `thread_id`
-- 执行过程通过 SSE 持续返回
+- 当前主链路先使用普通请求/响应返回
 - 命中人工确认时，需要暂停运行并在确认后恢复同一个 thread
 
 本阶段重点覆盖：
@@ -19,7 +19,7 @@
 - 登录后加载用户历史 Session 列表
 - 打开指定 Session 到当前窗口
 - Session 下继续发送消息
-- 通过 SSE 返回运行过程
+- 预留后续 SSE 扩展路径
 - 支持审批查询与审批决策
 
 ## 1.1 能力边界
@@ -170,16 +170,18 @@ data/users/<user_id>/sessions/index.json
 #### 返回示例
 
 ```json
-[
-  {
-    "session_id": "sess_001",
-    "title": "排查 mysql-xf2",
-    "status": "active",
-    "updated_at": "2026-04-22T12:10:00Z",
-    "last_message_at": "2026-04-22T12:10:00Z",
-    "preview": "已查询 mysql-xf2，健康状态为 DEGRADED"
-  }
-]
+{
+  "items": [
+    {
+      "session_id": "sess_001",
+      "title": "排查 mysql-xf2",
+      "status": "active",
+      "updated_at": "2026-04-22T12:10:00Z",
+      "last_message_at": "2026-04-22T12:10:00Z",
+      "preview": "已查询 mysql-xf2，健康状态为 DEGRADED"
+    }
+  ]
+}
 ```
 
 ### 4.2 创建新 Session
@@ -202,18 +204,24 @@ POST /api/v1/sessions
 - 创建 Session 目录
 - 初始化 `meta.json`
 - 初始化 `messages.jsonl`
-- 初始化 `summary.json`
+- 初始化 `approvals.jsonl`
 - 更新当前用户的 `index.json`
 
 #### 返回示例
 
 ```json
 {
-  "session_id": "sess_003",
-  "title": "新建会话",
-  "status": "active",
-  "thread_id": "thread_003",
-  "created_at": "2026-04-22T12:20:00Z"
+  "session": {
+    "meta": {
+      "session_id": "sess_003",
+      "title": "新建会话",
+      "status": "active",
+      "thread_id": "thread_003",
+      "created_at": "2026-04-22T12:20:00Z"
+    },
+    "messages": [],
+    "approvals": []
+  }
 }
 ```
 
@@ -232,34 +240,34 @@ GET /api/v1/sessions/{session_id}
 - 校验该 `session_id` 属于当前 `user_id`
 - 读取 `meta.json`
 - 读取 `messages.jsonl`
-- 按需读取 `summary.json`
+- 读取 `approvals.jsonl`
 
 #### 返回示例
 
 ```json
 {
-  "meta": {
-    "session_id": "sess_001",
-    "user_id": "user_001",
-    "role": "user",
-    "user": "user_001",
-    "thread_id": "thread_001",
-    "title": "排查 mysql-xf2 状态",
-    "status": "active",
-    "created_at": "2026-04-22T12:00:00Z",
-    "updated_at": "2026-04-22T12:10:00Z"
-  },
-  "summary": {
-    "current_goal": "查看 mysql-xf2 状态"
-  },
-  "messages": [
-    {
-      "id": "msg_001",
+  "session": {
+    "meta": {
+      "session_id": "sess_001",
+      "user_id": "user_001",
       "role": "user",
-      "content": "查看 mysql-xf2 状态",
-      "created_at": "2026-04-22T12:00:01Z"
-    }
-  ]
+      "user": "user_001",
+      "thread_id": "thread_001",
+      "title": "排查 mysql-xf2 状态",
+      "status": "active",
+      "created_at": "2026-04-22T12:00:00Z",
+      "updated_at": "2026-04-22T12:10:00Z"
+    },
+    "approvals": [],
+    "messages": [
+      {
+        "message_id": "msg_001",
+        "role": "user",
+        "content": "查看 mysql-xf2 状态",
+        "created_at": "2026-04-22T12:00:01Z"
+      }
+    ]
+  }
 }
 ```
 
@@ -306,6 +314,7 @@ DELETE /api/v1/sessions/{session_id}
 
 - 从 `data/users/<user_id>/sessions/index.json` 中移除
 - 删除 `data/users/<user_id>/sessions/<session_id>/` 目录
+- 同步删除该 Session 绑定的 `thread_id` 对应 DeepAgent checkpoint 数据
 - 默认不再出现在正常历史列表中
 
 #### 说明
@@ -336,19 +345,36 @@ POST /api/v1/sessions/{session_id}/messages
 
 - 如果当前 Session 状态为 `archived`，先自动恢复为 `active`
 - 将用户消息追加到 `messages.jsonl`
-- 为本次对话生成新的 `run_id`
 - 复用当前 Session 对应的 `thread_id`
-- 启动 Agent 执行
-- 返回 `run_id` 和 SSE 地址
+- 调用 DeepAgent 执行
+- 将 assistant 消息写回 `messages.jsonl`
+- 返回本轮消息结果与 `run_id`
 
 #### 返回示例
 
 ```json
 {
-  "session_id": "sess_001",
-  "message_id": "msg_010",
+  "session": {
+    "session_id": "sess_001",
+    "thread_id": "thread_001",
+    "title": "排查 mysql-xf2 状态",
+    "status": "active"
+  },
+  "user_message": {
+    "message_id": "msg_010",
+    "role": "user",
+    "content": "查看 mysql-xf2 当前状态",
+    "created_at": "2026-04-22T12:10:01Z"
+  },
+  "assistant_message": {
+    "message_id": "msg_011",
+    "role": "assistant",
+    "content": "当前阶段还未接通 DBAAS 实时查询能力。",
+    "created_at": "2026-04-22T12:10:02Z"
+  },
   "run_id": "run_010",
-  "stream_url": "/api/v1/sessions/sess_001/runs/run_010/events"
+  "mode": "deepagent",
+  "warning": "mock-server-disabled"
 }
 ```
 
@@ -506,9 +532,8 @@ GET /api/v1/sessions/{session_id}
 页面建议按以下顺序执行：
 
 1. `POST /api/v1/sessions/{session_id}/messages`
-2. 拿到 `run_id`
-3. `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
-4. 将 SSE 事件逐步渲染到当前窗口
+2. 直接使用响应中的 `assistant_message` 更新当前窗口
+3. 如后续接入 SSE，再订阅 `runs/{run_id}/events`
 
 ### 7.4 用户归档或删除 Session
 
@@ -534,7 +559,7 @@ GET /sessions
 GET /sessions/{session_id}
 -> data/users/<user_id>/sessions/<session_id>/meta.json
 -> data/users/<user_id>/sessions/<session_id>/messages.jsonl
--> data/users/<user_id>/sessions/<session_id>/summary.json
+-> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
 ### 8.3 审批
