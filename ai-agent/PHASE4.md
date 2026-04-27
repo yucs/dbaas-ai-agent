@@ -85,9 +85,6 @@ POST /api/v1/sessions/{session_id}/messages
 - `keep`
 - `trigger`
 - `summary_chars`
-- `history_path`
-
-其中 `history_path` 只是调试观测信息，不作为产品层读取契约。
 
 ## 5. 为什么压缩提醒不写进消息历史
 

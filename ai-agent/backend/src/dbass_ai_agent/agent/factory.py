@@ -51,6 +51,14 @@ def _build_logged_summarization_middleware_class() -> type[Any]:
         """App-specific wrapper that emits an info log when compression occurs."""
 
         def _before_summarize(self, messages_to_summarize: list[Any]) -> None:
+            logger.info(
+                "会话上下文开始压缩 thread_id=%s summarized_messages=%d keep=%s "
+                "trigger=%s",
+                self._get_thread_id(),
+                len(messages_to_summarize),
+                self._lc_helper.keep,
+                self._lc_helper.trigger,
+            )
             publish_compression_notice(
                 CompressionNotice(
                     phase="started",
@@ -58,24 +66,26 @@ def _build_logged_summarization_middleware_class() -> type[Any]:
                     summarized_messages=len(messages_to_summarize),
                     keep=str(self._lc_helper.keep),
                     trigger=str(self._lc_helper.trigger),
-                    history_path=self._get_history_path(),
                 )
             )
 
         def _on_summary(self, messages_to_summarize: list[Any], summary: str) -> None:
             thread_id = self._get_thread_id()
-            history_path = self._get_history_path()
             summarized_messages = len(messages_to_summarize)
             summary_chars = len(summary)
             logger.info(
                 "会话上下文已压缩 thread_id=%s summarized_messages=%d keep=%s "
-                "trigger=%s history_path=%s summary_chars=%d",
+                "trigger=%s summary_chars=%d",
                 thread_id,
                 summarized_messages,
                 self._lc_helper.keep,
                 self._lc_helper.trigger,
-                history_path,
                 summary_chars,
+            )
+            logger.info(
+                "会话上下文压缩摘要 thread_id=%s summary=%s",
+                thread_id,
+                summary,
             )
             publish_compression_notice(
                 CompressionNotice(
@@ -84,7 +94,6 @@ def _build_logged_summarization_middleware_class() -> type[Any]:
                     summarized_messages=summarized_messages,
                     keep=str(self._lc_helper.keep),
                     trigger=str(self._lc_helper.trigger),
-                    history_path=history_path,
                     summary_chars=summary_chars,
                 )
             )

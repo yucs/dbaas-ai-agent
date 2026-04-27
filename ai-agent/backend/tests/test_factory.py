@@ -210,7 +210,7 @@ class SummarizationFactoryTests(unittest.TestCase):
 
         self.assertNotIsInstance(middleware, SummarizationMiddleware)
 
-    def test_logged_summarization_middleware_emits_info_log(self) -> None:
+    def test_logged_summarization_middleware_emits_info_logs(self) -> None:
         LoggedSummarizationMiddleware = _build_logged_summarization_middleware_class()
         summary_model = FakeListChatModel(
             responses=["压缩摘要"],
@@ -234,11 +234,23 @@ class SummarizationFactoryTests(unittest.TestCase):
 
         self.assertEqual(summary, "压缩摘要")
         self.assertTrue(
+            any("会话上下文开始压缩" in line for line in captured.output),
+            captured.output,
+        )
+        self.assertTrue(
             any("会话上下文已压缩" in line for line in captured.output),
             captured.output,
         )
         self.assertTrue(
+            any("会话上下文压缩摘要" in line for line in captured.output),
+            captured.output,
+        )
+        self.assertTrue(
             any("summarized_messages=2" in line for line in captured.output),
+            captured.output,
+        )
+        self.assertTrue(
+            any("summary=压缩摘要" in line for line in captured.output),
             captured.output,
         )
 

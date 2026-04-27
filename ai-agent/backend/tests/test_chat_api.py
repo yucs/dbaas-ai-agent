@@ -54,7 +54,6 @@ class StubAgentRuntime:
                 "summarized_messages": 3,
                 "keep": "('messages', 2)",
                 "trigger": "('tokens', 10)",
-                "history_path": "/conversation_history/thread.md",
                 "summary_chars": None,
             },
         )
@@ -69,7 +68,6 @@ class StubAgentRuntime:
                 "summarized_messages": 3,
                 "keep": "('messages', 2)",
                 "trigger": "('tokens', 10)",
-                "history_path": "/conversation_history/thread.md",
                 "summary_chars": 42,
             },
         )

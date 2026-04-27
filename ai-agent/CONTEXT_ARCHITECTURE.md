@@ -187,13 +187,12 @@ Session 目录当前仍然只保留：
 - 本次被压缩的消息数量
 - 当前 `keep`
 - 当前 `trigger`
-- middleware 内部使用的 history path
 - 摘要字符数
 
 日志大致形态：
 
 ```text
-会话上下文已压缩 thread_id=... summarized_messages=... keep=('messages', 6) trigger=('tokens', 98304) history_path=... summary_chars=...
+会话上下文已压缩 thread_id=... summarized_messages=... keep=('messages', 6) trigger=('tokens', 98304) summary_chars=...
 ```
 
 如果当前消息请求走的是 SSE 流式接口，还会额外发送：

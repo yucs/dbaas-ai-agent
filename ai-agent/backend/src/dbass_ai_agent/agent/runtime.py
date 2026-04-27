@@ -279,7 +279,6 @@ class DeepAgentRuntime:
                     "summarized_messages": notice.summarized_messages,
                     "keep": notice.keep,
                     "trigger": notice.trigger,
-                    "history_path": notice.history_path,
                     "summary_chars": notice.summary_chars,
                 },
             )

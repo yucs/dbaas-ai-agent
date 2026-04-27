@@ -44,6 +44,7 @@ class Settings:
     log_backup_count: int = 10
     log_enable_console: bool = True
     log_request_body: bool = False
+    real_llm_tests_enabled: bool = False
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -55,6 +56,7 @@ class Settings:
         model = _get_table(config, "model")
         compression = _get_table(config, "compression")
         logging_config = _get_table(config, "logging")
+        tests = _get_table(config, "tests")
         base_dir = config_path.parent
 
         runtime_root = _resolve_path(
@@ -112,6 +114,7 @@ class Settings:
             log_backup_count=_get_int(logging_config, "backup_count", 10),
             log_enable_console=_get_bool(logging_config, "enable_console", True),
             log_request_body=_get_bool(logging_config, "log_request_body", False),
+            real_llm_tests_enabled=_get_bool(tests, "real_llm_enabled", False),
         )
 
 

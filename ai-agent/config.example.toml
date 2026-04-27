@@ -67,3 +67,7 @@ backup_count = 10
 enable_console = false
 # 是否记录请求 body。默认关闭，避免写入敏感内容或完整 prompt。
 log_request_body = false
+
+[tests]
+# 是否允许测试真实调用大模型。默认关闭，避免普通测试误消耗额度或依赖外部网络。
+real_llm_enabled = false

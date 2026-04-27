@@ -83,9 +83,9 @@ class SummarizationMiddlewareTests(unittest.TestCase):
                 "summarization",
             )
 
-            history_path = Path(tmpdir) / "conversation_history" / f"{thread_id}.md"
-            self.assertTrue(history_path.exists())
-            history = history_path.read_text(encoding="utf-8")
+            history_file = Path(tmpdir) / "conversation_history" / f"{thread_id}.md"
+            self.assertTrue(history_file.exists())
+            history = history_file.read_text(encoding="utf-8")
             self.assertIn("Human: 第一轮问题", history)
             self.assertIn("AI: 第一轮正常回复", history)
 

@@ -14,7 +14,6 @@ class CompressionNotice:
     summarized_messages: int
     keep: str
     trigger: str
-    history_path: str | None
     summary_chars: int | None = None
 
 

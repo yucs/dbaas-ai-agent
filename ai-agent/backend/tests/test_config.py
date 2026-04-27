@@ -60,6 +60,9 @@ class SettingsFromFileTests(unittest.TestCase):
                     backup_count = 3
                     enable_console = false
                     log_request_body = true
+
+                    [tests]
+                    real_llm_enabled = true
                     """
                 ).strip(),
                 encoding="utf-8",
@@ -85,6 +88,7 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.log_backup_count, 3)
             self.assertFalse(settings.log_enable_console)
             self.assertTrue(settings.log_request_body)
+            self.assertTrue(settings.real_llm_tests_enabled)
 
             self.assertEqual(settings.data_root, (config_root / "var/users").resolve())
             self.assertEqual(settings.frontend_root, (config_root / "ui").resolve())
