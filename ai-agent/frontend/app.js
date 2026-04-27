@@ -280,7 +280,7 @@ function renderCurrentSession() {
       (message) => `
         <article class="message ${message.role} ${message.pending ? "pending" : ""} ${message.error ? "error" : ""}">
           <div class="message-meta">
-            <span>${message.error ? "发送失败" : message.pending && message.role === "assistant" ? "助手思考中" : message.role === "assistant" ? "助手" : "用户"}</span>
+            <span>${getMessageAuthorLabel(message)}</span>
             <span>${formatTime(message.created_at)}</span>
           </div>
           <div class="message-content ${message.typing ? "typing" : ""}">${messageToHtml(message.content)}</div>
@@ -290,6 +290,22 @@ function renderCurrentSession() {
     .join("");
 
   elements.messages.scrollTop = elements.messages.scrollHeight;
+}
+
+function getMessageAuthorLabel(message) {
+  if (message.error) {
+    return "发送失败";
+  }
+  if (message.role === "ai-agent") {
+    return "AI Agent";
+  }
+  if (message.pending && message.role === "assistant") {
+    return "助手思考中";
+  }
+  if (message.role === "assistant") {
+    return "助手";
+  }
+  return "用户";
 }
 
 function setComposerState() {
@@ -482,6 +498,34 @@ function applyStreamError(message, optimisticRefs, sessionId) {
   return updated;
 }
 
+function applyStreamAiAgentMessage(message, optimisticRefs, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId || !message) {
+    return false;
+  }
+
+  let replaced = false;
+  const nextMessages = state.currentSession.messages.map((item) => {
+    if (optimisticRefs && item.message_id === optimisticRefs.optimisticAssistantId) {
+      replaced = true;
+      return message;
+    }
+    return item;
+  });
+
+  if (!replaced && !nextMessages.some((item) => item.message_id === message.message_id)) {
+    nextMessages.push(message);
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    messages: nextMessages,
+  };
+  upsertSessionItem(state.currentSession.meta, message.content);
+  renderSessions();
+  renderCurrentSession();
+  return true;
+}
+
 async function streamMessageResponse(sessionId, content, optimisticRefs) {
   const response = await fetch(`/api/v1/sessions/${sessionId}/messages/stream`, {
     method: "POST",
@@ -518,6 +562,12 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
     if (eventName === "error") {
       const message = payload.detail || "流式响应失败";
       const stage = payload.stage ? ` (${payload.stage})` : "";
+      if (payload.ai_agent_message) {
+        completed = true;
+        applyStreamAiAgentMessage(payload.ai_agent_message, optimisticRefs, sessionId);
+        showFlash(`${message}${stage}`, "error");
+        return;
+      }
       const error = new Error(`${message}${stage}`);
       error.streamError = true;
       throw error;

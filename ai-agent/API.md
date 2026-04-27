@@ -203,7 +203,7 @@ POST /api/v1/sessions
 - 生成新的 `session_id`
 - 创建 Session 目录
 - 初始化 `meta.json`
-- 初始化 `messages.jsonl`
+- 初始化 `messages.json`
 - 初始化 `approvals.jsonl`
 - 更新当前用户的 `index.json`
 
@@ -239,7 +239,7 @@ GET /api/v1/sessions/{session_id}
 
 - 校验该 `session_id` 属于当前 `user_id`
 - 读取 `meta.json`
-- 读取 `messages.jsonl`
+- 读取 `messages.json`
 - 读取 `approvals.jsonl`
 
 #### 返回示例
@@ -344,10 +344,10 @@ POST /api/v1/sessions/{session_id}/messages
 #### 行为
 
 - 如果当前 Session 状态为 `archived`，先自动恢复为 `active`
-- 将用户消息追加到 `messages.jsonl`
+- 将用户消息追加到 `messages.json`
 - 复用当前 Session 对应的 `thread_id`
 - 调用 DeepAgent 执行
-- 将 assistant 消息写回 `messages.jsonl`
+- 将 assistant 消息写回 `messages.json`
 - 返回本轮消息结果与 `run_id`
 
 #### 返回示例
@@ -400,7 +400,7 @@ Accept: text/event-stream
 #### 当前事件类型
 
 - `user_message`
-  - 用户消息已经写入 `messages.jsonl`
+  - 用户消息已经写入 `messages.json`
 - `started`
   - 本轮运行开始
 - `token`
@@ -410,7 +410,7 @@ Accept: text/event-stream
 - `compression_completed`
   - 当前运行的上下文压缩已经完成
 - `done`
-  - assistant 消息已经写入 `messages.jsonl`
+  - assistant 消息已经写入 `messages.json`
 - `error`
   - 当前运行失败
 
@@ -442,7 +442,7 @@ data: {"run_id":"run_001","mode":"deepagent","message":"上下文已自动压缩
 
 压缩事件只用于提醒页面：
 
-- 不写入 `messages.jsonl`
+- 不写入 `messages.json`
 - 不展示摘要正文
 - 不改变 `session_id`
 - 不改变 `thread_id`
@@ -633,7 +633,7 @@ GET /sessions
 ```text
 GET /sessions/{session_id}
 -> data/users/<user_id>/sessions/<session_id>/meta.json
--> data/users/<user_id>/sessions/<session_id>/messages.jsonl
+-> data/users/<user_id>/sessions/<session_id>/messages.json
 -> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 

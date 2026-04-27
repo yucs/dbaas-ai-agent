@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Literal
 
 from langchain_core.messages import BaseMessageChunk
 
 from dbass_ai_agent.config import Settings
 from dbass_ai_agent.infra.ids import new_run_id
+from dbass_ai_agent.infra.logging import elapsed_ms, log_context, redact_log_text
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta
 
 from .compression_events import CompressionNotice, capture_compression_notices
@@ -20,6 +23,7 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s,]+"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+"),
 ]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,33 +94,57 @@ class DeepAgentRuntime:
         session: SessionMeta,
         user_message: ChatMessage,
     ) -> AgentReply:
-        question = user_message.content.strip()
-        classification = classify_dbaas_request(question)
-
-        if classification == "dbaas_realtime":
-            return AgentReply(
-                run_id=new_run_id(),
-                content=build_not_supported_message(),
-                mode="deepagent",
-                warning="mock-server-disabled",
+        run_id = new_run_id()
+        with log_context(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            run_id=run_id,
+        ):
+            question = user_message.content.strip()
+            classification = classify_dbaas_request(question)
+            logger.info(
+                "agent invoke started classification=%s message_chars=%s user_input=%s",
+                classification,
+                len(question),
+                redact_log_text(question),
             )
 
-        try:
-            reply = self._invoke_agent(session.thread_id, question)
-        except AgentInvocationError:
-            raise
-        except Exception as exc:  # pragma: no cover - provider/network/runtime specific
-            raise AgentInvocationError.from_exception(
-                exc,
-                fallback="调用真实 DeepAgent 运行时失败。",
-                stage="invoke",
-            ) from exc
+            if classification == "dbaas_realtime":
+                logger.warning(
+                    "agent invoke skipped reason=mock_server_disabled classification=%s",
+                    classification,
+                )
+                return AgentReply(
+                    run_id=run_id,
+                    content=build_not_supported_message(),
+                    mode="deepagent",
+                    warning="mock-server-disabled",
+                )
 
-        return AgentReply(
-            run_id=new_run_id(),
-            content=reply,
-            mode="deepagent",
-        )
+            started_at = perf_counter()
+            try:
+                reply = self._invoke_agent(session.thread_id, question)
+            except AgentInvocationError:
+                logger.exception("agent invoke failed")
+                raise
+            except Exception as exc:  # pragma: no cover - provider/network/runtime specific
+                logger.exception("agent invoke failed")
+                raise AgentInvocationError.from_exception(
+                    exc,
+                    fallback="调用真实 DeepAgent 运行时失败。",
+                    stage="invoke",
+                ) from exc
+
+            logger.info(
+                "agent invoke completed duration_ms=%s",
+                elapsed_ms(started_at),
+            )
+            logger.debug("agent invoke response response_chars=%s", len(reply))
+            return AgentReply(
+                run_id=run_id,
+                content=reply,
+                mode="deepagent",
+            )
 
     def stream_reply(
         self,
@@ -126,78 +154,106 @@ class DeepAgentRuntime:
     ) -> Iterator[AgentStreamEvent]:
         run_id = new_run_id()
         mode = "deepagent"
-        question = user_message.content.strip()
-        classification = classify_dbaas_request(question)
-
-        if classification == "dbaas_realtime":
-            warning = "mock-server-disabled"
-            content = build_not_supported_message()
-            yield AgentStreamEvent(
-                event="started",
-                run_id=run_id,
-                mode=mode,
-                warning=warning,
+        with log_context(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            run_id=run_id,
+        ):
+            question = user_message.content.strip()
+            classification = classify_dbaas_request(question)
+            logger.info(
+                "agent stream started classification=%s message_chars=%s user_input=%s",
+                classification,
+                len(question),
+                redact_log_text(question),
             )
-            yield AgentStreamEvent(
-                event="token",
-                run_id=run_id,
-                mode=mode,
-                content=content,
-                warning=warning,
-            )
-            yield AgentStreamEvent(
-                event="completed",
-                run_id=run_id,
-                mode=mode,
-                content=content,
-                warning=warning,
-            )
-            return
 
-        yield AgentStreamEvent(event="started", run_id=run_id, mode=mode)
+            if classification == "dbaas_realtime":
+                warning = "mock-server-disabled"
+                content = build_not_supported_message()
+                logger.warning(
+                    "agent stream skipped reason=mock_server_disabled classification=%s",
+                    classification,
+                )
+                yield AgentStreamEvent(
+                    event="started",
+                    run_id=run_id,
+                    mode=mode,
+                    warning=warning,
+                )
+                yield AgentStreamEvent(
+                    event="token",
+                    run_id=run_id,
+                    mode=mode,
+                    content=content,
+                    warning=warning,
+                )
+                yield AgentStreamEvent(
+                    event="completed",
+                    run_id=run_id,
+                    mode=mode,
+                    content=content,
+                    warning=warning,
+                )
+                logger.info(
+                    "agent stream completed duration_ms=0 warning=%s",
+                    warning,
+                )
+                logger.debug("agent stream response response_chars=%s", len(content))
+                return
 
-        parts: list[str] = []
-        compression_notices: list[CompressionNotice] = []
+            yield AgentStreamEvent(event="started", run_id=run_id, mode=mode)
 
-        def _on_compression(notice: CompressionNotice) -> None:
-            if notice.thread_id == session.thread_id:
-                compression_notices.append(notice)
+            parts: list[str] = []
+            compression_notices: list[CompressionNotice] = []
 
-        try:
-            with capture_compression_notices(_on_compression):
-                for delta in self._stream_agent_text(session.thread_id, question):
+            def _on_compression(notice: CompressionNotice) -> None:
+                if notice.thread_id == session.thread_id:
+                    compression_notices.append(notice)
+
+            started_at = perf_counter()
+            try:
+                with capture_compression_notices(_on_compression):
+                    for delta in self._stream_agent_text(session.thread_id, question):
+                        yield from self._drain_compression_events(
+                            run_id,
+                            mode,
+                            compression_notices,
+                        )
+                        if not delta:
+                            continue
+                        parts.append(delta)
+                        yield AgentStreamEvent(
+                            event="token",
+                            run_id=run_id,
+                            mode=mode,
+                            content=delta,
+                        )
                     yield from self._drain_compression_events(
                         run_id,
                         mode,
                         compression_notices,
                     )
-                    if not delta:
-                        continue
-                    parts.append(delta)
-                    yield AgentStreamEvent(
-                        event="token",
-                        run_id=run_id,
-                        mode=mode,
-                        content=delta,
-                    )
-                yield from self._drain_compression_events(
-                    run_id,
-                    mode,
-                    compression_notices,
-                )
-        except AgentInvocationError:
-            raise
-        except Exception as exc:  # pragma: no cover - provider/network/runtime specific
-            raise AgentInvocationError.from_exception(
-                exc,
-                fallback="调用真实 DeepAgent 运行时失败。",
-                stage="stream",
-            ) from exc
+            except AgentInvocationError:
+                logger.exception("agent stream failed")
+                raise
+            except Exception as exc:  # pragma: no cover - provider/network/runtime specific
+                logger.exception("agent stream failed")
+                raise AgentInvocationError.from_exception(
+                    exc,
+                    fallback="调用真实 DeepAgent 运行时失败。",
+                    stage="stream",
+                ) from exc
 
-        content = "".join(parts)
-        if not content.strip():
-            content = "当前模型没有返回可展示的消息。"
-        yield AgentStreamEvent(event="completed", run_id=run_id, mode=mode, content=content)
+            content = "".join(parts)
+            if not content.strip():
+                content = "当前模型没有返回可展示的消息。"
+            logger.info(
+                "agent stream completed duration_ms=%s",
+                elapsed_ms(started_at),
+            )
+            logger.debug("agent stream response response_chars=%s", len(content))
+            yield AgentStreamEvent(event="completed", run_id=run_id, mode=mode, content=content)
 
     def _drain_compression_events(
         self,
@@ -243,6 +299,7 @@ class DeepAgentRuntime:
     def _stream_agent_text(self, thread_id: str, prompt: str) -> Iterator[str]:
         stream = getattr(self.artifacts.agent, "stream", None)
         if not callable(stream):
+            logger.debug("agent stream unavailable fallback=invoke")
             yield self._invoke_agent(thread_id, prompt)
             return
 
@@ -251,6 +308,7 @@ class DeepAgentRuntime:
         try:
             events = stream(input_payload, config=config, stream_mode="messages")
         except TypeError:
+            logger.debug("agent stream type_error fallback=invoke")
             yield self._invoke_agent(thread_id, prompt)
             return
 
@@ -277,6 +335,7 @@ class DeepAgentRuntime:
         except TypeError:
             if emitted_chunk:
                 raise
+            logger.debug("agent stream event_type_error fallback=invoke")
             yield self._invoke_agent(thread_id, prompt)
 
     def _should_emit_stream_message(self, message: Any | None, metadata: dict[str, Any]) -> bool:

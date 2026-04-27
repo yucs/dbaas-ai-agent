@@ -2,8 +2,7 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
-ai-agent/data/users/
-ai-agent/data/runtime/
+ai-agent/data/
 ai-agent/backend/.venv/
 ai-agent/.env
 ai-agent/config.toml

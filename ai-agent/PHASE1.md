@@ -148,7 +148,7 @@
 ```text
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
-data/users/<user_id>/sessions/<session_id>/messages.jsonl
+data/users/<user_id>/sessions/<session_id>/messages.json
 data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
@@ -156,7 +156,7 @@ data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 
 - `index.json`
 - `meta.json`
-- `messages.jsonl`
+- `messages.json`
 - `approvals.jsonl`
 
 这里的“接入”含义是：

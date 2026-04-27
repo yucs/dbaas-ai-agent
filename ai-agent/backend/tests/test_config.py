@@ -52,6 +52,14 @@ class SettingsFromFileTests(unittest.TestCase):
                     soft_trigger_tokens = 50000
                     keep_recent_messages = 8
                     summary_max_tokens = 1024
+
+                    [logging]
+                    level = "DEBUG"
+                    log_file = "./logs/unit.log"
+                    max_bytes = 2048
+                    backup_count = 3
+                    enable_console = false
+                    log_request_body = true
                     """
                 ).strip(),
                 encoding="utf-8",
@@ -72,6 +80,11 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.soft_trigger_tokens, 50000)
             self.assertEqual(settings.keep_recent_messages, 8)
             self.assertEqual(settings.summary_max_tokens, 1024)
+            self.assertEqual(settings.log_level, "DEBUG")
+            self.assertEqual(settings.log_max_bytes, 2048)
+            self.assertEqual(settings.log_backup_count, 3)
+            self.assertFalse(settings.log_enable_console)
+            self.assertTrue(settings.log_request_body)
 
             self.assertEqual(settings.data_root, (config_root / "var/users").resolve())
             self.assertEqual(settings.frontend_root, (config_root / "ui").resolve())
@@ -88,6 +101,7 @@ class SettingsFromFileTests(unittest.TestCase):
                 settings.compression_prompt_path,
                 (config_root / "prompts/compression.md").resolve(),
             )
+            self.assertEqual(settings.log_file, (config_root / "logs/unit.log").resolve())
 
 
 if __name__ == "__main__":

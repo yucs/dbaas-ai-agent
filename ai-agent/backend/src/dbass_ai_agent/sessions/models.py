@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 SessionStatus = Literal["active", "archived", "deleted"]
-MessageRole = Literal["user", "assistant", "system"]
+MessageRole = Literal["user", "assistant", "system", "ai-agent"]
 
 
 class ChatMessage(BaseModel):

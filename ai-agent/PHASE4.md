@@ -9,7 +9,7 @@
 - FastAPI SSE 流式消息接口
 - 前端基于 `fetch` 消费 SSE
 - DeepAgent `stream_mode="messages"` token 输出
-- 流式结束后继续写回产品层 `messages.jsonl`
+- 流式结束后继续写回产品层 `messages.json`
 - 压缩发生时通过 SSE 发送轻量提醒
 
 第四阶段不改变第三阶段已经确定的压缩边界：
@@ -71,7 +71,7 @@ POST /api/v1/sessions/{session_id}/messages
 
 - 前端收到 `compression_started` 后提示正在整理上下文
 - 前端收到 `compression_completed` 后提示压缩已完成
-- `messages.jsonl` 不写入这条提示
+- `messages.json` 不写入这条提示
 - Session 历史仍只包含用户消息和助手消息
 - 提醒中不包含摘要正文
 

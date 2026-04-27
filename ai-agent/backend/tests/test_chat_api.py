@@ -94,6 +94,13 @@ class StubAgentRuntime:
 
 
 class ErroringAgentRuntime:
+    def generate_reply(self, *, session, user_message):
+        raise AgentInvocationError(
+            "模型服务调用失败：mock provider unavailable",
+            error_type="provider_error",
+            stage="invoke",
+        )
+
     def stream_reply(self, *, session, user_message):
         yield AgentStreamEvent(event="started", run_id="run_error_001", mode="deepagent")
         raise AgentInvocationError(
@@ -157,6 +164,45 @@ class SendMessageApiTests(unittest.TestCase):
                 runtime.calls,
                 [(detail.meta.thread_id, "请帮我确认消息流是否正常")],
             )
+
+    def test_send_message_persists_ai_agent_message_on_agent_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: ErroringAgentRuntime()
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "普通报错测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages",
+                    json={"content": "普通调用也会失败"},
+                )
+
+            self.assertEqual(message_response.status_code, 502)
+            detail = service.get_session(identity, session_id)
+            self.assertEqual([message.role for message in detail.messages], ["user", "ai-agent"])
+            self.assertIn("本轮 AI Agent 调用失败", detail.messages[-1].content)
+            self.assertIn("mock provider unavailable", detail.messages[-1].content)
+            self.assertNotIn("阶段：", detail.messages[-1].content)
+            self.assertNotIn("类型：", detail.messages[-1].content)
+            self.assertNotIn("运行编号：", detail.messages[-1].content)
+            self.assertNotIn("排障编号：", detail.messages[-1].content)
 
     def test_stream_message_sends_sse_and_persists_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -222,7 +268,7 @@ class SendMessageApiTests(unittest.TestCase):
             )
             self.assertEqual(runtime.calls, [(detail.meta.thread_id, "请流式回复")])
 
-    def test_stream_message_sends_error_event_without_assistant_persist(self) -> None:
+    def test_stream_message_sends_error_event_and_persists_ai_agent_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
             service = SessionService(
@@ -262,9 +308,24 @@ class SendMessageApiTests(unittest.TestCase):
             self.assertEqual(events[-1][1]["error_type"], "function_error")
             self.assertEqual(events[-1][1]["stage"], "tool_call")
             self.assertIn("mock_tool 参数 invalid", events[-1][1]["detail"])
+            self.assertEqual(events[-1][1]["run_id"], "run_error_001")
+            self.assertEqual(events[-1][1]["ai_agent_message"]["role"], "ai-agent")
+            self.assertIn(
+                "本轮 AI Agent 调用失败",
+                events[-1][1]["ai_agent_message"]["content"],
+            )
+            self.assertIn("mock_tool 参数 invalid", events[-1][1]["ai_agent_message"]["content"])
+            self.assertNotIn("阶段：", events[-1][1]["ai_agent_message"]["content"])
+            self.assertNotIn("类型：", events[-1][1]["ai_agent_message"]["content"])
+            self.assertNotIn("运行编号：", events[-1][1]["ai_agent_message"]["content"])
+            self.assertNotIn("排障编号：", events[-1][1]["ai_agent_message"]["content"])
 
             detail = service.get_session(identity, session_id)
-            self.assertEqual([message.role for message in detail.messages], ["user"])
+            self.assertEqual([message.role for message in detail.messages], ["user", "ai-agent"])
+            self.assertEqual(
+                detail.messages[-1].content,
+                events[-1][1]["ai_agent_message"]["content"],
+            )
 
 
 def _parse_sse_events(body: str) -> list[tuple[str, dict]]:

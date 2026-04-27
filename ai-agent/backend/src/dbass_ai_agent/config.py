@@ -38,6 +38,12 @@ class Settings:
     soft_trigger_tokens: int = 98304
     keep_recent_messages: int = 6
     summary_max_tokens: int = 2048
+    log_level: str = "INFO"
+    log_file: Path = APP_ROOT / "data" / "logs" / "app.log"
+    log_max_bytes: int = 10_485_760
+    log_backup_count: int = 10
+    log_enable_console: bool = True
+    log_request_body: bool = False
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -48,6 +54,7 @@ class Settings:
         paths = _get_table(config, "paths")
         model = _get_table(config, "model")
         compression = _get_table(config, "compression")
+        logging_config = _get_table(config, "logging")
         base_dir = config_path.parent
 
         runtime_root = _resolve_path(
@@ -96,6 +103,15 @@ class Settings:
             ),
             keep_recent_messages=_get_int(compression, "keep_recent_messages", 6),
             summary_max_tokens=_get_int(compression, "summary_max_tokens", 2048),
+            log_level=_get_string(logging_config, "level", "INFO").upper(),
+            log_file=_resolve_path(
+                base_dir,
+                _get_string(logging_config, "log_file", "./data/logs/app.log"),
+            ),
+            log_max_bytes=_get_int(logging_config, "max_bytes", 10_485_760),
+            log_backup_count=_get_int(logging_config, "backup_count", 10),
+            log_enable_console=_get_bool(logging_config, "enable_console", True),
+            log_request_body=_get_bool(logging_config, "log_request_body", False),
         )
 
 

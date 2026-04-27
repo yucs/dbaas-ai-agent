@@ -103,7 +103,7 @@
 
 - `index.json`
 - `meta.json`
-- `messages.jsonl`
+- `messages.json`
 - `approvals.jsonl`
 
 当前的稳定分层是：
@@ -122,7 +122,7 @@
 
 当前 `POST /api/v1/sessions/{session_id}/messages` 的执行链路已经稳定下来：
 
-1. 记录用户消息到 `messages.jsonl`
+1. 记录用户消息到 `messages.json`
 2. 读取当前 Session 元数据与 `thread_id`
 3. 识别是否属于 DBAAS 实时查询 / 操作类请求
 4. 如果是实时 DBAAS 请求，直接返回边界提示

@@ -15,7 +15,7 @@
 
 - 产品层记录
   - `meta.json`
-  - `messages.jsonl`
+  - `messages.json`
   - `approvals.jsonl`
 - 运行时状态
   - `thread_id`

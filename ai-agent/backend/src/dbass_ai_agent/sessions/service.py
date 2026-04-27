@@ -134,6 +134,26 @@ class SessionService:
         self._save_meta_and_index(meta, preview=content)
         return message
 
+    def append_ai_agent_message(
+        self,
+        identity: Identity,
+        session_id: str,
+        content: str,
+    ) -> ChatMessage:
+        meta = self.ensure_active_session(identity, session_id)
+        now = utc_now()
+        message = ChatMessage(
+            message_id=new_message_id(),
+            role="ai-agent",
+            content=content,
+            created_at=now,
+        )
+        self.repository.append_message(meta.user_id, meta.session_id, message)
+        meta.updated_at = now
+        meta.last_message_at = now
+        self._save_meta_and_index(meta, preview=content)
+        return message
+
     def get_messages(self, identity: Identity, session_id: str) -> list[ChatMessage]:
         meta = self.get_session(identity, session_id).meta
         return self.repository.load_messages(meta.user_id, meta.session_id)

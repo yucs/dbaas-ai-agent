@@ -53,3 +53,17 @@ soft_trigger_tokens = 98304
 keep_recent_messages = 6
 # 压缩摘要允许使用的最大 token 数。
 summary_max_tokens = 2048
+
+[logging]
+# 日志等级；支持 DEBUG、INFO、WARNING、ERROR。
+level = "INFO"
+# 单个主日志文件路径；相对路径会以当前配置文件所在目录为基准解析。
+log_file = "./data/logs/app.log"
+# 单个日志文件最大字节数，超过后会自动滚动。
+max_bytes = 10485760
+# 保留的滚动日志文件数量。
+backup_count = 10
+# 是否同时输出到控制台。
+enable_console = false
+# 是否记录请求 body。默认关闭，避免写入敏感内容或完整 prompt。
+log_request_body = false

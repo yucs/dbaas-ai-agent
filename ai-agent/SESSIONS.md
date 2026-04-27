@@ -136,7 +136,7 @@ ai-agent/
           index.json
           <session_id>/
             meta.json
-            messages.jsonl
+            messages.json
             approvals.jsonl
 ```
 
@@ -224,11 +224,11 @@ ai-agent/
 }
 ```
 
-### 5.2 `messages.jsonl`
+### 5.2 `messages.json`
 
 保存当前 Session 的原始消息记录。
 
-建议使用 `jsonl`，便于顺序追加写入。
+文件名统一为 `messages.json`，内容仍按逐行 JSON 记录，便于顺序追加写入。
 
 建议每条消息至少包含：
 
@@ -317,7 +317,7 @@ ai-agent/
 
 1. 用户点击某个 `session_id`
 2. 后端读取 `meta.json`
-3. 后端读取 `messages.jsonl`
+3. 后端读取 `messages.json`
 4. 后端读取 `approvals.jsonl`
 5. 将该 Session 内容返回给前端
 6. 前端将其加载到当前窗口
@@ -332,10 +332,10 @@ ai-agent/
 建议流程：
 
 1. 前端向当前 `session_id` 发送用户消息
-2. 后端将消息追加到 `messages.jsonl`
+2. 后端将消息追加到 `messages.json`
 3. Agent 优先在当前活动 `thread_id` 上继续执行
 4. 返回本轮 assistant 消息结果
-5. 将 assistant 消息继续追加到 `messages.jsonl`
+5. 将 assistant 消息继续追加到 `messages.json`
 6. 更新 `meta.json.updated_at`
 7. 更新 `index.json` 中该条目的 `updated_at`、`last_message_at` 和 `preview`
 
@@ -358,7 +358,7 @@ ai-agent/
 - 生成新的 `session_id`
 - 创建对应目录
 - 写入 `meta.json`
-- 创建空的 `messages.jsonl`
+- 创建空的 `messages.json`
 - 创建空的 `approvals.jsonl`
 - 在 `index.json` 中追加一条记录
 
@@ -484,7 +484,7 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 ```text
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
-data/users/<user_id>/sessions/<session_id>/messages.jsonl
+data/users/<user_id>/sessions/<session_id>/messages.json
 data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 

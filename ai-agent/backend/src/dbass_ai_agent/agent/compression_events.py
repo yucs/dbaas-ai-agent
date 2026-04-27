@@ -28,11 +28,12 @@ _compression_notice_handler: ContextVar[CompressionNoticeHandler | None] = Conte
 
 @contextmanager
 def capture_compression_notices(handler: CompressionNoticeHandler) -> Iterator[None]:
-    token = _compression_notice_handler.set(handler)
+    previous = _compression_notice_handler.get()
+    _compression_notice_handler.set(handler)
     try:
         yield
     finally:
-        _compression_notice_handler.reset(token)
+        _compression_notice_handler.set(previous)
 
 
 def publish_compression_notice(notice: CompressionNotice) -> None:
