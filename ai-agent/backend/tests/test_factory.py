@@ -250,6 +250,10 @@ class SummarizationFactoryTests(unittest.TestCase):
             captured.output,
         )
         self.assertTrue(
+            any("history_path=" in line for line in captured.output),
+            captured.output,
+        )
+        self.assertTrue(
             any("summary=压缩摘要" in line for line in captured.output),
             captured.output,
         )
