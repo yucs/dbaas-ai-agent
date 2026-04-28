@@ -237,6 +237,25 @@ p {
   color: #6b4615;
 }
 
+.message.system {
+  align-self: center;
+  max-width: 680px;
+  padding: 12px 16px;
+  background: #f6f0e6;
+  border-color: #d8c8ae;
+  box-shadow: none;
+}
+
+.message.system .message-meta {
+  justify-content: center;
+}
+
+.message.system .message-content {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
 .message.error {
   background: #fff2ef;
   border-color: #d49b92;

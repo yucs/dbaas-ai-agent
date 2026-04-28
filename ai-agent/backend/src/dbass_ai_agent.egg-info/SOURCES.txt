@@ -8,7 +8,6 @@ src/dbass_ai_agent.egg-info/dependency_links.txt
 src/dbass_ai_agent.egg-info/requires.txt
 src/dbass_ai_agent.egg-info/top_level.txt
 src/dbass_ai_agent/agent/__init__.py
-src/dbass_ai_agent/agent/dbaas_guard.py
 src/dbass_ai_agent/agent/factory.py
 src/dbass_ai_agent/agent/prompt.py
 src/dbass_ai_agent/agent/runtime.py

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
 
@@ -154,6 +155,36 @@ class SessionService:
         self._save_meta_and_index(meta, preview=content)
         return message
 
+    def append_system_message(
+        self,
+        identity: Identity,
+        session_id: str,
+        content: str,
+        *,
+        dedupe_recent_seconds: int | None = None,
+    ) -> ChatMessage | None:
+        meta = self.ensure_active_session(identity, session_id)
+        now = utc_now()
+        if dedupe_recent_seconds and self._has_recent_system_message(
+            meta.user_id,
+            meta.session_id,
+            content,
+            now=now,
+            window_seconds=dedupe_recent_seconds,
+        ):
+            return None
+        message = ChatMessage(
+            message_id=new_message_id(),
+            role="system",
+            content=content,
+            created_at=now,
+        )
+        self.repository.append_message(meta.user_id, meta.session_id, message)
+        meta.updated_at = now
+        meta.last_message_at = now
+        self._save_meta_and_index(meta, preview=content)
+        return message
+
     def get_messages(self, identity: Identity, session_id: str) -> list[ChatMessage]:
         meta = self.get_session(identity, session_id).meta
         return self.repository.load_messages(meta.user_id, meta.session_id)
@@ -192,6 +223,22 @@ class SessionService:
         if not messages:
             return ""
         return messages[-1].content
+
+    def _has_recent_system_message(
+        self,
+        user_id: str,
+        session_id: str,
+        content: str,
+        *,
+        now: datetime,
+        window_seconds: int,
+    ) -> bool:
+        window = timedelta(seconds=max(0, window_seconds))
+        for message in reversed(self.repository.load_messages(user_id, session_id)):
+            if message.role != "system" or message.content != content:
+                continue
+            return now - message.created_at <= window
+        return False
 
     @staticmethod
     def _assert_identity(meta: SessionMeta, identity: Identity) -> None:

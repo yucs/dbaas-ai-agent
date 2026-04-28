@@ -33,7 +33,7 @@ class DeleteSessionResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=4000)
+    content: str
 
 
 class SendMessageResponse(BaseModel):

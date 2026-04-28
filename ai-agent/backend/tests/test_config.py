@@ -30,6 +30,9 @@ class SettingsFromFileTests(unittest.TestCase):
                     host = "0.0.0.0"
                     port = 9001
 
+                    [chat]
+                    message_max_chars = 12345
+
                     [paths]
                     data_root = "./var/users"
                     frontend_root = "./ui"
@@ -73,6 +76,7 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.app_name, "unit-test-app")
             self.assertEqual(settings.host, "0.0.0.0")
             self.assertEqual(settings.port, 9001)
+            self.assertEqual(settings.message_max_chars, 12345)
             self.assertEqual(settings.model, "demo-model")
             self.assertEqual(settings.base_url, "https://example.invalid/v1")
             self.assertEqual(settings.api_key, "test-key")

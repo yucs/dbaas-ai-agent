@@ -21,6 +21,7 @@ class Settings:
     app_name: str = "dbass-ai-agent"
     host: str = "127.0.0.1"
     port: int = 8010
+    message_max_chars: int = 20000
     data_root: Path = APP_ROOT / "data" / "users"
     frontend_root: Path = APP_ROOT / "frontend"
     runtime_root: Path = APP_ROOT / "data" / "runtime"
@@ -52,6 +53,7 @@ class Settings:
         config = load_config_file(config_path)
         app = _get_table(config, "app")
         server = _get_table(config, "server")
+        chat = _get_table(config, "chat")
         paths = _get_table(config, "paths")
         model = _get_table(config, "model")
         compression = _get_table(config, "compression")
@@ -69,6 +71,7 @@ class Settings:
             app_name=_get_string(app, "name", "dbass-ai-agent"),
             host=_get_string(server, "host", "127.0.0.1"),
             port=_get_int(server, "port", 8010),
+            message_max_chars=_get_positive_int(chat, "message_max_chars", 20000),
             data_root=_resolve_path(
                 base_dir,
                 _get_string(paths, "data_root", "./data/users"),
@@ -173,6 +176,13 @@ def _get_int(config: Mapping[str, Any], key: str, default: int) -> int:
         return default
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"配置项 `{key}` 必须是整数。")
+    return value
+
+
+def _get_positive_int(config: Mapping[str, Any], key: str, default: int) -> int:
+    value = _get_int(config, key, default)
+    if value < 1:
+        raise ConfigError(f"配置项 `{key}` 必须大于 0。")
     return value
 
 

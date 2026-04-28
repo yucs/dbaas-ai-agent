@@ -15,7 +15,6 @@ from dbass_ai_agent.infra.logging import elapsed_ms, log_context, redact_log_tex
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta
 
 from .compression_events import CompressionNotice, capture_compression_notices
-from .dbaas_guard import build_not_supported_message, classify_dbaas_request
 from .factory import RuntimeArtifacts, build_runtime_artifacts
 
 
@@ -101,25 +100,11 @@ class DeepAgentRuntime:
             run_id=run_id,
         ):
             question = user_message.content.strip()
-            classification = classify_dbaas_request(question)
             logger.info(
-                "agent invoke started classification=%s message_chars=%s user_input=%s",
-                classification,
+                "agent invoke started message_chars=%s user_input=%s",
                 len(question),
                 redact_log_text(question),
             )
-
-            if classification == "dbaas_realtime":
-                logger.warning(
-                    "agent invoke skipped reason=mock_server_disabled classification=%s",
-                    classification,
-                )
-                return AgentReply(
-                    run_id=run_id,
-                    content=build_not_supported_message(),
-                    mode="deepagent",
-                    warning="mock-server-disabled",
-                )
 
             started_at = perf_counter()
             try:
@@ -160,47 +145,11 @@ class DeepAgentRuntime:
             run_id=run_id,
         ):
             question = user_message.content.strip()
-            classification = classify_dbaas_request(question)
             logger.info(
-                "agent stream started classification=%s message_chars=%s user_input=%s",
-                classification,
+                "agent stream started message_chars=%s user_input=%s",
                 len(question),
                 redact_log_text(question),
             )
-
-            if classification == "dbaas_realtime":
-                warning = "mock-server-disabled"
-                content = build_not_supported_message()
-                logger.warning(
-                    "agent stream skipped reason=mock_server_disabled classification=%s",
-                    classification,
-                )
-                yield AgentStreamEvent(
-                    event="started",
-                    run_id=run_id,
-                    mode=mode,
-                    warning=warning,
-                )
-                yield AgentStreamEvent(
-                    event="token",
-                    run_id=run_id,
-                    mode=mode,
-                    content=content,
-                    warning=warning,
-                )
-                yield AgentStreamEvent(
-                    event="completed",
-                    run_id=run_id,
-                    mode=mode,
-                    content=content,
-                    warning=warning,
-                )
-                logger.info(
-                    "agent stream completed duration_ms=0 warning=%s",
-                    warning,
-                )
-                logger.debug("agent stream response response_chars=%s", len(content))
-                return
 
             yield AgentStreamEvent(event="started", run_id=run_id, mode=mode)
 

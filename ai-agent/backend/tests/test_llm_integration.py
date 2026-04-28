@@ -57,8 +57,8 @@ class RealLLMSummarizationIntegrationTests(unittest.TestCase):
                     HumanMessage(content="帮我看一下 mysql-prod-01 当前状态，顺便评估能不能扩到 16C64G。"),
                     AIMessage(
                         content=(
-                            "当前阶段后台还没有接通 mock-server 的查询和操作能力，不能读取实时状态。"
-                            "可以先记录你的目标和约束，后续接入 DBAAS 接口后再查询和执行。"
+                            "已通过 DBAAS 工具查询 mysql-prod-01：当前规格 8C32G，"
+                            "主从延迟 0.4 秒，实例状态正常，具备进入扩容评估的前提。"
                         )
                     ),
                     HumanMessage(
@@ -72,7 +72,7 @@ class RealLLMSummarizationIntegrationTests(unittest.TestCase):
                         content=(
                             "已记录：资源 mysql-prod-01；目标规格 16C64G；当前用户声称规格 8C32G；"
                             "窗口今晚 22:00-23:00；前置约束是主从延迟小于 1 秒且不能重启。"
-                            "由于当前不能实时查询，实例状态和主从延迟仍待后续确认。"
+                            "已查询到当前主从延迟 0.4 秒，实例状态正常。"
                         )
                     ),
                     HumanMessage(content="另外如果检查发现延迟超过 1 秒，就不要扩容，只给我风险说明。"),

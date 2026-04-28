@@ -147,6 +147,10 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok", "mode": "deepagent"}
 
+    @app.get("/api/v1/config")
+    def frontend_config() -> dict[str, int]:
+        return {"message_max_chars": settings.message_max_chars}
+
     @app.get("/")
     def index() -> FileResponse:
         return static_file_response(settings.frontend_root / "index.html")

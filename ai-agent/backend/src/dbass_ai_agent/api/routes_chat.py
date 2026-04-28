@@ -10,11 +10,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from dbass_ai_agent.agent.runtime import AgentInvocationError, DeepAgentRuntime
+from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.logging import log_context
 from dbass_ai_agent.sessions.service import SessionService
 
-from .deps import get_agent_runtime, get_current_identity, get_session_service
+from .deps import get_agent_runtime, get_app_settings, get_current_identity, get_session_service
 from .schemas import SendMessageRequest, SendMessageResponse
 
 
@@ -30,8 +31,10 @@ def send_message(
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
     agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    settings: Settings = Depends(get_app_settings),
 ) -> SendMessageResponse:
-    user_message = session_service.append_user_message(identity, session_id, payload.content)
+    content = _validate_message_content(payload.content, settings)
+    user_message = session_service.append_user_message(identity, session_id, content)
     session = session_service.get_session(identity, session_id).meta
     request_id = getattr(request.state, "request_id", "-")
     with log_context(
@@ -44,7 +47,7 @@ def send_message(
         logger.debug(
             "chat message accepted message_id=%s message_chars=%s",
             user_message.message_id,
-            len(payload.content),
+            len(content),
         )
         try:
             reply = agent_runtime.generate_reply(
@@ -95,11 +98,13 @@ def stream_message(
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
     agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    settings: Settings = Depends(get_app_settings),
 ) -> StreamingResponse:
+    content = _validate_message_content(payload.content, settings)
     user_message = session_service.append_user_message(
         identity,
         session_id,
-        payload.content,
+        content,
     )
     session = session_service.get_session(identity, session_id).meta
     request_id = getattr(request.state, "request_id", "-")
@@ -115,7 +120,7 @@ def stream_message(
             logger.debug(
                 "chat stream accepted message_id=%s message_chars=%s",
                 user_message.message_id,
-                len(payload.content),
+                len(content),
             )
             yield _sse_event("user_message", {"user_message": user_message})
 
@@ -150,12 +155,21 @@ def stream_message(
                         continue
 
                     if event.event in {"compression_started", "compression_completed"}:
+                        system_message = None
+                        if event.event == "compression_completed":
+                            system_message = session_service.append_system_message(
+                                identity,
+                                session_id,
+                                event.content,
+                                dedupe_recent_seconds=300,
+                            )
                         yield _sse_event(
                             event.event,
                             {
                                 "run_id": event.run_id,
                                 "mode": event.mode,
                                 "message": event.content,
+                                "system_message": system_message,
                                 "details": event.details or {},
                             },
                         )
@@ -289,6 +303,20 @@ def stream_message(
 def _sse_event(event: str, payload: dict[str, Any]) -> str:
     data = json.dumps(jsonable_encoder(payload), ensure_ascii=False)
     return f"event: {event}\ndata: {data}\n\n"
+
+
+def _validate_message_content(content: str, settings: Settings) -> str:
+    if not content.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="消息内容不能为空。",
+        )
+    if len(content) > settings.message_max_chars:
+        raise HTTPException(
+            status_code=422,
+            detail=f"消息长度不能超过 {settings.message_max_chars} 字符。",
+        )
+    return content
 
 
 def _build_ai_agent_error_content(

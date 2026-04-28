@@ -16,9 +16,15 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from dbass_ai_agent.agent.runtime import AgentInvocationError, AgentReply, AgentStreamEvent
-from dbass_ai_agent.api.deps import get_agent_runtime, get_current_identity, get_session_service
+from dbass_ai_agent.api.deps import (
+    get_agent_runtime,
+    get_app_settings,
+    get_current_identity,
+    get_session_service,
+)
 from dbass_ai_agent.api.routes_chat import router as chat_router
 from dbass_ai_agent.api.routes_sessions import router as sessions_router
+from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.sessions.approval_store import ApprovalStore
 from dbass_ai_agent.sessions.index_store import IndexStore
@@ -202,6 +208,77 @@ class SendMessageApiTests(unittest.TestCase):
             self.assertNotIn("运行编号：", detail.messages[-1].content)
             self.assertNotIn("排障编号：", detail.messages[-1].content)
 
+    def test_send_message_rejects_content_over_configured_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+            app.dependency_overrides[get_app_settings] = lambda: Settings(message_max_chars=5)
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "长度限制测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages",
+                    json={"content": "超过五个字符"},
+                )
+
+            self.assertEqual(message_response.status_code, 422)
+            self.assertEqual(message_response.json()["detail"], "消息长度不能超过 5 字符。")
+            self.assertEqual(runtime.calls, [])
+            self.assertEqual(service.get_session(identity, session_id).messages, [])
+
+    def test_stream_message_rejects_blank_content_before_persisting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "空消息测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages/stream",
+                    json={"content": "   "},
+                )
+
+            self.assertEqual(message_response.status_code, 422)
+            self.assertEqual(message_response.json()["detail"], "消息内容不能为空。")
+            self.assertEqual(runtime.calls, [])
+            self.assertEqual(service.get_session(identity, session_id).messages, [])
+
     def test_stream_message_sends_sse_and_persists_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -235,6 +312,14 @@ class SendMessageApiTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200)
                     body = "".join(response.iter_text())
 
+                with client.stream(
+                    "POST",
+                    f"/api/v1/sessions/{session_id}/messages/stream",
+                    json={"content": "你好"},
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    second_body = "".join(response.iter_text())
+
             events = _parse_sse_events(body)
             self.assertEqual(
                 [event_name for event_name, _payload in events],
@@ -251,20 +336,43 @@ class SendMessageApiTests(unittest.TestCase):
             self.assertEqual(events[0][1]["user_message"]["content"], "请流式回复")
             self.assertEqual(events[2][1]["message"], "上下文较长，正在整理早期内容。")
             self.assertEqual(events[2][1]["details"]["phase"], "started")
+            self.assertIsNone(events[2][1]["system_message"])
             self.assertEqual(events[3][1]["message"], "上下文已自动压缩。")
             self.assertEqual(events[3][1]["details"]["phase"], "completed")
+            self.assertEqual(events[3][1]["system_message"]["role"], "system")
+            self.assertEqual(events[3][1]["system_message"]["content"], "上下文已自动压缩。")
             self.assertEqual(events[2][1]["details"]["summarized_messages"], 3)
             self.assertEqual(events[4][1]["delta"], "这是")
             self.assertEqual(events[5][1]["delta"], "流式回复")
             self.assertEqual(events[-1][1]["assistant_message"]["content"], "这是流式回复")
             self.assertEqual(events[-1][1]["run_id"], "run_stream_001")
 
+            second_events = _parse_sse_events(second_body)
+            self.assertEqual(second_events[3][0], "compression_completed")
+            self.assertIsNone(second_events[3][1]["system_message"])
+
             detail = service.get_session(identity, session_id)
             self.assertEqual(
                 [message.content for message in detail.messages],
-                ["请流式回复", "这是流式回复"],
+                [
+                    "请流式回复",
+                    "上下文已自动压缩。",
+                    "这是流式回复",
+                    "你好",
+                    "这是流式回复",
+                ],
             )
-            self.assertEqual(runtime.calls, [(detail.meta.thread_id, "请流式回复")])
+            self.assertEqual(
+                [message.role for message in detail.messages],
+                ["user", "system", "assistant", "user", "assistant"],
+            )
+            self.assertEqual(
+                runtime.calls,
+                [
+                    (detail.meta.thread_id, "请流式回复"),
+                    (detail.meta.thread_id, "你好"),
+                ],
+            )
 
     def test_stream_message_sends_error_event_and_persists_ai_agent_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

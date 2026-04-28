@@ -7,6 +7,9 @@ const state = {
   currentSession: null,
   sending: false,
   bootstrapping: false,
+  config: {
+    messageMaxChars: 20000,
+  },
 };
 
 const elements = {
@@ -50,6 +53,35 @@ function formatTime(value) {
 
 function truncatePreview(content) {
   return String(content || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function formatApiDetail(detail) {
+  if (!detail) {
+    return "";
+  }
+
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        const location = Array.isArray(item.loc) ? item.loc.join(".") : "";
+        const message = item.msg || JSON.stringify(item);
+        return location ? `${location}: ${message}` : message;
+      })
+      .join("；");
+  }
+
+  if (typeof detail === "object") {
+    return detail.detail || detail.msg || JSON.stringify(detail);
+  }
+
+  return String(detail);
 }
 
 function sortSessions(items) {
@@ -130,7 +162,7 @@ async function api(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail || "请求失败");
+    throw new Error(formatApiDetail(payload.detail) || "请求失败");
   }
   return payload;
 }
@@ -305,6 +337,9 @@ function getMessageAuthorLabel(message) {
   if (message.role === "assistant") {
     return "助手";
   }
+  if (message.role === "system") {
+    return "系统";
+  }
   return "用户";
 }
 
@@ -469,6 +504,25 @@ function applyStreamToken(payload, optimisticRefs, sessionId) {
   renderCurrentSession();
 }
 
+function applyStreamSystemMessage(message, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId || !message) {
+    return false;
+  }
+
+  if (state.currentSession.messages.some((item) => item.message_id === message.message_id)) {
+    return true;
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    messages: [...state.currentSession.messages, message],
+  };
+  upsertSessionItem(state.currentSession.meta, message.content);
+  renderSessions();
+  renderCurrentSession();
+  return true;
+}
+
 function applyStreamError(message, optimisticRefs, sessionId) {
   if (!state.currentSession || state.currentSessionId !== sessionId || !optimisticRefs) {
     return false;
@@ -538,7 +592,7 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "请求失败");
+    throw new Error(formatApiDetail(payload.detail) || "请求失败");
   }
 
   let completed = false;
@@ -555,12 +609,14 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
     }
 
     if (eventName === "compression_started" || eventName === "compression_completed") {
-      showFlash(payload.message || "上下文已自动整理，本会话会继续正常进行。");
+      if (payload.system_message) {
+        applyStreamSystemMessage(payload.system_message, sessionId);
+      }
       return;
     }
 
     if (eventName === "error") {
-      const message = payload.detail || "流式响应失败";
+      const message = formatApiDetail(payload.detail) || "流式响应失败";
       const stage = payload.stage ? ` (${payload.stage})` : "";
       if (payload.ai_agent_message) {
         completed = true;
@@ -575,9 +631,6 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
 
     if (eventName === "done") {
       completed = true;
-      if (payload.warning === "mock-server-disabled") {
-        showFlash("这是 DBAAS 相关请求，当前阶段后台尚未启用 mock-server 调用能力。");
-      }
       if (optimisticRefs && state.currentSessionId === sessionId) {
         applyMessageResponse(payload, optimisticRefs);
       } else if (payload.session && payload.assistant_message) {
@@ -596,6 +649,13 @@ async function fetchSessions() {
   const payload = await api("/api/v1/sessions");
   state.sessions = sortSessions(payload.items || []);
   renderSessions();
+}
+
+async function fetchAppConfig() {
+  const payload = await api("/api/v1/config");
+  if (Number.isInteger(payload.message_max_chars) && payload.message_max_chars > 0) {
+    state.config.messageMaxChars = payload.message_max_chars;
+  }
 }
 
 async function loadSession(sessionId) {
@@ -717,6 +777,13 @@ async function sendMessage(event) {
 
   const content = elements.messageInput.value.trim();
   if (!content) {
+    showFlash("消息内容不能为空。", "error");
+    elements.messageInput.focus();
+    return;
+  }
+  if (content.length > state.config.messageMaxChars) {
+    showFlash(`消息长度不能超过 ${state.config.messageMaxChars} 字符。`, "error");
+    elements.messageInput.focus();
     return;
   }
 
@@ -754,6 +821,7 @@ async function sendMessage(event) {
 }
 
 async function bootstrap() {
+  await fetchAppConfig();
   state.auth = loadAuth();
   renderIdentity();
   renderSessions();
