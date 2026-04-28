@@ -10,6 +10,8 @@ from typing import Any, Literal
 from langchain_core.messages import BaseMessageChunk
 
 from dbass_ai_agent.config import Settings
+from dbass_ai_agent.dbaas.tools import DbaasToolRunState, dbaas_tool_identity
+from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.ids import new_run_id
 from dbass_ai_agent.infra.logging import elapsed_ms, log_context, redact_log_text
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta
@@ -90,6 +92,7 @@ class DeepAgentRuntime:
     def generate_reply(
         self,
         *,
+        identity: Identity,
         session: SessionMeta,
         user_message: ChatMessage,
     ) -> AgentReply:
@@ -108,7 +111,8 @@ class DeepAgentRuntime:
 
             started_at = perf_counter()
             try:
-                reply = self._invoke_agent(session.thread_id, question)
+                with dbaas_tool_identity(identity):
+                    reply = self._invoke_agent(session.thread_id, question)
             except AgentInvocationError:
                 logger.exception("agent invoke failed")
                 raise
@@ -134,6 +138,7 @@ class DeepAgentRuntime:
     def stream_reply(
         self,
         *,
+        identity: Identity,
         session: SessionMeta,
         user_message: ChatMessage,
     ) -> Iterator[AgentStreamEvent]:
@@ -162,27 +167,36 @@ class DeepAgentRuntime:
 
             started_at = perf_counter()
             try:
-                with capture_compression_notices(_on_compression):
-                    for delta in self._stream_agent_text(session.thread_id, question):
-                        yield from self._drain_compression_events(
-                            run_id,
-                            mode,
-                            compression_notices,
-                        )
-                        if not delta:
-                            continue
-                        parts.append(delta)
-                        yield AgentStreamEvent(
-                            event="token",
-                            run_id=run_id,
-                            mode=mode,
-                            content=delta,
-                        )
+                agent_stream = self._stream_agent_text(session.thread_id, question)
+                dbaas_tool_state = DbaasToolRunState()
+                while True:
+                    try:
+                        with (
+                            capture_compression_notices(_on_compression),
+                            dbaas_tool_identity(identity, state=dbaas_tool_state),
+                        ):
+                            delta = next(agent_stream)
+                    except StopIteration:
+                        break
                     yield from self._drain_compression_events(
                         run_id,
                         mode,
                         compression_notices,
                     )
+                    if not delta:
+                        continue
+                    parts.append(delta)
+                    yield AgentStreamEvent(
+                        event="token",
+                        run_id=run_id,
+                        mode=mode,
+                        content=delta,
+                    )
+                yield from self._drain_compression_events(
+                    run_id,
+                    mode,
+                    compression_notices,
+                )
             except AgentInvocationError:
                 logger.exception("agent stream failed")
                 raise

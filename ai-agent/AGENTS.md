@@ -15,3 +15,9 @@ PORT=9000 ../mock-server/start.sh
 ```
 
 该脚本位于 `../mock-server/start.sh`。当前推荐使用 `9000` 端口，避免与本项目后端服务端口冲突。
+
+本地联调结束后，可以使用以下脚本停止默认端口上的后端服务和 mock server：
+
+```bash
+./stop.sh
+```

@@ -182,6 +182,8 @@ realtime_status.meta.json
 - `resource_lock_timeout_seconds`
   - 控制等待 `services.lock`、`hosts.lock` 等快照资源锁最多等待多久
   - 如果等待锁超时，tool 应返回 `refreshing`，提示稍后重试
+  - 锁文件中记录持有锁进程的 PID；如果 PID 已不存在，视为 stale lock，允许自动删除后重新加锁
+  - stale lock 主要用于处理开发阶段服务重启、进程被终止或 reload 中断时残留的锁文件，避免后台同步永久被误判为 `refreshing`
 
 ## 5. Tool 语义
 
@@ -248,6 +250,9 @@ realtime_status.meta.json
   - 正式快照或 meta 文件不存在
 - `refreshing`
   - 后台任务正在刷新，可以通过 lock 或 meta 状态表达
+- `refreshing_retry_exhausted`
+  - 同一轮 Agent 调用中，`sync_services_tool` 已经连续返回超过 3 次 `refreshing`
+  - 此状态用于阻止模型无限循环重试；模型必须停止工具调用，直接告知用户数据仍在刷新中
 - `error`
   - 同步失败，当前没有可用于准确查询的 fresh 快照
 
@@ -292,6 +297,18 @@ query_dbaas_data_tool(kind, jq_filter, max_preview_items)
 ```
 
 `jq_filter` 可以由大模型根据用户问题和 schema 摘要生成。
+
+每个 session 首次查询某一类 DBAAS 数据前，
+必须先调用 `describe_dbaas_schema_tool(kind=...)` 获取该 kind 的结构定义，
+再生成 `jq_filter`。
+
+同一 session 中，如果已经针对相同 kind 调用过 schema 工具，
+且 schema version 未变化，可以复用已知结构，不必重复查询。
+
+这样做的原因是：
+
+- DBAAS 字段名不一定符合大模型的常见猜测
+- 先查 schema 可以避免模型生成错误 jq，导致统计结果看似成功但实际字段错用
 
 例如：
 
@@ -441,6 +458,12 @@ describe_dbaas_schema_tool
 4. 如果当前用户是普通用户，从全量快照过滤出用户可见服务
 5. 写入 `users/{user_id}/services.json` 和 `users/{user_id}/services.meta.json`
 6. 返回用户自己的 scoped 快照路径
+
+如果同步路径返回 `refreshing`，同一轮 Agent 调用内最多允许 `sync_services_tool` 重试 3 次。
+第 4 次应返回 `refreshing_retry_exhausted`，
+让模型结束本轮回复并提示用户稍后重试。
+原因是 DBAAS 数据刷新可能受后台锁、接口超时或服务重启影响；
+无限重试会导致流式响应长时间不结束，前端发送按钮持续不可用。
 
 `user_id` 和 `role` 不应暴露为大模型可填写的 tool 参数。
 

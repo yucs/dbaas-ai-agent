@@ -58,6 +58,28 @@ keep_recent_messages = 6
 # 压缩摘要允许使用的最大 token 数。
 summary_max_tokens = 2048
 
+[dbaas_server]
+# DBAAS mock/server 基础地址；接口 path 由代码集中维护。
+base_url = "http://127.0.0.1:9000"
+# 调用 DBAAS HTTP 接口的超时时间，单位秒。
+request_timeout_seconds = 5
+
+[dbaas_workspace]
+# DBAAS 工作目录；用于保存快照、锁和临时文件。
+dir = "./data/runtime/dbaas_workspace"
+# 后台同步服务数据的间隔，单位秒。
+sync_interval_seconds = 5
+# 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
+ttl_seconds = 30
+# 等待服务/主机等资源锁的最长时间，单位秒。
+resource_lock_timeout_seconds = 3
+# 单次 jq 查询最多运行多久，单位秒。
+jq_timeout_seconds = 3
+# 返回给大模型的最大预览条数。
+jq_max_preview_items = 50
+# 单次 jq 输出允许被 tool 处理的最大字节数。
+jq_max_output_bytes = 1048576
+
 [logging]
 # 日志等级；支持 DEBUG、INFO、WARNING、ERROR。
 level = "INFO"

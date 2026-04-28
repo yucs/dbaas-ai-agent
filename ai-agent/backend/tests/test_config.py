@@ -56,6 +56,19 @@ class SettingsFromFileTests(unittest.TestCase):
                     keep_recent_messages = 8
                     summary_max_tokens = 1024
 
+                    [dbaas_server]
+                    base_url = "http://127.0.0.1:9000"
+                    request_timeout_seconds = 7
+
+                    [dbaas_workspace]
+                    dir = "./var/dbaas"
+                    sync_interval_seconds = 5
+                    ttl_seconds = 30
+                    resource_lock_timeout_seconds = 4
+                    jq_timeout_seconds = 6
+                    jq_max_preview_items = 25
+                    jq_max_output_bytes = 2048
+
                     [logging]
                     level = "DEBUG"
                     log_file = "./logs/unit.log"
@@ -87,6 +100,14 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.soft_trigger_tokens, 50000)
             self.assertEqual(settings.keep_recent_messages, 8)
             self.assertEqual(settings.summary_max_tokens, 1024)
+            self.assertEqual(settings.dbaas_server_base_url, "http://127.0.0.1:9000")
+            self.assertEqual(settings.dbaas_request_timeout_seconds, 7)
+            self.assertEqual(settings.dbaas_sync_interval_seconds, 5)
+            self.assertEqual(settings.dbaas_ttl_seconds, 30)
+            self.assertEqual(settings.dbaas_resource_lock_timeout_seconds, 4)
+            self.assertEqual(settings.dbaas_jq_timeout_seconds, 6)
+            self.assertEqual(settings.dbaas_jq_max_preview_items, 25)
+            self.assertEqual(settings.dbaas_jq_max_output_bytes, 2048)
             self.assertEqual(settings.log_level, "DEBUG")
             self.assertEqual(settings.log_max_bytes, 2048)
             self.assertEqual(settings.log_backup_count, 3)
@@ -109,6 +130,7 @@ class SettingsFromFileTests(unittest.TestCase):
                 settings.compression_prompt_path,
                 (config_root / "prompts/compression.md").resolve(),
             )
+            self.assertEqual(settings.dbaas_workspace_dir, (config_root / "var/dbaas").resolve())
             self.assertEqual(settings.log_file, (config_root / "logs/unit.log").resolve())
 
 

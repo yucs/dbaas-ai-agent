@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from dbass_ai_agent.agent.runtime import DeepAgentRuntime  # noqa: E402
+from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta  # noqa: E402
 
 
@@ -28,7 +29,11 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         session = _session_meta()
         user_message = _user_message("请查询 mysql-xf2 当前 CPU 和内存状态")
 
-        reply = runtime.generate_reply(session=session, user_message=user_message)
+        reply = runtime.generate_reply(
+            identity=_identity(),
+            session=session,
+            user_message=user_message,
+        )
 
         self.assertEqual(reply.content, "已查询 dbaas-server 并返回结果")
         self.assertIsNone(reply.warning)
@@ -47,7 +52,13 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         session = _session_meta()
         user_message = _user_message("扩容 mysql-xf2 到 16C64G 前先检查集群状态")
 
-        events = list(runtime.stream_reply(session=session, user_message=user_message))
+        events = list(
+            runtime.stream_reply(
+                identity=_identity(),
+                session=session,
+                user_message=user_message,
+            )
+        )
 
         self.assertEqual([event.event for event in events], ["started", "token", "token", "completed"])
         self.assertTrue(all(event.warning is None for event in events))
@@ -75,6 +86,10 @@ def _user_message(content: str) -> ChatMessage:
         content=content,
         created_at=datetime.now(UTC),
     )
+
+
+def _identity() -> Identity:
+    return Identity(user_id="admin", role="admin", user=None)
 
 
 if __name__ == "__main__":

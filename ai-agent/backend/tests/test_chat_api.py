@@ -38,7 +38,7 @@ class StubAgentRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate_reply(self, *, session, user_message):
+    def generate_reply(self, *, identity, session, user_message):
         self.calls.append((session.thread_id, user_message.content))
         return AgentReply(
             run_id="run_test_001",
@@ -46,7 +46,7 @@ class StubAgentRuntime:
             mode="deepagent",
         )
 
-    def stream_reply(self, *, session, user_message):
+    def stream_reply(self, *, identity, session, user_message):
         self.calls.append((session.thread_id, user_message.content))
         yield AgentStreamEvent(event="started", run_id="run_stream_001", mode="deepagent")
         yield AgentStreamEvent(
@@ -98,14 +98,14 @@ class StubAgentRuntime:
 
 
 class ErroringAgentRuntime:
-    def generate_reply(self, *, session, user_message):
+    def generate_reply(self, *, identity, session, user_message):
         raise AgentInvocationError(
             "模型服务调用失败：mock provider unavailable",
             error_type="provider_error",
             stage="invoke",
         )
 
-    def stream_reply(self, *, session, user_message):
+    def stream_reply(self, *, identity, session, user_message):
         yield AgentStreamEvent(event="started", run_id="run_error_001", mode="deepagent")
         raise AgentInvocationError(
             "函数调用失败：mock_tool 参数 invalid",

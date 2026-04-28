@@ -46,6 +46,15 @@ class Settings:
     log_enable_console: bool = True
     log_request_body: bool = False
     real_llm_tests_enabled: bool = False
+    dbaas_server_base_url: str = "http://127.0.0.1:9000"
+    dbaas_request_timeout_seconds: int = 5
+    dbaas_workspace_dir: Path = APP_ROOT / "data" / "runtime" / "dbaas_workspace"
+    dbaas_sync_interval_seconds: int = 5
+    dbaas_ttl_seconds: int = 30
+    dbaas_resource_lock_timeout_seconds: int = 3
+    dbaas_jq_timeout_seconds: int = 3
+    dbaas_jq_max_preview_items: int = 50
+    dbaas_jq_max_output_bytes: int = 1_048_576
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -59,6 +68,8 @@ class Settings:
         compression = _get_table(config, "compression")
         logging_config = _get_table(config, "logging")
         tests = _get_table(config, "tests")
+        dbaas_server = _get_table(config, "dbaas_server")
+        dbaas_workspace = _get_table(config, "dbaas_workspace")
         base_dir = config_path.parent
 
         runtime_root = _resolve_path(
@@ -118,6 +129,50 @@ class Settings:
             log_enable_console=_get_bool(logging_config, "enable_console", True),
             log_request_body=_get_bool(logging_config, "log_request_body", False),
             real_llm_tests_enabled=_get_bool(tests, "real_llm_enabled", False),
+            dbaas_server_base_url=_get_string(
+                dbaas_server,
+                "base_url",
+                "http://127.0.0.1:9000",
+            ),
+            dbaas_request_timeout_seconds=_get_positive_int(
+                dbaas_server,
+                "request_timeout_seconds",
+                5,
+            ),
+            dbaas_workspace_dir=_resolve_path(
+                base_dir,
+                _get_string(
+                    dbaas_workspace,
+                    "dir",
+                    "./data/runtime/dbaas_workspace",
+                ),
+            ),
+            dbaas_sync_interval_seconds=_get_positive_int(
+                dbaas_workspace,
+                "sync_interval_seconds",
+                5,
+            ),
+            dbaas_ttl_seconds=_get_positive_int(dbaas_workspace, "ttl_seconds", 30),
+            dbaas_resource_lock_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "resource_lock_timeout_seconds",
+                3,
+            ),
+            dbaas_jq_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "jq_timeout_seconds",
+                3,
+            ),
+            dbaas_jq_max_preview_items=_get_positive_int(
+                dbaas_workspace,
+                "jq_max_preview_items",
+                50,
+            ),
+            dbaas_jq_max_output_bytes=_get_positive_int(
+                dbaas_workspace,
+                "jq_max_output_bytes",
+                1_048_576,
+            ),
         )
 
 

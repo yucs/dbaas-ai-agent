@@ -11,6 +11,7 @@ import httpx
 
 from dbass_ai_agent.agent.compression_events import CompressionNotice, publish_compression_notice
 from dbass_ai_agent.config import Settings
+from dbass_ai_agent.dbaas.tools import build_dbaas_tools
 
 from .prompt import load_compression_prompt, load_system_prompt
 
@@ -244,6 +245,7 @@ def _create_runtime_agent(
     with patch_deepagents_summarization_factory(summarization_factory):
         return create_deep_agent(
             model=model,
+            tools=build_dbaas_tools(settings),
             checkpointer=checkpointer,
             system_prompt=system_prompt,
         )

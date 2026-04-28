@@ -13,6 +13,7 @@ from dbass_ai_agent.api.routes_chat import router as chat_router
 from dbass_ai_agent.api.routes_runs import router as runs_router
 from dbass_ai_agent.api.routes_sessions import router as sessions_router
 from dbass_ai_agent.config import Settings
+from dbass_ai_agent.dbaas.background import DbaasBackgroundSync
 from dbass_ai_agent.infra.logging import (
     bind_log_context,
     elapsed_ms,
@@ -57,8 +58,10 @@ def create_app() -> FastAPI:
     settings = get_app_settings()
     setup_logging(settings)
     _log_startup_settings(settings)
+    dbaas_background_sync = DbaasBackgroundSync(settings)
 
     app = FastAPI(title=settings.app_name)
+    app.state.dbaas_background_sync = dbaas_background_sync
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -166,7 +169,12 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
         logger.info("application shutting down")
+        await dbaas_background_sync.stop()
         await close_agent_runtime()
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        dbaas_background_sync.start()
 
     return app
 

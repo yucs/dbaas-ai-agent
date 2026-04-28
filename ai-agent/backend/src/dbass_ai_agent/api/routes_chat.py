@@ -51,6 +51,7 @@ def send_message(
         )
         try:
             reply = agent_runtime.generate_reply(
+                identity=identity,
                 session=session,
                 user_message=user_message,
             )
@@ -128,7 +129,11 @@ def stream_message(
             final_event = None
             current_run_id = "-"
             try:
-                for event in agent_runtime.stream_reply(session=session, user_message=user_message):
+                for event in agent_runtime.stream_reply(
+                    identity=identity,
+                    session=session,
+                    user_message=user_message,
+                ):
                     current_run_id = event.run_id or current_run_id
                     if event.event == "started":
                         yield _sse_event(
