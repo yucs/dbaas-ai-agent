@@ -18,16 +18,12 @@ if str(SRC_ROOT) not in sys.path:
 from dbass_ai_agent.config import APP_ROOT  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
-from dbass_ai_agent.dbaas.locks import ResourceFileLock  # noqa: E402
 from dbass_ai_agent.dbaas.query import query_dbaas_data  # noqa: E402
 from dbass_ai_agent.dbaas.schema import describe_schema, validate_payload  # noqa: E402
 from dbass_ai_agent.dbaas.sync import DbaasServiceSynchronizer, isoformat, utcnow  # noqa: E402
 from dbass_ai_agent.dbaas.tools import (  # noqa: E402
-    DbaasToolRunState,
-    _apply_refreshing_retry_limit,
     dbaas_tool_identity,
 )
-from dbass_ai_agent.dbaas.visibility import ensure_visible_services  # noqa: E402
 from dbass_ai_agent.dbaas.workspace import DbaasWorkspace, write_json_atomic, write_meta_atomic  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 
@@ -63,29 +59,8 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertTrue(workspace.data_path(SERVICES_KIND).exists())
             self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
-    def test_visible_services_filters_regular_user(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = _config(tmpdir)
-            with patch.object(
-                DbaasServiceSynchronizer,
-                "_fetch_services",
-                return_value=[
-                    _service("mysql-a", "payment-team"),
-                    _service("mysql-b", "billing-team"),
-                ],
-            ):
-                meta = ensure_visible_services(
-                    config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
-                )
-
-            payload = _read_json(Path(meta["data_path"]))
-            self.assertEqual(meta["scope"], "user")
-            self.assertEqual(meta["record_count"], 1)
-            self.assertEqual([item["name"] for item in payload], ["mysql-a"])
-
     @unittest.skipUnless(shutil.which("jq"), "jq is required for DBAAS query tests")
-    def test_query_dbaas_data_uses_user_scoped_snapshot(self) -> None:
+    def test_query_dbaas_data_filters_regular_user_with_jq_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
             _write_fresh_admin_snapshot(
@@ -115,47 +90,105 @@ class DbaasSyncTests(unittest.TestCase):
         copy_context().run(manager.__enter__)
         copy_context().run(manager.__exit__, None, None, None)
 
-    def test_resource_lock_removes_stale_pid_lock(self) -> None:
+    def test_expired_admin_snapshot_is_deleted_before_refresh_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            lock_path = Path(tmpdir) / "services.lock"
-            lock_path.write_text("12345", encoding="ascii")
+            config = _config(tmpdir)
+            workspace = DbaasWorkspace(config)
+            _write_expired_admin_snapshot(config, [_service("mysql-old", "payment-team")])
 
-            with patch("dbass_ai_agent.dbaas.locks._pid_exists", return_value=False):
-                with ResourceFileLock(lock_path, timeout_seconds=1):
-                    self.assertTrue(lock_path.exists())
+            with patch.object(
+                DbaasServiceSynchronizer,
+                "_fetch_services",
+                side_effect=RuntimeError("dbaas unavailable"),
+            ):
+                meta = DbaasServiceSynchronizer(config).force_refresh_admin_services()
 
-            self.assertFalse(lock_path.exists())
+            self.assertEqual(meta["status"], "error")
+            self.assertEqual(meta["error_type"], "snapshot_unavailable")
+            self.assertFalse(workspace.data_path(SERVICES_KIND).exists())
+            self.assertFalse(workspace.meta_path(SERVICES_KIND).exists())
 
-    def test_refreshing_retry_limit_stops_after_three_attempts(self) -> None:
-        state = DbaasToolRunState()
-        meta = {"kind": SERVICES_KIND, "status": "refreshing", "message": "refreshing"}
+    @unittest.skipUnless(shutil.which("jq"), "jq is required for DBAAS query tests")
+    def test_fresh_snapshot_remains_queryable_when_refresh_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            workspace = DbaasWorkspace(config)
+            _write_fresh_admin_snapshot(
+                config,
+                [
+                    _service("mysql-a", "payment-team", health_status="HEALTHY"),
+                    _service("mysql-b", "payment-team", health_status="UNHEALTHY"),
+                ],
+            )
 
-        statuses = [
-            _apply_refreshing_retry_limit(meta, state, kind=SERVICES_KIND)["status"]
-            for _ in range(4)
-        ]
+            with patch.object(
+                DbaasServiceSynchronizer,
+                "_fetch_services",
+                side_effect=RuntimeError("dbaas unavailable"),
+            ):
+                meta = DbaasServiceSynchronizer(config).force_refresh_admin_services()
 
-        self.assertEqual(
-            statuses,
-            [
-                "refreshing",
-                "refreshing",
-                "refreshing",
-                "refreshing_retry_exhausted",
-            ],
-        )
+            self.assertEqual(meta["status"], "error")
+            self.assertTrue(workspace.data_path(SERVICES_KIND).exists())
+            self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
-    def test_refreshing_retry_limit_resets_after_fresh_meta(self) -> None:
-        state = DbaasToolRunState()
-        refreshing = {"kind": SERVICES_KIND, "status": "refreshing", "message": "refreshing"}
-        fresh = {"kind": SERVICES_KIND, "status": "fresh"}
+            result = query_dbaas_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                kind="services",
+                jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+            )
 
-        _apply_refreshing_retry_limit(refreshing, state, kind=SERVICES_KIND)
-        _apply_refreshing_retry_limit(fresh, state, kind=SERVICES_KIND)
-        result = _apply_refreshing_retry_limit(refreshing, state, kind=SERVICES_KIND)
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["preview"], 1)
 
-        self.assertEqual(result["status"], "refreshing")
-        self.assertEqual(result["refreshing_attempt"], 1)
+    def test_query_returns_error_when_snapshot_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+
+            result = query_dbaas_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                kind="services",
+                jq_filter=".[]",
+            )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            self.assertIsNone(result["data_path"])
+
+    def test_query_does_not_trigger_sync_when_snapshot_is_expired(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_expired_admin_snapshot(config, [_service("mysql-old", "payment-team")])
+
+            with patch.object(DbaasServiceSynchronizer, "_fetch_services") as fetch_services:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="admin", role="admin", user=None),
+                    kind="services",
+                    jq_filter=".[]",
+                )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            fetch_services.assert_not_called()
+
+    def test_query_error_message_is_suitable_for_user_answer_when_snapshot_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+
+            result = query_dbaas_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                kind="services",
+                jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+            )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            self.assertIn("当前没有可用的服务列表快照", result["message"])
+            self.assertIn("后台同步可能尚未完成", result["message"])
 
 
 def _config(tmpdir: str) -> DbaasConfig:
@@ -165,7 +198,6 @@ def _config(tmpdir: str) -> DbaasConfig:
         workspace_dir=Path(tmpdir) / "workspace",
         sync_interval_seconds=5,
         ttl_seconds=30,
-        resource_lock_timeout_seconds=1,
         jq_timeout_seconds=2,
         jq_max_preview_items=50,
         jq_max_output_bytes=1024 * 1024,
@@ -210,6 +242,29 @@ def _write_fresh_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> Non
             "status": "fresh",
             "synced_at": isoformat(now),
             "expires_at": isoformat(now + timedelta(seconds=config.ttl_seconds)),
+            "ttl_seconds": config.ttl_seconds,
+            "record_count": len(payload),
+            "bytes": bytes_written,
+            "data_path": str(data_path),
+            "meta_path": str(workspace.meta_path(SERVICES_KIND)),
+            "schema_version": "services.v1",
+        },
+    )
+
+
+def _write_expired_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> None:
+    workspace = DbaasWorkspace(config)
+    data_path = workspace.data_path(SERVICES_KIND)
+    bytes_written = write_json_atomic(data_path, payload)
+    now = utcnow()
+    write_meta_atomic(
+        workspace.meta_path(SERVICES_KIND),
+        {
+            "kind": SERVICES_KIND,
+            "scope": "admin",
+            "status": "fresh",
+            "synced_at": isoformat(now - timedelta(seconds=config.ttl_seconds * 2)),
+            "expires_at": isoformat(now - timedelta(seconds=1)),
             "ttl_seconds": config.ttl_seconds,
             "record_count": len(payload),
             "bytes": bytes_written,

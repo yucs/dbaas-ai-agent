@@ -64,7 +64,6 @@ class SettingsFromFileTests(unittest.TestCase):
                     dir = "./var/dbaas"
                     sync_interval_seconds = 5
                     ttl_seconds = 30
-                    resource_lock_timeout_seconds = 4
                     jq_timeout_seconds = 6
                     jq_max_preview_items = 25
                     jq_max_output_bytes = 2048
@@ -104,7 +103,6 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.dbaas_request_timeout_seconds, 7)
             self.assertEqual(settings.dbaas_sync_interval_seconds, 5)
             self.assertEqual(settings.dbaas_ttl_seconds, 30)
-            self.assertEqual(settings.dbaas_resource_lock_timeout_seconds, 4)
             self.assertEqual(settings.dbaas_jq_timeout_seconds, 6)
             self.assertEqual(settings.dbaas_jq_max_preview_items, 25)
             self.assertEqual(settings.dbaas_jq_max_output_bytes, 2048)

@@ -9,16 +9,12 @@ SUPPORTED_KINDS = {SERVICES_KIND}
 SERVICES_ENDPOINT = "/services"
 
 ADMIN_SCOPE = "admin"
-USERS_SCOPE = "users"
 
 DATA_FILE_NAMES = {
     SERVICES_KIND: "services.json",
 }
 META_FILE_NAMES = {
     SERVICES_KIND: "services.meta.json",
-}
-LOCK_FILE_NAMES = {
-    SERVICES_KIND: "services.lock",
 }
 
 SCHEMA_FILES = {

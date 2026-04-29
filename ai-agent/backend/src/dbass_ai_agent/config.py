@@ -51,7 +51,6 @@ class Settings:
     dbaas_workspace_dir: Path = APP_ROOT / "data" / "runtime" / "dbaas_workspace"
     dbaas_sync_interval_seconds: int = 5
     dbaas_ttl_seconds: int = 30
-    dbaas_resource_lock_timeout_seconds: int = 3
     dbaas_jq_timeout_seconds: int = 3
     dbaas_jq_max_preview_items: int = 50
     dbaas_jq_max_output_bytes: int = 1_048_576
@@ -153,11 +152,6 @@ class Settings:
                 5,
             ),
             dbaas_ttl_seconds=_get_positive_int(dbaas_workspace, "ttl_seconds", 30),
-            dbaas_resource_lock_timeout_seconds=_get_positive_int(
-                dbaas_workspace,
-                "resource_lock_timeout_seconds",
-                3,
-            ),
             dbaas_jq_timeout_seconds=_get_positive_int(
                 dbaas_workspace,
                 "jq_timeout_seconds",

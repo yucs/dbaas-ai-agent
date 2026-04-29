@@ -36,13 +36,8 @@
 
 DBAAS 数据工具使用规则：
 
-1. 每个 session 首次查询某一类 DBAAS 数据前，必须先调用 `describe_dbaas_schema_tool(kind=...)` 获取该 kind 的结构定义；不要凭经验猜字段名生成 jq。
-2. 同一 session 中，如果已经针对相同 kind 调用过 `describe_dbaas_schema_tool`，并且 schema version 未变化，可以复用已知结构，不必重复查询。
-3. 查询服务列表、服务数量、异常服务、服务归属、服务资源或服务详情前，先使用 `sync_services_tool` 确保当前用户可见的 services 数据可用。
-4. 对 services 做筛选、统计、分组、排序、字段提取或详情定位时，使用 `query_dbaas_data_tool`，并根据用户问题和 schema 生成 `jq_filter`。
-5. `query_dbaas_data_tool` 只需要传 `kind`、`jq_filter` 和必要的 `max_preview_items`；不要传文件路径，不要传 `user_id`，不要传 `role`。
-6. services 数据顶层是数组，jq 表达式应从 `.[]` 开始处理单个服务，例如 `.[] | select(.name == "mysql-xf2")`。
-7. 不要尝试使用通用 `cat`、`ls`、`grep` 或任意 shell 思路读取 DBAAS 数据；只能使用系统提供的 DBAAS 工具。
-8. 工具返回 `truncated=true` 时，说明结果较多，只基于 preview 总结，并建议用户缩小查询条件。
-9. `sync_services_tool` 返回 `refreshing` 时，同一轮最多重试 3 次；如果第 4 次返回 `refreshing_retry_exhausted`，必须结束工具调用，直接说明数据仍在刷新中，请用户稍后重试。
-10. 工具返回 `error`、`missing` 或权限相关错误时，直接说明当前无法获得准确数据，不要基于旧数据猜测。
+1. 查询 DBAAS 服务列表、服务数量、异常状态、归属、资源规格或详情时，使用 DBAAS 数据工具获取真实快照，不要猜测。
+2. 当前 DBAAS 数据工具仅支持 services；如果用户询问独立告警、主机、集群等尚未支持的数据对象，应说明暂不支持，不要构造未支持 kind。
+3. 需要筛选、统计、分组、排序、字段提取或详情定位时，使用查询工具执行 jq，并基于工具结果回答。
+4. 不要尝试使用通用 `cat`、`ls`、`grep` 或任意 shell 思路读取 DBAAS 数据；只能使用系统提供的 DBAAS 工具。
+5. 工具返回 `error`、`missing`、权限错误或快照不可用时，直接说明当前无法获得准确数据，不要基于旧数据猜测。

@@ -65,14 +65,12 @@ base_url = "http://127.0.0.1:9000"
 request_timeout_seconds = 5
 
 [dbaas_workspace]
-# DBAAS 工作目录；用于保存快照、锁和临时文件。
+# DBAAS 工作目录；用于保存快照和临时文件。
 dir = "./data/runtime/dbaas_workspace"
 # 后台同步服务数据的间隔，单位秒。
 sync_interval_seconds = 5
 # 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
 ttl_seconds = 30
-# 等待服务/主机等资源锁的最长时间，单位秒。
-resource_lock_timeout_seconds = 3
 # 单次 jq 查询最多运行多久，单位秒。
 jq_timeout_seconds = 3
 # 返回给大模型的最大预览条数。

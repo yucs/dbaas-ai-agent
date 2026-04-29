@@ -11,16 +11,17 @@ from dbass_ai_agent.config import APP_ROOT
 
 from .config import DbaasConfig
 from .constants import SERVICES_ENDPOINT, SERVICES_KIND
-from .locks import ResourceFileLock, ResourceLockTimeoutError, lock_exists
 from .schema import DbaasSchemaError, schema_path, schema_version, validate_payload
-from .workspace import DbaasWorkspace, delete_if_exists, read_json_file, write_json_atomic, write_meta_atomic
+from .workspace import (
+    DbaasWorkspace,
+    delete_if_exists,
+    read_json_file,
+    replace_file_atomic,
+    write_json_temp,
+)
 
 
 logger = logging.getLogger(__name__)
-
-
-class DbaasSyncError(RuntimeError):
-    """Raised when a DBAAS snapshot cannot be synchronized."""
 
 
 def utcnow() -> datetime:
@@ -50,7 +51,10 @@ def is_meta_fresh(meta: dict[str, Any], *, now: datetime | None = None) -> bool:
 def read_meta(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    payload = read_json_file(path)
+    try:
+        payload = read_json_file(path)
+    except (FileNotFoundError, ValueError):
+        return None
     if not isinstance(payload, dict):
         return None
     return payload
@@ -62,49 +66,15 @@ class DbaasServiceSynchronizer:
         self.workspace = DbaasWorkspace(config)
         self.app_root = app_root
 
-    def ensure_admin_services(self) -> dict[str, Any]:
-        current = self._current_admin_meta()
-        if current is not None and is_meta_fresh(current) and self.workspace.data_path(SERVICES_KIND).exists():
-            return current
-
-        lock_path = self.workspace.lock_path(SERVICES_KIND)
-        try:
-            with ResourceFileLock(
-                lock_path,
-                timeout_seconds=self.config.resource_lock_timeout_seconds,
-            ):
-                current = self._current_admin_meta()
-                if (
-                    current is not None
-                    and is_meta_fresh(current)
-                    and self.workspace.data_path(SERVICES_KIND).exists()
-                ):
-                    return current
-                self._delete_expired_admin_files()
-                return self.refresh_admin_services()
-        except ResourceLockTimeoutError as exc:
-            return self._refreshing_meta()
-        except Exception as exc:
-            logger.exception("dbaas services sync failed")
-            meta = self._error_meta(str(exc))
-            write_meta_atomic(self.workspace.meta_path(SERVICES_KIND), meta)
-            raise DbaasSyncError(str(exc)) from exc
-
     def force_refresh_admin_services(self) -> dict[str, Any]:
-        lock_path = self.workspace.lock_path(SERVICES_KIND)
+        current = self._current_admin_meta()
+        if not self._is_admin_snapshot_fresh(current):
+            self._delete_admin_files()
         try:
-            with ResourceFileLock(
-                lock_path,
-                timeout_seconds=self.config.resource_lock_timeout_seconds,
-            ):
-                return self.refresh_admin_services()
-        except ResourceLockTimeoutError:
-            return self._refreshing_meta()
+            return self.refresh_admin_services()
         except Exception as exc:
             logger.exception("dbaas services force refresh failed")
-            meta = self._error_meta(str(exc))
-            write_meta_atomic(self.workspace.meta_path(SERVICES_KIND), meta)
-            raise DbaasSyncError(str(exc)) from exc
+            return self._unavailable_meta(str(exc))
 
     def refresh_admin_services(self) -> dict[str, Any]:
         payload = self._fetch_services()
@@ -116,28 +86,40 @@ class DbaasServiceSynchronizer:
 
         now = utcnow()
         data_path = self.workspace.data_path(SERVICES_KIND)
-        bytes_written = write_json_atomic(data_path, payload)
+        meta_path = self.workspace.meta_path(SERVICES_KIND)
         record_count = len(payload) if isinstance(payload, list) else 0
-        meta = {
-            "kind": SERVICES_KIND,
-            "scope": "admin",
-            "version": 1,
-            "data_path": str(data_path),
-            "meta_path": str(self.workspace.meta_path(SERVICES_KIND)),
-            "status": "fresh",
-            "synced_at": isoformat(now),
-            "expires_at": isoformat(now + timedelta(seconds=self.config.ttl_seconds)),
-            "ttl_seconds": self.config.ttl_seconds,
-            "record_count": record_count,
-            "bytes": bytes_written,
-            "source": "dbaas-server",
-            "source_endpoint": SERVICES_ENDPOINT,
-            "schema_version": schema_version(SERVICES_KIND),
-            "schema_path": str(schema_path(SERVICES_KIND, app_root=self.app_root)),
-            "last_refresh_status": "success",
-            "last_error": None,
-        }
-        write_meta_atomic(self.workspace.meta_path(SERVICES_KIND), meta)
+        data_tmp_path: Path | None = None
+        meta_tmp_path: Path | None = None
+        try:
+            data_tmp_path, bytes_written = write_json_temp(data_path, payload)
+            meta = {
+                "kind": SERVICES_KIND,
+                "scope": "admin",
+                "version": 1,
+                "data_path": str(data_path),
+                "meta_path": str(meta_path),
+                "status": "fresh",
+                "synced_at": isoformat(now),
+                "expires_at": isoformat(now + timedelta(seconds=self.config.ttl_seconds)),
+                "ttl_seconds": self.config.ttl_seconds,
+                "record_count": record_count,
+                "bytes": bytes_written,
+                "source": "dbaas-server",
+                "source_endpoint": SERVICES_ENDPOINT,
+                "schema_version": schema_version(SERVICES_KIND),
+                "schema_path": str(schema_path(SERVICES_KIND, app_root=self.app_root)),
+                "last_refresh_status": "success",
+                "last_error": None,
+            }
+            meta_tmp_path, _ = write_json_temp(meta_path, meta)
+            replace_file_atomic(data_tmp_path, data_path)
+            replace_file_atomic(meta_tmp_path, meta_path)
+        except Exception:
+            if data_tmp_path is not None:
+                delete_if_exists(data_tmp_path)
+            if meta_tmp_path is not None:
+                delete_if_exists(meta_tmp_path)
+            raise
         logger.info("dbaas services snapshot refreshed records=%s bytes=%s", record_count, bytes_written)
         return meta
 
@@ -151,34 +133,28 @@ class DbaasServiceSynchronizer:
     def _current_admin_meta(self) -> dict[str, Any] | None:
         return read_meta(self.workspace.meta_path(SERVICES_KIND))
 
-    def _delete_expired_admin_files(self) -> None:
-        meta = self._current_admin_meta()
-        data_path = self.workspace.data_path(SERVICES_KIND)
-        if meta is None or not is_meta_fresh(meta) or not data_path.exists():
-            delete_if_exists(data_path)
+    def _is_admin_snapshot_fresh(self, meta: dict[str, Any] | None) -> bool:
+        return (
+            meta is not None
+            and is_meta_fresh(meta)
+            and self.workspace.data_path(SERVICES_KIND).exists()
+            and self.workspace.meta_path(SERVICES_KIND).exists()
+        )
 
-    def _refreshing_meta(self) -> dict[str, Any]:
+    def _delete_admin_files(self) -> None:
+        delete_if_exists(self.workspace.data_path(SERVICES_KIND))
+        delete_if_exists(self.workspace.meta_path(SERVICES_KIND))
+
+    def _unavailable_meta(self, message: str) -> dict[str, Any]:
         return {
             "kind": SERVICES_KIND,
             "scope": "admin",
-            "status": "refreshing",
-            "data_path": None,
-            "meta_path": str(self.workspace.meta_path(SERVICES_KIND)),
-            "refreshing": lock_exists(self.workspace.lock_path(SERVICES_KIND)),
-            "message": "服务列表正在刷新，请稍后重试。",
-        }
-
-    def _error_meta(self, message: str) -> dict[str, Any]:
-        now = utcnow()
-        return {
-            "kind": SERVICES_KIND,
-            "scope": "admin",
-            "version": 1,
-            "data_path": None,
-            "meta_path": str(self.workspace.meta_path(SERVICES_KIND)),
             "status": "error",
+            "error_type": "snapshot_unavailable",
+            "data_path": None,
+            "meta_path": str(self.workspace.meta_path(SERVICES_KIND)),
             "synced_at": None,
-            "expires_at": isoformat(now),
+            "expires_at": None,
             "ttl_seconds": self.config.ttl_seconds,
             "record_count": 0,
             "bytes": 0,
@@ -188,4 +164,5 @@ class DbaasServiceSynchronizer:
             "schema_path": str(schema_path(SERVICES_KIND, app_root=self.app_root)),
             "last_refresh_status": "error",
             "last_error": message,
+            "message": f"当前没有可用的服务列表快照，可能拉取 DBAAS 数据失败：{message}",
         }

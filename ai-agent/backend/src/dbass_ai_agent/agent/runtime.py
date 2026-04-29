@@ -10,7 +10,7 @@ from typing import Any, Literal
 from langchain_core.messages import BaseMessageChunk
 
 from dbass_ai_agent.config import Settings
-from dbass_ai_agent.dbaas.tools import DbaasToolRunState, dbaas_tool_identity
+from dbass_ai_agent.dbaas.tools import dbaas_tool_identity
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.ids import new_run_id
 from dbass_ai_agent.infra.logging import elapsed_ms, log_context, redact_log_text
@@ -168,12 +168,11 @@ class DeepAgentRuntime:
             started_at = perf_counter()
             try:
                 agent_stream = self._stream_agent_text(session.thread_id, question)
-                dbaas_tool_state = DbaasToolRunState()
                 while True:
                     try:
                         with (
                             capture_compression_notices(_on_compression),
-                            dbaas_tool_identity(identity, state=dbaas_tool_state),
+                            dbaas_tool_identity(identity),
                         ):
                             delta = next(agent_stream)
                     except StopIteration:

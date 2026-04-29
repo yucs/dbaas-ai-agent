@@ -92,7 +92,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             self.assertEqual(set(kwargs), {"model", "tools", "checkpointer", "system_prompt"})
             self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
-            self.assertEqual(len(kwargs["tools"]), 3)
+            self.assertEqual(len(kwargs["tools"]), 2)
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
             self.assertEqual(kwargs["system_prompt"], "system prompt")
 

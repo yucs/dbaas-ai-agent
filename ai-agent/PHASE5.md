@@ -22,13 +22,12 @@
 - 后台定时任务负责周期性拉取 `dbaas-mock-server` 数据
 - 固定路径保存最新快照，例如 `services.json`
 - 同步生成对应元数据，例如 `services.meta.json`
-- Agent 可见 tool 可以在快照缺失或过期时主动触发同步
-- 后台任务和 Agent 可见 tool 共用同一套同步逻辑和同一把资源锁
-- 数据过期、缺失、刷新中、刷新失败等状态通过 meta 结构表达
+- 后台同步是唯一写者，Agent 可见 tool 不触发同步、不写快照
+- 数据过期、缺失、刷新失败等状态通过 meta 或 tool 返回结构表达
 - 过期快照不再作为 Agent 查询依据，避免旧数据误导用户
 
 也就是说，后台任务负责尽量保持快照新鲜；
-大模型 tool 在用户查询时负责兜底确保快照可用。
+大模型 tool 在用户查询时只读取已经发布的快照。
 
 ## 3. 服务列表快照文件
 
@@ -89,11 +88,20 @@ services.meta.json
 6. 原子替换 `services.json`
 7. 原子替换 `services.meta.json`
 
+后台同步是当前唯一写者，因此不需要资源锁。
+`jq` 查询不获取锁，直接读取当前正式 `services.json`。
+如果 `jq` 在替换前打开文件，会读旧文件；
+如果在替换后打开文件，会读新文件。
+`os.replace` 保证不会读到半截 JSON。
+`services.json` 和 `services.meta.json` 两次替换之间的短暂不一致窗口可以接受。
+
 如果刷新失败，不应返回旧的过期快照给 Agent 查询。
 
-刷新失败应体现在 `services.meta.json` 的状态和错误字段中。
 旧的过期快照应直接删除，
 tool 对外返回时不能再提供旧的过期 `data_path`。
+如果过期文件已删除且本次拉取失败，
+可以直接返回 `error`，说明当前没有可用快照，可能拉取 DBAAS 数据失败；
+不要求写入新的错误 meta 文件。
 
 后台同步间隔、TTL、快照根目录和 `dbaas-mock-server` 地址必须写入 `config.toml`，
 不能在代码中写死。
@@ -109,7 +117,6 @@ request_timeout_seconds = 5
 dir = ".runtime/dbaas_workspace"
 sync_interval_seconds = 5
 ttl_seconds = 30
-resource_lock_timeout_seconds = 3
 jq_timeout_seconds = 3
 jq_max_preview_items = 50
 jq_max_output_bytes = 1048576
@@ -122,13 +129,11 @@ jq_max_output_bytes = 1048576
 - `dbaas_server.request_timeout_seconds`
   - 调用 `dbaas-mock-server` HTTP 接口的超时时间
 - `dbaas_workspace.dir`
-  - DBAAS 工作目录根路径，用于保存快照、锁、临时文件和后续查询输出等运行时数据
+  - DBAAS 工作目录根路径，用于保存快照、临时文件和后续查询输出等运行时数据
 - `dbaas_workspace.sync_interval_seconds`
   - 后台任务触发拉取的间隔
 - `dbaas_workspace.ttl_seconds`
   - 快照对 Agent 查询来说仍被认为新鲜的时间窗口，用于 tool 判断 `fresh` / `stale`
-- `dbaas_workspace.resource_lock_timeout_seconds`
-  - 等待快照资源锁的最长时间，用于避免 tool 或后台任务长时间卡在锁等待上
 - `dbaas_workspace.jq_timeout_seconds`
   - 单次 `jq` 查询最多运行多久
 - `dbaas_workspace.jq_max_preview_items`
@@ -171,72 +176,44 @@ realtime_status.meta.json
   - 控制 tool 如何判断已有快照是否仍然新鲜
   - 如果后台异常导致快照长时间未更新，tool 可以据此返回 `stale`
 
-后台同步任务和 `sync_services_tool` 主动触发同步时，
-都必须使用同一个 `request_timeout_seconds`，
-避免 HTTP 调用长期阻塞锁和用户请求。
-
-`request_timeout_seconds` 和 `resource_lock_timeout_seconds` 的职责不同：
-
-- `request_timeout_seconds`
-  - 控制调用 `dbaas-server` HTTP 接口最多等待多久
-- `resource_lock_timeout_seconds`
-  - 控制等待 `services.lock`、`hosts.lock` 等快照资源锁最多等待多久
-  - 如果等待锁超时，tool 应返回 `refreshing`，提示稍后重试
-  - 锁文件中记录持有锁进程的 PID；如果 PID 已不存在，视为 stale lock，允许自动删除后重新加锁
-  - stale lock 主要用于处理开发阶段服务重启、进程被终止或 reload 中断时残留的锁文件，避免后台同步永久被误判为 `refreshing`
+后台同步任务必须使用 `request_timeout_seconds`，
+避免 HTTP 调用长期阻塞后台刷新循环。
 
 ## 5. Tool 语义
 
-`sync_services_tool` 可以保留这个方法名，
-但语义需要明确为：
+第一版 Agent 可见工具保留：
 
 ```text
-确保服务列表快照可用；如果缺失或过期，则主动触发一次同步。
+query_dbaas_data_tool
+describe_dbaas_schema_tool
 ```
 
-它主要执行：
+`query_dbaas_data_tool` 的职责是读取已发布快照并执行受控 `jq`。
+它不调用 `dbaas-mock-server`，
+不删除文件，
+不写入快照，
+也不触发后台同步。
+
+查询前主要执行：
 
 - 检查 `services.json` 是否存在
 - 检查 `services.meta.json` 是否存在
 - 读取 meta
 - 判断当前时间是否超过 `expires_at`
-- 如果快照存在且未过期，直接返回快照状态、路径、刷新时间和可读提示
-- 如果快照缺失或过期，则获取 `services.lock`
-- 获取锁后再次检查快照是否已经被其他调用刷新
-- 如果仍然缺失或过期，则调用统一同步逻辑刷新快照
-- 同步成功后返回新的 fresh 快照
-- 同步失败时返回 error，不返回旧的过期 `data_path`
+- 检查 meta 中的 `data_path` 是否指向当前 admin `services.json`
+- 如果快照存在且未过期，执行 `jq`
+- 如果快照缺失或过期，返回 error，不返回旧的过期 `data_path`
 
 它不做：
 
 - 不用大模型计算服务数量或统计值
 - 不把完整 `services.json` 返回给大模型上下文
+- 不触发同步
+- 不生成用户 scoped 快照文件
 
-`sync_services_tool` 可以访问 `dbaas-mock-server`，
-但必须通过统一同步逻辑访问，
-不能另写一套独立拉取和写文件流程。
-
-锁逻辑建议：
-
-1. 先检查快照是否 fresh
-2. 如果 fresh，直接返回
-3. 如果 missing 或 stale，尝试获取 `services.lock`
-4. 获取锁后再次检查快照是否 fresh
-5. 仍然 missing 或 stale 时执行同步
-6. 使用临时文件写入并原子替换正式文件
-7. 释放锁并返回结果
-
-如果等待锁超时，返回：
-
-```json
-{
-  "kind": "services",
-  "status": "refreshing",
-  "data_path": null,
-  "refreshing": true,
-  "message": "服务列表正在刷新，请稍后重试。"
-}
-```
+如果快照不可用，返回 `error`，
+`data_path` 为 `null`，
+message 说明当前没有可用快照，后台同步可能尚未完成或拉取 DBAAS 数据失败。
 
 ## 6. 快照状态
 
@@ -245,45 +222,26 @@ realtime_status.meta.json
 - `fresh`
   - `services.json` 和 `services.meta.json` 都存在，且未过期
 - `stale`
-  - 快照文件存在，但已经超过 `expires_at`
+  - 快照文件存在，但已经超过 `expires_at`；这是内部判断状态，不应作为可查询路径返回给 Agent
 - `missing`
   - 正式快照或 meta 文件不存在
-- `refreshing`
-  - 后台任务正在刷新，可以通过 lock 或 meta 状态表达
-- `refreshing_retry_exhausted`
-  - 同一轮 Agent 调用中，`sync_services_tool` 已经连续返回超过 3 次 `refreshing`
-  - 此状态用于阻止模型无限循环重试；模型必须停止工具调用，直接告知用户数据仍在刷新中
 - `error`
   - 同步失败，当前没有可用于准确查询的 fresh 快照
 
 对于 `stale` 状态，tool 不应返回旧快照路径供 Agent 查询。
-它应尝试主动同步；
-如果同步失败，则返回 `error` 并说明当前没有可用于准确查询的数据。
+它应返回 `error` 并说明当前没有可用于准确查询的数据。
 
 ## 7. 是否删除过期文件
 
 当前策略调整为：
 
 - 过期快照不可用于 Agent 查询
-- `sync_services_tool` 在发现缺失或过期时可以主动触发同步
 - 同步成功后用原子替换覆盖旧文件
 - 同步失败时返回 `error`，不返回旧的过期 `data_path`
-- 旧的过期文件直接删除
+- 旧的过期 `services.json` 和 `services.meta.json` 直接删除
 
-删除过期文件必须在拿到对应资源锁之后执行，
-避免后台任务或其他 tool 调用正在读写同一个文件。
-
-后台任务和 tool 必须共用同一把资源锁：
-
-```text
-services.lock
-hosts.lock
-clusters.lock
-realtime_status.lock
-```
-
-后台任务和 tool 也必须共用同一个刷新方法，
-确保拉取、schema 校验、临时文件写入、原子替换和 meta 更新只有一套实现。
+删除过期文件由后台同步流程负责。
+Agent 可见 tool 不删除文件、不发布文件。
 
 ## 8. 查询与统计策略
 
@@ -326,10 +284,30 @@ query_dbaas_data_tool(kind, jq_filter, max_preview_items)
 tool 内部必须：
 
 1. 从 session / request identity 获取当前用户身份
-2. 调用 `sync_services_tool` 或通用 `ensure_visible_snapshot(kind, current_user)`
-3. 根据当前用户身份得到允许访问的 scoped `data_path`
-4. 只对该 `data_path` 执行 `jq`
-5. 使用超时、输出大小和 preview 条数限制
+2. 读取 admin `services.meta.json`
+3. 校验 meta 为 `fresh` 且未超过 `expires_at`
+4. 校验 `services.json` 存在且 meta 中的 `data_path` 指向当前固定文件
+5. 根据当前用户身份生成受控 `jq` 命令
+6. 使用超时、输出大小和 preview 条数限制
+
+admin 用户直接对 `services.json` 执行模型给出的 `jq_filter`。
+普通用户不能直接访问全量结果；
+工具必须用固定 wrapper 先过滤当前用户可见服务，
+再执行模型给出的 `jq_filter`。
+
+示例：
+
+```jq
+[.[] | select(.user == $current_user)] | (<model_jq_filter>)
+```
+
+执行时通过 `jq --arg current_user ...` 传入当前用户可见范围，
+不能把用户名直接拼进 jq 字符串。
+
+`jq` 查询不获取锁。
+如果后台同步刚好删除了过期快照或本次拉取失败，
+查询工具可以直接返回 `error`，
+说明当前没有可用数据。
 
 查询工具返回：
 
@@ -366,7 +344,7 @@ jq_max_output_bytes = 1048576
 - 不接受任意 path
 - `kind` 必须是枚举，例如 `services`、`hosts`、`clusters`、`realtime_status`
 - 执行 `jq` 时使用参数数组，不通过 shell 拼接命令
-- 普通用户只能查询自己的 scoped 快照
+- 普通用户必须通过固定 jq wrapper 查询自己的可见服务
 - admin 用户可以查询 admin 全量快照
 - 如果输出过大，只返回 preview 和 `truncated=true`，提示用户缩小查询条件
 
@@ -415,7 +393,6 @@ search_dbaas_data_tool
 第一版工具组合建议：
 
 ```text
-sync_services_tool
 query_dbaas_data_tool
 describe_dbaas_schema_tool
 ```
@@ -424,46 +401,30 @@ describe_dbaas_schema_tool
 
 服务数据需要区分管理员和普通用户可见范围。
 
-当前建议采用工作目录隔离：
+当前第一版不再为普通用户生成 scoped 快照文件。
+后台同步只维护 admin 全量快照：
 
 ```text
 .runtime/dbaas_workspace/
   admin/
     services.json
     services.meta.json
-  users/
-    {user_id}/
-      services.json
-      services.meta.json
 ```
 
-其中：
-
-- `admin/services.json`
-  - 管理员视图，保存全量服务快照
-- `users/{user_id}/services.json`
-  - 普通用户视图，只保存该用户可见服务
-
-`sync_services_tool` 的语义应调整为：
-
-```text
-确保当前用户可见的 services 快照可用。
-```
+其中 `admin/services.json` 保存全量服务快照。
 
 执行流程：
 
 1. 从 session / request identity 获取当前 `user_id` 和 `role`
-2. 确保 `admin/services.json` 全量快照 fresh
-3. 如果当前用户是管理员，返回 `admin/services.json`
-4. 如果当前用户是普通用户，从全量快照过滤出用户可见服务
-5. 写入 `users/{user_id}/services.json` 和 `users/{user_id}/services.meta.json`
-6. 返回用户自己的 scoped 快照路径
+2. 查询工具读取 admin `services.meta.json` 并确认快照 fresh
+3. 如果当前用户是管理员，直接对 `admin/services.json` 执行 `jq_filter`
+4. 如果当前用户是普通用户，用固定 wrapper 先过滤当前用户可见服务，再执行 `jq_filter`
+5. 返回 `jq` 结果预览和截断信息
 
-如果同步路径返回 `refreshing`，同一轮 Agent 调用内最多允许 `sync_services_tool` 重试 3 次。
-第 4 次应返回 `refreshing_retry_exhausted`，
-让模型结束本轮回复并提示用户稍后重试。
-原因是 DBAAS 数据刷新可能受后台锁、接口超时或服务重启影响；
-无限重试会导致流式响应长时间不结束，前端发送按钮持续不可用。
+如果 admin 快照不可用或已经过期，
+tool 应返回 `error`。
+模型应直接说明当前无法获得准确数据，
+不要基于旧数据猜测。
 
 `user_id` 和 `role` 不应暴露为大模型可填写的 tool 参数。
 
@@ -473,27 +434,9 @@ tool 必须以后端 session / request identity 为准，
 如果当前 DeepAgent tool 无法直接读取 session context，
 可以在 runtime 或 factory 构建 tool 时将当前用户身份通过闭包绑定到 tool 内部。
 
-普通用户后续的 `jq` 查询只能基于自己的 scoped 快照路径执行，
-不能直接访问 `admin/services.json`。
-
-用户目录名必须使用安全的内部 user id，
-不能直接拼接未经校验的任意用户名。
-
-用户 scoped meta 建议记录：
-
-```json
-{
-  "kind": "services",
-  "scope": "user",
-  "user_id": "alice",
-  "role": "user",
-  "source_scope": "admin",
-  "source_synced_at": "2026-04-28T10:00:00+08:00",
-  "filtered_at": "2026-04-28T10:00:01+08:00",
-  "record_count": 12,
-  "data_path": ".../users/alice/services.json"
-}
-```
+普通用户不能直接访问 admin 全量结果；
+权限过滤由 `query_dbaas_data_tool` 内部固定 jq wrapper 保证，
+而不是让模型自行拼接权限条件。
 
 ## 10. 内存缓存优化项
 
@@ -502,8 +445,7 @@ tool 必须以后端 session / request identity 为准，
 也就是说：
 
 - `admin/services.json` 是全量服务事实源
-- `users/{user_id}/services.json` 是用户可见服务事实源
-- `jq` 查询仍然基于文件执行
+- `jq` 查询仍然基于 admin 快照文件执行
 - 进程重启后可以完全依赖文件恢复
 
 内存缓存可以作为后续性能优化，
@@ -512,8 +454,8 @@ tool 必须以后端 session / request identity 为准，
 可选优化方向：
 
 - 后台刷新 `admin/services.json` 成功后，将解析后的 services 数据放入内存缓存
-- 普通用户生成 scoped 视图时，优先使用内存中的 admin 数据过滤
-- 如果内存缓存不存在或版本不匹配，则回退读取 `admin/services.json`
+- 普通用户查询时，优先使用内存中的 admin 数据过滤
+- 如果内存缓存不存在或版本不匹配，则回退使用 `jq` 查询 `admin/services.json`
 - 内存缓存 key 应包含 `kind`、`scope` 和 `source_synced_at`
 - admin 快照 `synced_at` 变化后，旧内存缓存必须失效
 
@@ -521,8 +463,7 @@ tool 必须以后端 session / request identity 为准，
 
 - 内存缓存不作为事实源
 - 内存缓存不能绕过用户权限过滤
-- 内存缓存不能替代用户 scoped 文件
-- `query_dbaas_data_tool` 等查询工具仍应读取当前用户可见的文件路径
+- `query_dbaas_data_tool` 等查询工具仍应读取 admin 快照文件，并在工具内部执行权限过滤
 
 ## 11. 快照 Schema 与字段描述
 
@@ -650,10 +591,8 @@ backend/src/dbass_ai_agent/dbaas/
   config.py
   constants.py
   workspace.py
-  locks.py
   schema.py
   sync.py
-  visibility.py
   query.py
   tools.py
   background.py
@@ -665,35 +604,30 @@ backend/schemas/
 职责建议：
 
 - `dbaas/config.py`
-  - DBAAS 配置模型，例如 `base_url`、`workspace_dir`、`sync_interval_seconds`、`ttl_seconds`、`resource_lock_timeout_seconds`
+  - DBAAS 配置模型，例如 `base_url`、`workspace_dir`、`sync_interval_seconds`、`ttl_seconds`
 - `dbaas/constants.py`
   - endpoint path 和固定文件名，例如 `/services`、`services.json`、`services.meta.json`
 - `dbaas/workspace.py`
-  - 工作目录路径计算、admin/user 目录、临时文件路径、data/meta 文件路径
-- `dbaas/locks.py`
-  - `services.lock`、`hosts.lock` 等资源锁获取、释放和超时控制
+  - 工作目录路径计算、admin 目录、临时文件路径、data/meta 文件路径
 - `dbaas/schema.py`
   - 加载 JSON Schema、校验 dbaas-server 响应、生成 schema 字段说明摘要
 - `dbaas/sync.py`
-  - 调用 `dbaas-server` HTTP 接口、刷新 admin 全量快照、临时文件写入、原子替换、失败 meta 更新
-- `dbaas/visibility.py`
-  - admin/user 可见性判断、普通用户 scoped services 生成、用户身份边界处理
+  - 调用 `dbaas-server` HTTP 接口、刷新 admin 全量快照、临时文件写入、过期文件删除、原子替换发布
 - `dbaas/query.py`
-  - 受控执行 `jq`，处理 timeout、输出限制、preview 和错误返回
+  - 读取 admin 快照、按用户身份包装 jq、受控执行 `jq`、处理 timeout、输出限制、preview 和错误返回
 - `dbaas/background.py`
   - 后台定时同步循环，供 FastAPI 生命周期挂载
 - `dbaas/tools.py`
-  - DeepAgent 可见工具包装，第一版包含 `sync_services_tool`、`query_dbaas_data_tool`、`describe_dbaas_schema_tool`
+  - DeepAgent 可见工具包装，第一版包含 `query_dbaas_data_tool`、`describe_dbaas_schema_tool`
 
 FastAPI 侧只负责在应用生命周期中启动和停止后台同步任务。
 
-DeepAgent 侧只负责在现有 tool 注册链路里挂接 `sync_services_tool`。
+DeepAgent 侧只负责在现有 tool 注册链路里挂接查询和 schema 工具。
 
 ## 14. 待继续讨论
 
 后续还需要继续明确：
 
-- 是否需要 lock 文件同时表达 `refreshing` 状态
 - 过期文件删除后的错误 meta 如何记录
 - meta 是否需要记录 schema 字段摘要或只记录 `schema_path`
 - 后续 hosts、clusters、realtime status 是否抽象通用 workspace/sync 基础能力
