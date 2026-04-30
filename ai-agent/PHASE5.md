@@ -487,7 +487,7 @@ tool 描述只保留简短摘要和 schema 引用。
 ```text
 services.json
 services.meta.json
-backend/schemas/services.v1.schema.json
+config/schemas/services.v1.schema.json
 tool 描述
 ```
 
@@ -508,7 +508,7 @@ tool 描述
 {
   "kind": "services",
   "schema_version": "services.v1",
-  "schema_path": "backend/schemas/services.v1.schema.json",
+  "schema_path": "config/schemas/services.v1.schema.json",
   "data_path": ".../services.json"
 }
 ```
@@ -597,7 +597,7 @@ backend/src/dbass_ai_agent/dbaas/
   tools.py
   background.py
 
-backend/schemas/
+config/schemas/
   services.v1.schema.json
 ```
 
