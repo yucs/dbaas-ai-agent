@@ -53,7 +53,7 @@ class Settings:
     dbaas_ttl_seconds: int = 30
     dbaas_jq_timeout_seconds: int = 3
     dbaas_jq_max_preview_items: int = 50
-    dbaas_jq_max_output_bytes: int = 1_048_576
+    dbaas_jq_max_output_bytes: int = 16_384
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -165,7 +165,7 @@ class Settings:
             dbaas_jq_max_output_bytes=_get_positive_int(
                 dbaas_workspace,
                 "jq_max_output_bytes",
-                1_048_576,
+                16_384,
             ),
         )
 

@@ -75,8 +75,8 @@ ttl_seconds = 30
 jq_timeout_seconds = 3
 # 返回给大模型的最大预览条数。
 jq_max_preview_items = 50
-# 单次 jq 输出允许被 tool 处理的最大字节数。
-jq_max_output_bytes = 1048576
+# 单次 jq 输出允许被 tool 处理的最大字节数，限制可能进入工具返回和模型上下文的数据量。
+jq_max_output_bytes = 16384
 
 [logging]
 # 日志等级；支持 DEBUG、INFO、WARNING、ERROR。
