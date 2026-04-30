@@ -103,7 +103,7 @@ curl http://127.0.0.1:8000/services
 - `PUT /services/{name}/storage` 按指定子服务类型更新存储和 `platformAuto`
 - `POST /services/{name}/image-upgrade` 创建异步镜像升级任务
 - `GET /tasks/{taskId}` 查询通用异步任务状态
-- `GET /metrics/latest` 按 `metric_key` 查询最新监控数据，`metric_key` 必须存在于 AI Agent 的 `backend/config/dbaas_metric_catalog.json`
+- `GET /metrics/latest` 按 `metric_key` 查询最新监控数据，`metric_key` 必须存在于 AI Agent 的 `config/dbaas_metric_catalog.json`
 - `GET /units/{unitName}/metrics/history` 按真实单元名称、`metric_key` 和 Unix timestamp 秒级时间范围查询历史监控数据
 
 最新监控接口按请求动态生成数据，不落盘大体积 seed 文件。管理员全量查询和普通用户指定服务查询默认返回 100000 条监控记录；普通用户不指定服务、查询自己全部服务时默认返回 5000 条监控记录。返回中会包含对应范围内 `services.json` 的真实单元，不足部分使用伪造单元补齐。监控值类型由 `dbaas_metric_catalog.json` 中对应 `metric_key` 的 `value_type` 决定，未知 `metric_key` 会返回 404。
@@ -343,7 +343,7 @@ mock-server/
 ## 数据加载约定
 
 - 服务启动时会同时读取 `mock-server/data/sites.json`、`clusters.json`、`hosts.json`、`services.json`
-- 服务启动时会读取 AI Agent 侧的 `ai-agent/backend/config/dbaas_metric_catalog.json` 作为监控项 catalog
+- 服务启动时会读取 AI Agent 侧的 `ai-agent/config/dbaas_metric_catalog.json` 作为监控项 catalog
 - 这四个文件顶层都使用数组格式
 - `sites.json`、`clusters.json`、`hosts.json` 只保存各自资源的原始字段，不内嵌聚合结果
 - `site` 下的 `clusters`、`serviceGroups`，`cluster` 下的 `hosts`、`serviceGroupCount` 等都在内存加载后动态聚合

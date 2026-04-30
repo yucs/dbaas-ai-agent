@@ -491,7 +491,7 @@ class JsonDataStore:
     def _load_metric_catalog(self) -> dict[str, dict[str, Any]]:
         """加载 AI Agent 侧维护的监控项 catalog。"""
 
-        catalog_path = self.data_dir.parent.parent / "ai-agent" / "backend" / "config" / "dbaas_metric_catalog.json"
+        catalog_path = self.data_dir.parent.parent / "ai-agent" / "config" / "dbaas_metric_catalog.json"
         catalog_items = self._load_array_file(catalog_path, resource_name="metric catalog")
         catalog_by_key: dict[str, dict[str, Any]] = {}
         for item in catalog_items:
