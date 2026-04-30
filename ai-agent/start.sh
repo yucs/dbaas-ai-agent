@@ -8,7 +8,7 @@ MOCK_SERVER_DIR="${SCRIPT_DIR}/../mock-server"
 MOCK_SERVER_START="${MOCK_SERVER_DIR}/start.sh"
 APP_MODULE="dbass_ai_agent.main:app"
 APP_DIR="${BACKEND_DIR}/src"
-CONFIG_FILE="${SCRIPT_DIR}/config.toml"
+CONFIG_FILE="${SCRIPT_DIR}/config/config.toml"
 MOCK_SERVER_PID=""
 BACKEND_PID=""
 
@@ -40,7 +40,7 @@ export PYTHONPATH="${APP_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "缺少配置文件: ${CONFIG_FILE}" >&2
-  echo "请先从 ai-agent/config.example.toml 复制一份为 ai-agent/config.toml 并填写模型配置。" >&2
+  echo "请先从 ai-agent/config/config.example.toml 复制一份为 ai-agent/config/config.toml 并填写模型配置。" >&2
   exit 1
 fi
 
@@ -61,7 +61,7 @@ print("\t".join([
 ]))
 PY
 ) || {
-  echo "读取配置失败，请检查 config.toml。" >&2
+  echo "读取配置失败，请检查 config/config.toml。" >&2
   exit 1
 }
 

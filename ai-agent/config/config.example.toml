@@ -13,7 +13,7 @@ port = 8010
 message_max_chars = 20000
 
 [paths]
-# 用户数据根目录；相对路径会以当前配置文件所在目录为基准解析。
+# 用户数据根目录；默认配置中的相对路径会以项目根目录为基准解析。
 data_root = "./data/users"
 # 运行时数据目录；用于保存临时状态、运行产物等服务内部数据。
 runtime_root = "./data/runtime"
@@ -62,13 +62,13 @@ summary_max_tokens = 2048
 # DBAAS mock/server 基础地址；接口 path 由代码集中维护。
 base_url = "http://127.0.0.1:9000"
 # 调用 DBAAS HTTP 接口的超时时间，单位秒。
-request_timeout_seconds = 5
+request_timeout_seconds = 10
 
 [dbaas_workspace]
 # DBAAS 工作目录；用于保存快照和临时文件。
 dir = "./data/runtime/dbaas_workspace"
 # 后台同步服务数据的间隔，单位秒。
-sync_interval_seconds = 5
+sync_interval_seconds = 8
 # 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
 ttl_seconds = 30
 # 单次 jq 查询最多运行多久，单位秒。
@@ -87,7 +87,7 @@ metric_refresh_lock_timeout_seconds = 10
 [logging]
 # 日志等级；支持 DEBUG、INFO、WARNING、ERROR。
 level = "INFO"
-# 单个主日志文件路径；相对路径会以当前配置文件所在目录为基准解析。
+# 单个主日志文件路径；默认配置中的相对路径会以项目根目录为基准解析。
 log_file = "./data/logs/app.log"
 # 单个日志文件最大字节数，超过后会自动滚动。
 max_bytes = 10485760

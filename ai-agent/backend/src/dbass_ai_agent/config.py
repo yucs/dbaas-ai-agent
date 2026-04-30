@@ -9,7 +9,7 @@ from typing import Any
 
 
 APP_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CONFIG_PATH = APP_ROOT / "config.toml"
+DEFAULT_CONFIG_PATH = APP_ROOT / "config" / "config.toml"
 
 
 class ConfigError(RuntimeError):
@@ -72,7 +72,7 @@ class Settings:
         tests = _get_table(config, "tests")
         dbaas_server = _get_table(config, "dbaas_server")
         dbaas_workspace = _get_table(config, "dbaas_workspace")
-        base_dir = config_path.parent
+        base_dir = _resolve_config_base_dir(config_path)
 
         runtime_root = _resolve_path(
             base_dir,
@@ -196,7 +196,7 @@ def get_settings() -> Settings:
 def load_config_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(
-            f"缺少配置文件: {path}。请先从 config.example.toml 复制一份为 config.toml。"
+            f"缺少配置文件: {path}。请先从 config/config.example.toml 复制一份为 config/config.toml。"
         )
     try:
         with path.open("rb") as handle:
@@ -206,6 +206,12 @@ def load_config_file(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ConfigError(f"配置文件格式无效: {path}")
     return loaded
+
+
+def _resolve_config_base_dir(config_path: Path) -> Path:
+    if config_path == DEFAULT_CONFIG_PATH.resolve():
+        return APP_ROOT
+    return config_path.parent
 
 
 def _get_table(config: Mapping[str, Any], name: str) -> Mapping[str, Any]:

@@ -100,7 +100,7 @@ def _real_llm_settings(root: Path) -> Settings:
 
     if not settings.real_llm_tests_enabled:
         raise unittest.SkipTest(
-            "真实大模型测试未开启；如需执行，请在 config.toml 的 [tests] 中设置 "
+            "真实大模型测试未开启；如需执行，请在 config/config.toml 的 [tests] 中设置 "
             "real_llm_enabled = true。"
         )
 

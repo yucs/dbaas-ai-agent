@@ -71,7 +71,7 @@ backend/src/dbass_ai_agent/dbaas/
 
 ```text
 metric_catalog.py
-  - 加载 backend/config/dbaas_metric_catalog.json
+  - 加载 config/dbaas_metric_catalog.json
   - 校验 metric_key 字符集
   - catalog 搜索、大小写不敏感匹配、打分排序
   - 返回 compact catalog entries
@@ -145,7 +145,7 @@ tools.py
 - 在 shutdown 中取消 cleanup task，并等待其退出
 - 不在 route handler 或 tool 调用时临时启动 cleanup
 
-Phase6 需要在 `config.toml` 的 `[dbaas_workspace]` 下新增 metric 配置：
+Phase6 需要在 `config/config.toml` 的 `[dbaas_workspace]` 下新增 metric 配置：
 
 ```toml
 [dbaas_workspace]
@@ -173,7 +173,7 @@ metric query 第一版复用 services 已有 jq 配置：
 
 Catalog 加载策略：
 
-- 服务启动时加载一次 `backend/config/dbaas_metric_catalog.json`
+- 服务启动时加载一次 `config/dbaas_metric_catalog.json`
 - 启动时校验 JSON 格式、必填字段、`metric_key` 字符集、`value_type` 和 enum 字段
 - 加载后放入进程内只读缓存
 - `describe_unit_metric_catalog_tool` 查询内存缓存
@@ -184,7 +184,7 @@ Catalog 加载策略：
 监控项 catalog 建议作为静态业务配置文件维护：
 
 ```text
-backend/config/dbaas_metric_catalog.json
+config/dbaas_metric_catalog.json
 ```
 
 该文件保存真实监控项元数据。

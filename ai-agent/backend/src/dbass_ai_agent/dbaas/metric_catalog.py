@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from dbass_ai_agent.config import APP_ROOT
 
+from .constants import METRIC_CATALOG_FILE
 from .metric_models import MetricCatalogEntry, MetricValueType
 from .metric_workspace import METRIC_KEY_PATTERN
+from .workspace import read_json_file
 
 
-CATALOG_PATH = Path("backend/config/dbaas_metric_catalog.json")
 SUPPORTED_VALUE_TYPES = {"number", "string", "enum", "boolean"}
 
 
@@ -71,13 +71,12 @@ def get_metric_catalog_entry(metric_key: str, *, app_root: Path = APP_ROOT) -> M
 
 @lru_cache(maxsize=8)
 def load_metric_catalog(*, app_root: Path = APP_ROOT) -> tuple[MetricCatalogEntry, ...]:
-    catalog_file = app_root / CATALOG_PATH
+    catalog_file = app_root / METRIC_CATALOG_FILE
     try:
-        with catalog_file.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
+        payload = read_json_file(catalog_file)
     except FileNotFoundError as exc:
         raise MetricCatalogError(f"监控项 catalog 文件不存在：{catalog_file}") from exc
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
         raise MetricCatalogError(f"监控项 catalog JSON 解析失败：{catalog_file}") from exc
     if not isinstance(payload, list):
         raise MetricCatalogError("监控项 catalog 顶层必须是数组。")
