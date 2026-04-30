@@ -92,7 +92,17 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             self.assertEqual(set(kwargs), {"model", "tools", "checkpointer", "system_prompt"})
             self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
-            self.assertEqual(len(kwargs["tools"]), 2)
+            self.assertEqual(
+                {tool.name for tool in kwargs["tools"]},
+                {
+                    "query_dbaas_data_tool",
+                    "describe_dbaas_schema_tool",
+                    "describe_unit_metric_catalog_tool",
+                    "query_unit_latest_metric_data_tool",
+                    "query_unit_metric_history_tool",
+                    "get_current_time_tool",
+                },
+            )
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
             self.assertEqual(kwargs["system_prompt"], "system prompt")
 

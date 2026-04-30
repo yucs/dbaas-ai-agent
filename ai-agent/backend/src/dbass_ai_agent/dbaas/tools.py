@@ -12,6 +12,7 @@ from dbass_ai_agent.identity.models import Identity
 
 from .config import DbaasConfig, dbaas_config_from_settings
 from .constants import SERVICES_KIND
+from .metric_tools import build_metric_tools
 from .query import query_dbaas_data
 from .schema import describe_schema
 
@@ -36,6 +37,13 @@ def dbaas_tool_identity(
 
 
 def build_dbaas_tools(settings: Settings) -> list[Any]:
+    return [
+        *build_service_tools(settings),
+        *build_metric_tools(settings, _require_identity),
+    ]
+
+
+def build_service_tools(settings: Settings) -> list[Any]:
     config = dbaas_config_from_settings(settings)
 
     @tool("query_dbaas_data_tool")

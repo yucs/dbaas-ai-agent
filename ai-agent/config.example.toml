@@ -77,6 +77,12 @@ jq_timeout_seconds = 3
 jq_max_preview_items = 50
 # 单次 jq 输出允许被 tool 处理的最大字节数，限制可能进入工具返回和模型上下文的数据量。
 jq_max_output_bytes = 16384
+# metric latest/history 快照多久算新鲜，单位秒。
+metric_snapshot_ttl_seconds = 30
+# metric cleanup 后台任务扫描间隔，单位秒。
+metric_snapshot_cleanup_interval_seconds = 600
+# 同一个 metric snapshot key 刷新锁最多等待多久，单位秒。
+metric_refresh_lock_timeout_seconds = 10
 
 [logging]
 # 日志等级；支持 DEBUG、INFO、WARNING、ERROR。

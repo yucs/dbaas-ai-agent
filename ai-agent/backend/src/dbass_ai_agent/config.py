@@ -54,6 +54,9 @@ class Settings:
     dbaas_jq_timeout_seconds: int = 3
     dbaas_jq_max_preview_items: int = 50
     dbaas_jq_max_output_bytes: int = 16_384
+    dbaas_metric_snapshot_ttl_seconds: int = 30
+    dbaas_metric_snapshot_cleanup_interval_seconds: int = 600
+    dbaas_metric_refresh_lock_timeout_seconds: int = 10
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -166,6 +169,21 @@ class Settings:
                 dbaas_workspace,
                 "jq_max_output_bytes",
                 16_384,
+            ),
+            dbaas_metric_snapshot_ttl_seconds=_get_positive_int(
+                dbaas_workspace,
+                "metric_snapshot_ttl_seconds",
+                30,
+            ),
+            dbaas_metric_snapshot_cleanup_interval_seconds=_get_positive_int(
+                dbaas_workspace,
+                "metric_snapshot_cleanup_interval_seconds",
+                600,
+            ),
+            dbaas_metric_refresh_lock_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "metric_refresh_lock_timeout_seconds",
+                10,
             ),
         )
 

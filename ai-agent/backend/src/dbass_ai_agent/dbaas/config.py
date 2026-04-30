@@ -16,6 +16,9 @@ class DbaasConfig:
     jq_timeout_seconds: int
     jq_max_preview_items: int
     jq_max_output_bytes: int
+    metric_snapshot_ttl_seconds: int
+    metric_snapshot_cleanup_interval_seconds: int
+    metric_refresh_lock_timeout_seconds: int
 
 
 def dbaas_config_from_settings(settings: Settings) -> DbaasConfig:
@@ -28,4 +31,7 @@ def dbaas_config_from_settings(settings: Settings) -> DbaasConfig:
         jq_timeout_seconds=settings.dbaas_jq_timeout_seconds,
         jq_max_preview_items=settings.dbaas_jq_max_preview_items,
         jq_max_output_bytes=settings.dbaas_jq_max_output_bytes,
+        metric_snapshot_ttl_seconds=settings.dbaas_metric_snapshot_ttl_seconds,
+        metric_snapshot_cleanup_interval_seconds=settings.dbaas_metric_snapshot_cleanup_interval_seconds,
+        metric_refresh_lock_timeout_seconds=settings.dbaas_metric_refresh_lock_timeout_seconds,
     )

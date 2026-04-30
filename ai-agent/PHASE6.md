@@ -51,12 +51,15 @@ Phase6 第一版不重构现有 `query.py` 的 services 查询逻辑。
 ```text
 backend/src/dbass_ai_agent/dbaas/
   metric_catalog.py     # catalog 加载、搜索、打分、精简返回
+  metric_models.py      # metric 相关 dataclass / TypedDict / 常量类型
   metric_workspace.py   # metric 快照路径、身份 scope、meta/data 路径
   metric_sync.py        # 按 snapshot key 刷新 latest 快照、TTL 判断、per-snapshot 内存锁
   metric_history.py     # 指定单元历史缓存下载、参数校验、meta/data 写入
-  metric_query.py       # metric latest/history 的 jq 查询入口和共享 jq runner
+  metric_query.py       # metric latest/history 查询编排和共享 jq runner
   metric_cleanup.py     # 后台定期清理 latest/history 监控快照
-  tools.py              # 注册 metric catalog/query tools
+  time_tools.py         # get_current_time_tool 实现
+  metric_tools.py       # 注册 metric catalog/query/history/time tools
+  tools.py              # 保留现有 services tool 注册
 ```
 
 其中 `metric_query.py` 第一版可以独立实现 jq 处理，
@@ -73,6 +76,11 @@ metric_catalog.py
   - catalog 搜索、大小写不敏感匹配、打分排序
   - 返回 compact catalog entries
 
+metric_models.py
+  - 定义 catalog entry、snapshot scope、snapshot meta、query result 等类型
+  - 定义 metric value_type、scope 等 Literal/常量
+  - 避免 catalog/workspace/sync/history/query 之间重复定义松散 dict 结构
+
 metric_workspace.py
   - 管理管理员 metrics_latest/{metric_key}.json 和 meta 路径
   - 管理普通用户 metrics_latest/user__{safe_user}__{metric_key}.json 和 meta 路径
@@ -87,18 +95,25 @@ metric_sync.py
   - 调用 GET /metrics/latest?metric_key=...
   - 写临时 data/meta 并 os.replace 发布
   - 过期刷新失败时删除对应 data/meta
+  - 返回可供查询的 latest data_path/meta，不执行 jq
+  - ensure_latest_snapshot 在 cache miss/stale 时会触发 DBAAS HTTP fetch
 
 metric_history.py
   - 校验 unit_name、metric_key、start_ts、end_ts
   - 调用 GET /units/{unit_name}/metrics/history?...
   - 写 metrics_history cache 和 meta
   - 命中未过期历史缓存时复用
+  - 返回可供查询的 history data_path/meta，不执行 jq
+  - ensure_history_snapshot 在 cache miss/stale 时会触发 DBAAS HTTP fetch
 
 metric_query.py
-  - query_unit_metric_data 业务函数
-  - query_unit_metric_history 业务函数
+  - query_unit_latest_metric_data 业务编排函数
+  - query_unit_metric_history 业务编排函数
+  - latest 查询时调用 metric_sync 获取可用 latest 快照
+  - history 查询时调用 metric_history 获取可用 history 快照
   - latest/history 共享 metric jq runner
   - 处理 preview、truncated、byte limit 和 jq 错误结构
+  - 不直接拼 DBAAS HTTP URL，不直接执行 latest/history refresh 细节
 
 metric_cleanup.py
   - 单协程 background cleanup loop
@@ -106,11 +121,21 @@ metric_cleanup.py
   - 周期性清理 metrics_history/
   - 清理失败只记录日志，不影响查询
 
-tools.py
+time_tools.py
+  - 实现 get_current_time_tool
+  - 返回 now_ts、iso_utc、iso_local、timezone
+  - Phase6 内用于 history 相对时间换算
+
+metric_tools.py
   - 注册 describe_unit_metric_catalog_tool
-  - 注册 query_unit_metric_data_tool
+  - 注册 query_unit_latest_metric_data_tool
   - 注册 query_unit_metric_history_tool
-  - 注册 get_current_time_tool，或后续拆到通用 tools 模块
+  - 注册 time_tools.py 提供的 get_current_time_tool
+
+tools.py
+  - 保留现有 services 查询相关 tool 注册
+  - 保持 Phase5 services tool 入口稳定
+  - build_dbaas_tools(settings) 可以组合 services tools 和 metric_tools.py 返回的工具列表
 ```
 
 后端启动和关闭接入：
@@ -706,7 +731,7 @@ runtime/dbaas_workspace/metrics_latest/user__payment-platform-team__container.cp
 第一版监控数据查询工具签名建议为：
 
 ```python
-query_unit_metric_data_tool(
+query_unit_latest_metric_data_tool(
     metric_key: str,
     jq_filter: str,
     max_preview_items: int | None = None,
@@ -902,6 +927,8 @@ tool 返回中的 `preview` 可以是数字：
   - jq 表达式执行失败
 - `history_time_range_invalid`
   - history 查询时间范围不合法
+- `resource_not_found`
+  - DBAAS 返回资源不存在，例如指定真实单元不存在或不可见
 - `dbaas_request_failed`
   - 请求 DBAAS 监控接口失败或返回非 2xx
 
@@ -912,7 +939,7 @@ tool 返回中的 `preview` 可以是数字：
 - DBAAS 返回 404 且表示 `metric_key` 不存在
   - `metric_not_found`
 - DBAAS 返回 404 且表示 `unit_name` 不存在或不可见
-  - `permission_denied` 或 `dbaas_request_failed`，第一版可以优先用 `permission_denied` 避免向普通用户暴露资源存在性
+  - `resource_not_found`
 - DBAAS 请求超时、连接失败或返回其他非 2xx
   - `dbaas_request_failed`
 - 本地快照缺失、过期且刷新失败
@@ -1042,7 +1069,7 @@ Phase6 第一版监控查询支持管理员和普通用户。
 
 ```text
 describe_unit_metric_catalog_tool
-query_unit_metric_data_tool
+query_unit_latest_metric_data_tool
 query_unit_metric_history_tool
 ```
 

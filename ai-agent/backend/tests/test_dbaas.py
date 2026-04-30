@@ -201,6 +201,9 @@ def _config(tmpdir: str) -> DbaasConfig:
         jq_timeout_seconds=2,
         jq_max_preview_items=50,
         jq_max_output_bytes=1024 * 1024,
+        metric_snapshot_ttl_seconds=30,
+        metric_snapshot_cleanup_interval_seconds=600,
+        metric_refresh_lock_timeout_seconds=10,
     )
 
 

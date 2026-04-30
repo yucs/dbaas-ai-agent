@@ -67,6 +67,9 @@ class SettingsFromFileTests(unittest.TestCase):
                     jq_timeout_seconds = 6
                     jq_max_preview_items = 25
                     jq_max_output_bytes = 2048
+                    metric_snapshot_ttl_seconds = 45
+                    metric_snapshot_cleanup_interval_seconds = 900
+                    metric_refresh_lock_timeout_seconds = 12
 
                     [logging]
                     level = "DEBUG"
@@ -106,6 +109,9 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.dbaas_jq_timeout_seconds, 6)
             self.assertEqual(settings.dbaas_jq_max_preview_items, 25)
             self.assertEqual(settings.dbaas_jq_max_output_bytes, 2048)
+            self.assertEqual(settings.dbaas_metric_snapshot_ttl_seconds, 45)
+            self.assertEqual(settings.dbaas_metric_snapshot_cleanup_interval_seconds, 900)
+            self.assertEqual(settings.dbaas_metric_refresh_lock_timeout_seconds, 12)
             self.assertEqual(settings.log_level, "DEBUG")
             self.assertEqual(settings.log_max_bytes, 2048)
             self.assertEqual(settings.log_backup_count, 3)
