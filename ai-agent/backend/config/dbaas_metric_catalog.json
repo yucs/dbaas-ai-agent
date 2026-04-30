@@ -1,0 +1,64 @@
+[
+  {
+    "metric_key": "container.cpu.use",
+    "display_name": "容器 CPU 使用率",
+    "service_types": ["container"],
+    "value_type": "number",
+    "unit": "%",
+    "aliases": ["cpu", "CPU 使用率", "容器 CPU", "cpu usage"]
+  },
+  {
+    "metric_key": "container.mem.usagePercent",
+    "display_name": "容器内存使用率",
+    "service_types": ["container"],
+    "value_type": "number",
+    "unit": "%",
+    "aliases": ["内存", "内存使用率", "mem", "memory", "memory usage"]
+  },
+  {
+    "metric_key": "container.mem.usedBytes",
+    "display_name": "容器内存使用量",
+    "service_types": ["container"],
+    "value_type": "number",
+    "unit": "bytes",
+    "aliases": ["内存使用量", "已用内存", "memory used"]
+  },
+  {
+    "metric_key": "container.mem.limitBytes",
+    "display_name": "容器内存限制",
+    "service_types": ["container"],
+    "value_type": "number",
+    "unit": "bytes",
+    "aliases": ["内存限制", "内存上限", "memory limit"]
+  },
+  {
+    "metric_key": "instance.mysql.version",
+    "display_name": "MySQL 版本",
+    "service_types": ["mysql"],
+    "value_type": "string",
+    "unit": null,
+    "aliases": ["MySQL 版本", "数据库版本", "version"]
+  },
+  {
+    "metric_key": "instance.mysql.replicationStatus",
+    "display_name": "MySQL 复制状态",
+    "service_types": ["mysql"],
+    "value_type": "enum",
+    "unit": null,
+    "enum_values": ["passing", "warning", "critical", "unknown"],
+    "normal_values": ["passing"],
+    "abnormal_values": ["warning", "critical", "unknown"],
+    "aliases": ["MySQL 复制状态", "MySQL 同步状态", "复制状态"]
+  },
+  {
+    "metric_key": "instance.redis.replicationStatus",
+    "display_name": "Redis 复制状态",
+    "service_types": ["redis"],
+    "value_type": "enum",
+    "unit": null,
+    "enum_values": ["passing", "warning", "critical", "unknown"],
+    "normal_values": ["passing"],
+    "abnormal_values": ["warning", "critical", "unknown"],
+    "aliases": ["Redis 复制状态", "Redis 同步状态", "复制状态"]
+  }
+]

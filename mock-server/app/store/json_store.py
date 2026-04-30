@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import hashlib
 import json
+import math
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any
@@ -25,6 +28,14 @@ class TaskNotFoundError(KeyError):
 
 class ServiceUnitNotFoundError(KeyError):
     """子服务中不存在目标单元。"""
+
+
+class MetricNotFoundError(KeyError):
+    """监控项不存在。"""
+
+
+class MetricCatalogError(ValueError):
+    """监控项 catalog 配置错误。"""
 
 
 class SiteNotFoundError(KeyError):
@@ -54,6 +65,7 @@ class JsonDataStore:
         self._clusters_by_id: dict[str, dict[str, Any]] = {}
         self._hosts_by_id: dict[str, dict[str, Any]] = {}
         self._tasks_by_id: dict[str, dict[str, Any]] = {}
+        self._metric_catalog_by_key: dict[str, dict[str, Any]] = {}
         self._task_sequence = 0
         self._lock = threading.RLock()
         self.reload()
@@ -66,6 +78,7 @@ class JsonDataStore:
             self._clusters_by_id = self._load_clusters()
             self._hosts_by_id = self._load_hosts()
             self._services_by_name = self._load_services()
+            self._metric_catalog_by_key = self._load_metric_catalog()
             self._validate_relationships()
             self._refresh_platform_aggregates()
             self._tasks_by_id = {}
@@ -291,6 +304,83 @@ class JsonDataStore:
                 raise TaskNotFoundError(task_id)
             return self._public_task(task)
 
+    def list_latest_metric_points(
+        self,
+        metric_key: str,
+        *,
+        service_name: str | None = None,
+        total_count: int = 100_000,
+    ) -> list[dict[str, Any]]:
+        """按监控项动态生成最新监控点位。"""
+
+        with self._lock:
+            metric = self._get_metric_catalog_item(metric_key)
+            real_units = self._collect_metric_units(service_name=service_name, metric=metric)
+            if service_name is not None and service_name not in self._services_by_name:
+                raise ServiceNotFoundError(service_name)
+
+            records = [
+                {
+                    "unit_name": item["unit_name"],
+                    "service_type": item["service_type"],
+                    "value": self._metric_value(metric, item, ordinal),
+                }
+                for ordinal, item in enumerate(real_units)
+            ]
+            fake_service_types = self._fake_service_types(metric, service_name=service_name)
+            fake_count = max(0, total_count - len(records))
+            for fake_index in range(fake_count):
+                service_type = fake_service_types[fake_index % len(fake_service_types)]
+                item = self._fake_metric_unit(service_type, fake_index, service_name=service_name)
+                records.append(
+                    {
+                        "unit_name": item["unit_name"],
+                        "service_type": item["service_type"],
+                        "value": self._metric_value(metric, item, len(real_units) + fake_index),
+                    }
+                )
+            return records
+
+    def list_unit_metric_history(
+        self,
+        unit_name: str,
+        metric_key: str,
+        *,
+        start_ts: int,
+        end_ts: int,
+    ) -> list[dict[str, Any]]:
+        """按单元和监控项动态生成历史监控点位。"""
+
+        with self._lock:
+            metric = self._get_metric_catalog_item(metric_key)
+            unit = self._select_history_metric_unit(unit_name, metric)
+            duration = end_ts - start_ts
+            step_seconds = max(60, math.ceil(duration / 720))
+            points: list[dict[str, Any]] = []
+            for ts in range(start_ts, end_ts + 1, step_seconds):
+                points.append({"ts": ts, "value": self._metric_value(metric, unit, ts, ts=ts)})
+            return points
+
+    def find_unit_bindings(self, unit_name: str) -> list[dict[str, Any]]:
+        """返回真实单元名称对应的服务归属。"""
+
+        with self._lock:
+            bindings: list[dict[str, Any]] = []
+            for service in self._services_by_name.values():
+                for child_service in service.get("services", []):
+                    for unit in child_service.get("units", []):
+                        if unit.get("name") != unit_name:
+                            continue
+                        bindings.append(
+                            {
+                                "service_name": service["name"],
+                                "user": service.get("user"),
+                                "service_type": child_service["type"],
+                                "unit_name": unit["name"],
+                            }
+                        )
+            return bindings
+
     def _load_sites(self) -> dict[str, dict[str, Any]]:
         """加载站点原始数据。"""
 
@@ -382,6 +472,36 @@ class JsonDataStore:
                 raise DataValidationError("each service item must have a non-empty 'name'")
             services_by_name[name] = self._normalize_service_seed(service, index)
         return services_by_name
+
+    def _load_metric_catalog(self) -> dict[str, dict[str, Any]]:
+        """加载 AI Agent 侧维护的监控项 catalog。"""
+
+        catalog_path = self.data_dir.parent.parent / "ai-agent" / "backend" / "config" / "dbaas_metric_catalog.json"
+        catalog_items = self._load_array_file(catalog_path, resource_name="metric catalog")
+        catalog_by_key: dict[str, dict[str, Any]] = {}
+        for item in catalog_items:
+            if not isinstance(item, dict):
+                raise DataValidationError("dbaas_metric_catalog.json items must be objects")
+            metric_key = item.get("metric_key")
+            if not isinstance(metric_key, str) or not metric_key:
+                raise DataValidationError("each metric catalog item must have a non-empty 'metric_key'")
+            if re.fullmatch(r"[a-zA-Z0-9._-]+", metric_key) is None:
+                raise DataValidationError(f"metric_key '{metric_key}' contains unsupported characters")
+            if metric_key in catalog_by_key:
+                raise DataValidationError(f"duplicate metric_key '{metric_key}' in dbaas_metric_catalog.json")
+
+            value_type = item.get("value_type")
+            if value_type not in {"number", "string", "enum", "boolean"}:
+                raise DataValidationError(f"metric_key '{metric_key}' has unsupported value_type '{value_type}'")
+            if value_type == "enum":
+                enum_values = item.get("enum_values")
+                if not isinstance(enum_values, list) or not enum_values or not all(isinstance(value, str) for value in enum_values):
+                    raise DataValidationError(f"metric_key '{metric_key}' must define non-empty string enum_values")
+            service_types = item.get("service_types")
+            if not isinstance(service_types, list) or not all(isinstance(value, str) and value for value in service_types):
+                raise DataValidationError(f"metric_key '{metric_key}' must define service_types")
+            catalog_by_key[metric_key] = deepcopy(item)
+        return catalog_by_key
 
     def _load_array_file(self, file_path: Path, *, resource_name: str) -> list[Any]:
         """从 JSON 文件中读取数组。"""
@@ -806,6 +926,192 @@ class JsonDataStore:
                         }
                     )
         return units
+
+    def _collect_metric_units(
+        self,
+        *,
+        service_name: str | None,
+        metric: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """收集指定监控项适用的真实单元。"""
+
+        services = self._services_by_name.values()
+        if service_name is not None:
+            service = self._services_by_name.get(service_name)
+            if service is None:
+                raise ServiceNotFoundError(service_name)
+            services = [service]
+
+        metric_service_types = set(metric["service_types"])
+        items: list[dict[str, Any]] = []
+        for service in services:
+            for child_service in service.get("services", []):
+                service_type = child_service["type"]
+                if "container" not in metric_service_types and service_type not in metric_service_types:
+                    continue
+                for unit in child_service.get("units", []):
+                    items.append(
+                        {
+                            "service_name": service["name"],
+                            "service_type": service_type,
+                            "unit_name": unit["name"],
+                            "unit": unit,
+                        }
+                    )
+        return items
+
+    def _select_history_metric_unit(self, unit_name: str, metric: dict[str, Any]) -> dict[str, Any]:
+        """选择真实历史单元；同名时优先选择适配当前 metric 的单元。"""
+
+        matches: list[dict[str, Any]] = []
+        for service in self._services_by_name.values():
+            for child_service in service.get("services", []):
+                for unit in child_service.get("units", []):
+                    if unit.get("name") != unit_name:
+                        continue
+                    matches.append(
+                        {
+                            "service_name": service["name"],
+                            "service_type": child_service["type"],
+                            "unit_name": unit["name"],
+                            "unit": unit,
+                        }
+                    )
+
+        if not matches:
+            raise ServiceUnitNotFoundError(unit_name)
+
+        metric_service_types = set(metric["service_types"])
+        if "container" in metric_service_types:
+            return matches[0]
+        for item in matches:
+            if item["service_type"] in metric_service_types:
+                return item
+        return matches[0]
+
+    def _fake_service_types(self, metric: dict[str, Any], *, service_name: str | None) -> list[str]:
+        """返回伪造监控单元可使用的服务类型。"""
+
+        metric_service_types = [value for value in metric["service_types"] if value != "container"]
+        if service_name is not None:
+            service = self._services_by_name.get(service_name)
+            if service is None:
+                raise ServiceNotFoundError(service_name)
+            child_service_types = [
+                child_service["type"]
+                for child_service in service.get("services", [])
+                if "container" in metric["service_types"] or child_service["type"] in metric_service_types
+            ]
+            if child_service_types:
+                return child_service_types
+            return metric_service_types or [service["type"]]
+        return metric_service_types or ["mysql", "redis", "proxy", "tidb", "tikv", "pd"]
+
+    def _fake_metric_unit(
+        self,
+        service_type: str,
+        fake_index: int,
+        *,
+        service_name: str | None,
+    ) -> dict[str, Any]:
+        """构造一个不落盘的伪造监控单元。"""
+
+        if service_name is None:
+            unit_name = f"mock-{service_type}-{fake_index:06d}"
+        else:
+            unit_name = f"{service_name}-mock-{fake_index:06d}"
+        memory = float(2 ** (fake_index % 5) * 4)
+        return {
+            "service_name": service_name or f"svc{fake_index % 10_000:04d}",
+            "service_type": service_type,
+            "unit_name": unit_name,
+            "unit": {
+                "name": unit_name,
+                "version": self._version_for(service_type, fake_index),
+                "memory": memory,
+                "cpu": float((fake_index % 16) + 1),
+            },
+        }
+
+    def _get_metric_catalog_item(self, metric_key: str) -> dict[str, Any]:
+        """返回指定监控项 catalog 条目。"""
+
+        metric = self._metric_catalog_by_key.get(metric_key)
+        if metric is None:
+            raise MetricNotFoundError(metric_key)
+        return metric
+
+    def _metric_value(
+        self,
+        metric: dict[str, Any],
+        item: dict[str, Any],
+        ordinal: int,
+        *,
+        ts: int | None = None,
+    ) -> Any:
+        """根据 catalog value_type 生成稳定的 mock 监控值。"""
+
+        value_type = metric["value_type"]
+        metric_key = metric["metric_key"]
+        seed = self._stable_int(metric_key, item["unit_name"], ordinal, ts or 0)
+
+        if value_type == "number":
+            return self._number_metric_value(metric_key, item, seed)
+        if value_type == "string":
+            return self._string_metric_value(metric_key, item, seed)
+        if value_type == "enum":
+            enum_values = metric.get("enum_values")
+            if not isinstance(enum_values, list) or not enum_values:
+                raise MetricCatalogError(f"metric_key '{metric_key}' has invalid enum_values")
+            if "passing" in enum_values and seed % 20 < 16:
+                return "passing"
+            return enum_values[seed % len(enum_values)]
+        if value_type == "boolean":
+            return seed % 2 == 0
+        raise MetricCatalogError(f"metric_key '{metric_key}' has unsupported value_type '{value_type}'")
+
+    def _number_metric_value(self, metric_key: str, item: dict[str, Any], seed: int) -> float | int:
+        """生成数字型监控值。"""
+
+        unit = item.get("unit", {})
+        memory_gib = float(unit.get("memory") or 8.0)
+        if metric_key == "container.cpu.use":
+            return round(5 + seed % 940 / 10, 1)
+        if metric_key == "container.mem.usagePercent":
+            return round(10 + seed % 860 / 10, 1)
+        if metric_key == "container.mem.limitBytes":
+            return int(memory_gib * 1024 * 1024 * 1024)
+        if metric_key == "container.mem.usedBytes":
+            usage_percent = 10 + seed % 860 / 10
+            return int(memory_gib * 1024 * 1024 * 1024 * usage_percent / 100)
+        return round(seed % 10_000 / 10, 1)
+
+    def _string_metric_value(self, metric_key: str, item: dict[str, Any], seed: int) -> str:
+        """生成字符串型监控值。"""
+
+        unit = item.get("unit", {})
+        if metric_key == "instance.mysql.version":
+            version = unit.get("version")
+            if isinstance(version, str) and version:
+                return version
+            return self._version_for(item["service_type"], seed)
+        return f"value-{seed % 10_000:04d}"
+
+    def _version_for(self, service_type: str, seed: int) -> str:
+        """生成服务类型对应的版本字符串。"""
+
+        if service_type == "mysql":
+            return ["8.0.36", "8.0.37", "5.7.44"][seed % 3]
+        if service_type == "redis":
+            return ["6.2.14", "7.0.15"][seed % 2]
+        return f"1.{seed % 8}.{seed % 20}"
+
+    def _stable_int(self, *parts: object) -> int:
+        """基于输入生成稳定整数。"""
+
+        payload = "|".join(str(part) for part in parts)
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return int(digest[:12], 16)
 
     def _get_target_child_services(self, name: str, child_service_type: str) -> list[dict[str, Any]]:
         """返回服务组中匹配子服务类型的所有子服务。"""

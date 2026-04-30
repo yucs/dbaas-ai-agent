@@ -11,6 +11,7 @@ from .platform import (
     SiteDetailResponse,
     SiteSummary,
 )
+from .metric import HistoryMetricPoint, LatestMetricPoint
 from .service_detail import (
     BackupStrategySummary,
     ChildService,
@@ -37,6 +38,8 @@ __all__ = [
     "HostDisk",
     "HostSummary",
     "HostUnitSummary",
+    "HistoryMetricPoint",
+    "LatestMetricPoint",
     "ServiceGroupSummary",
     "ServiceDetailResponse",
     "ServiceImageUpgradeRequest",

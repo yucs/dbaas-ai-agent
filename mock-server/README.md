@@ -35,6 +35,8 @@
 - `PUT /services/{name}/storage`
 - `POST /services/{name}/image-upgrade`
 - `GET /tasks/{taskId}`
+- `GET /metrics/latest`
+- `GET /units/{unitName}/metrics/history`
 
 ## 认证与权限
 
@@ -45,6 +47,8 @@
 - `GET /users` 和 `GET /users/{user}` 中的 `user` 直接等于服务组 `user`
 - 管理员可查看全部用户；普通用户只能查看自己
 - 普通用户无权访问 `sites`、`clusters`、`hosts` 相关平台资源接口
+- 管理员可查询全量最新监控；普通用户查询最新监控时必须指定 `service_name`，且只能指定自己的服务
+- 管理员可查询任意真实单元历史监控；普通用户只能查询自己服务下的真实单元历史监控
 
 认证示例：
 
@@ -99,6 +103,10 @@ curl http://127.0.0.1:8000/services
 - `PUT /services/{name}/storage` 按指定子服务类型更新存储和 `platformAuto`
 - `POST /services/{name}/image-upgrade` 创建异步镜像升级任务
 - `GET /tasks/{taskId}` 查询通用异步任务状态
+- `GET /metrics/latest` 按 `metric_key` 查询最新监控数据，`metric_key` 必须存在于 AI Agent 的 `backend/config/dbaas_metric_catalog.json`
+- `GET /units/{unitName}/metrics/history` 按真实单元名称、`metric_key` 和 Unix timestamp 秒级时间范围查询历史监控数据
+
+最新监控接口按请求动态生成数据，不落盘大体积 seed 文件。管理员全量查询默认返回 100000 条监控记录，返回中会包含 `services.json` 里的真实单元，不足部分使用伪造单元补齐。监控值类型由 `dbaas_metric_catalog.json` 中对应 `metric_key` 的 `value_type` 决定，未知 `metric_key` 会返回 404。
 
 ## 快速启动
 
@@ -252,6 +260,27 @@ curl http://127.0.0.1:8000/tasks/task-0001 \
   -H 'Authorization: Bearer admin'
 ```
 
+管理员查询全量最新监控：
+
+```bash
+curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
+  -H 'Authorization: Bearer admin'
+```
+
+普通用户查询自己服务的最新监控：
+
+```bash
+curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.mem.usagePercent&service_name=mysql-xf2' \
+  -H 'Authorization: Bearer user:payment-platform-team'
+```
+
+查询真实单元历史监控：
+
+```bash
+curl 'http://127.0.0.1:8000/units/mysql-primary-01/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200' \
+  -H 'Authorization: Bearer admin'
+```
+
 ## 可选启动参数
 
 修改监听地址或端口：
@@ -301,6 +330,7 @@ mock-server/
 ## 数据加载约定
 
 - 服务启动时会同时读取 `mock-server/data/sites.json`、`clusters.json`、`hosts.json`、`services.json`
+- 服务启动时会读取 AI Agent 侧的 `ai-agent/backend/config/dbaas_metric_catalog.json` 作为监控项 catalog
 - 这四个文件顶层都使用数组格式
 - `sites.json`、`clusters.json`、`hosts.json` 只保存各自资源的原始字段，不内嵌聚合结果
 - `site` 下的 `clusters`、`serviceGroups`，`cluster` 下的 `hosts`、`serviceGroupCount` 等都在内存加载后动态聚合
@@ -312,6 +342,7 @@ mock-server/
 - 单元会返回 `hostId`、`hostName`、`hostIp`、`containerIp`
 - 单元存储固定包含 `data`、`log` 两个 volume，并映射到主机磁盘
 - 当前 seed 规模为 12 个站点、48 个集群、1920 台主机、2208 个服务组
+- 最新监控数据在接口调用时动态生成，管理员全量查询默认返回 100000 条记录
 - 数据加载到内存后供接口查询使用
 - 运行期间的 update 动作只修改内存
 - 不回写本地 `data` 文件
