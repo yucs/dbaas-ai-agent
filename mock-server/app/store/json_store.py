@@ -309,13 +309,18 @@ class JsonDataStore:
         metric_key: str,
         *,
         service_name: str | None = None,
+        owner_user: str | None = None,
         total_count: int = 100_000,
     ) -> list[dict[str, Any]]:
         """按监控项动态生成最新监控点位。"""
 
         with self._lock:
             metric = self._get_metric_catalog_item(metric_key)
-            real_units = self._collect_metric_units(service_name=service_name, metric=metric)
+            real_units = self._collect_metric_units(
+                service_name=service_name,
+                owner_user=owner_user,
+                metric=metric,
+            )
             if service_name is not None and service_name not in self._services_by_name:
                 raise ServiceNotFoundError(service_name)
 
@@ -327,11 +332,19 @@ class JsonDataStore:
                 }
                 for ordinal, item in enumerate(real_units)
             ]
-            fake_service_types = self._fake_service_types(metric, service_name=service_name)
+            if owner_user is not None and not real_units:
+                return records
+
+            fake_service_types = self._fake_service_types(metric, service_name=service_name, owner_user=owner_user)
             fake_count = max(0, total_count - len(records))
             for fake_index in range(fake_count):
                 service_type = fake_service_types[fake_index % len(fake_service_types)]
-                item = self._fake_metric_unit(service_type, fake_index, service_name=service_name)
+                item = self._fake_metric_unit(
+                    service_type,
+                    fake_index,
+                    service_name=service_name,
+                    owner_user=owner_user,
+                )
                 records.append(
                     {
                         "unit_name": item["unit_name"],
@@ -931,6 +944,7 @@ class JsonDataStore:
         self,
         *,
         service_name: str | None,
+        owner_user: str | None,
         metric: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """收集指定监控项适用的真实单元。"""
@@ -941,6 +955,12 @@ class JsonDataStore:
             if service is None:
                 raise ServiceNotFoundError(service_name)
             services = [service]
+        elif owner_user is not None:
+            services = [
+                service
+                for service in self._services_by_name.values()
+                if service.get("user") == owner_user
+            ]
 
         metric_service_types = set(metric["service_types"])
         items: list[dict[str, Any]] = []
@@ -989,7 +1009,13 @@ class JsonDataStore:
                 return item
         return matches[0]
 
-    def _fake_service_types(self, metric: dict[str, Any], *, service_name: str | None) -> list[str]:
+    def _fake_service_types(
+        self,
+        metric: dict[str, Any],
+        *,
+        service_name: str | None,
+        owner_user: str | None,
+    ) -> list[str]:
         """返回伪造监控单元可使用的服务类型。"""
 
         metric_service_types = [value for value in metric["service_types"] if value != "container"]
@@ -1005,6 +1031,17 @@ class JsonDataStore:
             if child_service_types:
                 return child_service_types
             return metric_service_types or [service["type"]]
+        if owner_user is not None:
+            child_service_types = [
+                child_service["type"]
+                for service in self._services_by_name.values()
+                if service.get("user") == owner_user
+                for child_service in service.get("services", [])
+                if "container" in metric["service_types"] or child_service["type"] in metric_service_types
+            ]
+            if child_service_types:
+                return sorted(set(child_service_types))
+            return metric_service_types or ["mysql", "redis", "proxy"]
         return metric_service_types or ["mysql", "redis", "proxy", "tidb", "tikv", "pd"]
 
     def _fake_metric_unit(
@@ -1013,11 +1050,15 @@ class JsonDataStore:
         fake_index: int,
         *,
         service_name: str | None,
+        owner_user: str | None,
     ) -> dict[str, Any]:
         """构造一个不落盘的伪造监控单元。"""
 
         if service_name is None:
-            unit_name = f"mock-{service_type}-{fake_index:06d}"
+            if owner_user is None:
+                unit_name = f"mock-{service_type}-{fake_index:06d}"
+            else:
+                unit_name = f"{owner_user}-mock-{service_type}-{fake_index:06d}"
         else:
             unit_name = f"{service_name}-mock-{fake_index:06d}"
         memory = float(2 ** (fake_index % 5) * 4)

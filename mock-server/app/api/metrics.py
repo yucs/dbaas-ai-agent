@@ -27,20 +27,23 @@ def get_store(request: Request) -> JsonDataStore:
 def list_latest_metrics(
     request: Request,
     metric_key: str = Query(description="监控项 key，必须存在于 dbaas_metric_catalog.json"),
-    service_name: str | None = Query(default=None, description="服务组名称；普通用户必填"),
+    service_name: str | None = Query(default=None, description="可选服务组名称；普通用户不传时查询自己全部服务"),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[LatestMetricPoint]:
     """按监控项查询最新监控数据。"""
 
     store = get_store(request)
-    if service_name is None and not current_user.is_admin:
-        raise HTTPException(status_code=422, detail="service_name is required for non-admin users")
-
     if service_name is not None:
         ensure_service_access(store, current_user, service_name)
 
+    total_count = 5_000 if service_name is None and not current_user.is_admin else 100_000
     try:
-        points = store.list_latest_metric_points(metric_key, service_name=service_name)
+        points = store.list_latest_metric_points(
+            metric_key,
+            service_name=service_name,
+            owner_user=None if current_user.is_admin or service_name is not None else current_user.user,
+            total_count=total_count,
+        )
     except MetricNotFoundError:
         raise HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found") from None
     except ServiceNotFoundError:

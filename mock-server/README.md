@@ -47,7 +47,7 @@
 - `GET /users` 和 `GET /users/{user}` 中的 `user` 直接等于服务组 `user`
 - 管理员可查看全部用户；普通用户只能查看自己
 - 普通用户无权访问 `sites`、`clusters`、`hosts` 相关平台资源接口
-- 管理员可查询全量最新监控；普通用户查询最新监控时必须指定 `service_name`，且只能指定自己的服务
+- 管理员可查询全量最新监控；普通用户查询最新监控时默认返回自己所属全部服务，也可以通过 `service_name` 缩小到自己的指定服务
 - 管理员可查询任意真实单元历史监控；普通用户只能查询自己服务下的真实单元历史监控
 
 认证示例：
@@ -106,7 +106,7 @@ curl http://127.0.0.1:8000/services
 - `GET /metrics/latest` 按 `metric_key` 查询最新监控数据，`metric_key` 必须存在于 AI Agent 的 `backend/config/dbaas_metric_catalog.json`
 - `GET /units/{unitName}/metrics/history` 按真实单元名称、`metric_key` 和 Unix timestamp 秒级时间范围查询历史监控数据
 
-最新监控接口按请求动态生成数据，不落盘大体积 seed 文件。管理员全量查询默认返回 100000 条监控记录，返回中会包含 `services.json` 里的真实单元，不足部分使用伪造单元补齐。监控值类型由 `dbaas_metric_catalog.json` 中对应 `metric_key` 的 `value_type` 决定，未知 `metric_key` 会返回 404。
+最新监控接口按请求动态生成数据，不落盘大体积 seed 文件。管理员全量查询和普通用户指定服务查询默认返回 100000 条监控记录；普通用户不指定服务、查询自己全部服务时默认返回 5000 条监控记录。返回中会包含对应范围内 `services.json` 的真实单元，不足部分使用伪造单元补齐。监控值类型由 `dbaas_metric_catalog.json` 中对应 `metric_key` 的 `value_type` 决定，未知 `metric_key` 会返回 404。
 
 ## 快速启动
 
@@ -274,6 +274,13 @@ curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.mem.usagePercent
   -H 'Authorization: Bearer user:payment-platform-team'
 ```
 
+普通用户查询自己全部服务的最新监控：
+
+```bash
+curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
+  -H 'Authorization: Bearer user:payment-platform-team'
+```
+
 查询真实单元历史监控：
 
 ```bash
@@ -342,7 +349,7 @@ mock-server/
 - 单元会返回 `hostId`、`hostName`、`hostIp`、`containerIp`
 - 单元存储固定包含 `data`、`log` 两个 volume，并映射到主机磁盘
 - 当前 seed 规模为 12 个站点、48 个集群、1920 台主机、2208 个服务组
-- 最新监控数据在接口调用时动态生成，管理员全量查询默认返回 100000 条记录
+- 最新监控数据在接口调用时动态生成，管理员全量查询和普通用户指定服务查询默认返回 100000 条记录，普通用户查询自己全部服务默认返回 5000 条记录
 - 数据加载到内存后供接口查询使用
 - 运行期间的 update 动作只修改内存
 - 不回写本地 `data` 文件

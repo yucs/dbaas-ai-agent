@@ -35,7 +35,7 @@ def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None
     assert any(item["unit_name"].startswith("mock-") for item in payload)
 
 
-def test_non_admin_must_specify_service_name_for_latest_metric() -> None:
+def test_non_admin_can_query_all_owned_services_latest_metric_without_service_name() -> None:
     client = create_test_client()
 
     response = client.get(
@@ -44,8 +44,11 @@ def test_non_admin_must_specify_service_name_for_latest_metric() -> None:
         headers=user_headers("payment-platform-team"),
     )
 
-    assert response.status_code == 422
-    assert response.json() == {"detail": "service_name is required for non-admin users"}
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 5_000
+    assert any(item["unit_name"] == "mysql-primary-01" and item["service_type"] == "mysql" for item in payload)
+    assert any(item["unit_name"].startswith("payment-platform-team-mock-") for item in payload)
 
 
 def test_non_admin_can_query_own_service_latest_metric() -> None:
