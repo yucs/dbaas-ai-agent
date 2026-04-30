@@ -108,6 +108,12 @@ curl http://127.0.0.1:8000/services
 
 最新监控接口按请求动态生成数据，不落盘大体积 seed 文件。管理员全量查询和普通用户指定服务查询默认返回 100000 条监控记录；普通用户不指定服务、查询自己全部服务时默认返回 5000 条监控记录。返回中会包含对应范围内 `services.json` 的真实单元，不足部分使用伪造单元补齐。监控值类型由 `dbaas_metric_catalog.json` 中对应 `metric_key` 的 `value_type` 决定，未知 `metric_key` 会返回 404。
 
+最新监控记录结构：
+
+```json
+{"service_name":"mysql-xf2","unit_name":"mysql-primary-01","service_type":"mysql","value":72.5}
+```
+
 ## 快速启动
 
 进入项目目录：

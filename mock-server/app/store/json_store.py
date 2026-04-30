@@ -326,6 +326,7 @@ class JsonDataStore:
 
             records = [
                 {
+                    "service_name": item["service_name"],
                     "unit_name": item["unit_name"],
                     "service_type": item["service_type"],
                     "value": self._metric_value(metric, item, ordinal),
@@ -347,6 +348,7 @@ class JsonDataStore:
                 )
                 records.append(
                     {
+                        "service_name": item["service_name"],
                         "unit_name": item["unit_name"],
                         "service_type": item["service_type"],
                         "value": self._metric_value(metric, item, len(real_units) + fake_index),
@@ -1063,7 +1065,7 @@ class JsonDataStore:
             unit_name = f"{service_name}-mock-{fake_index:06d}"
         memory = float(2 ** (fake_index % 5) * 4)
         return {
-            "service_name": service_name or f"svc{fake_index % 10_000:04d}",
+            "service_name": service_name or self._fake_service_name(owner_user, fake_index),
             "service_type": service_type,
             "unit_name": unit_name,
             "unit": {
@@ -1073,6 +1075,20 @@ class JsonDataStore:
                 "cpu": float((fake_index % 16) + 1),
             },
         }
+
+    def _fake_service_name(self, owner_user: str | None, fake_index: int) -> str:
+        """返回伪造单元所属的服务组名称。"""
+
+        if owner_user is None:
+            return f"mock-svc-{fake_index % 10_000:05d}"
+        service_names = [
+            service["name"]
+            for service in sorted(self._services_by_name.values(), key=lambda item: item["name"])
+            if service.get("user") == owner_user
+        ]
+        if not service_names:
+            return f"{owner_user}-mock-svc"
+        return service_names[fake_index % len(service_names)]
 
     def _get_metric_catalog_item(self, metric_key: str) -> dict[str, Any]:
         """返回指定监控项 catalog 条目。"""

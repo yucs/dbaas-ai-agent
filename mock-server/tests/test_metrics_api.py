@@ -30,9 +30,14 @@ def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 100_000
-    assert any(item["unit_name"] == "mysql-primary-01" and item["service_type"] == "mysql" for item in payload)
+    assert any(
+        item["service_name"] == "mysql-xf2"
+        and item["unit_name"] == "mysql-primary-01"
+        and item["service_type"] == "mysql"
+        for item in payload
+    )
     assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
-    assert any(item["unit_name"].startswith("mock-") for item in payload)
+    assert any(item["service_name"].startswith("mock-svc-") and item["unit_name"].startswith("mock-") for item in payload)
 
 
 def test_non_admin_can_query_all_owned_services_latest_metric_without_service_name() -> None:
@@ -47,8 +52,17 @@ def test_non_admin_can_query_all_owned_services_latest_metric_without_service_na
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 5_000
-    assert any(item["unit_name"] == "mysql-primary-01" and item["service_type"] == "mysql" for item in payload)
-    assert any(item["unit_name"].startswith("payment-platform-team-mock-") for item in payload)
+    assert any(
+        item["service_name"] == "mysql-xf2"
+        and item["unit_name"] == "mysql-primary-01"
+        and item["service_type"] == "mysql"
+        for item in payload
+    )
+    assert any(
+        item["service_name"] == "mysql-xf2"
+        and item["unit_name"].startswith("payment-platform-team-mock-")
+        for item in payload
+    )
 
 
 def test_non_admin_can_query_own_service_latest_metric() -> None:
@@ -63,7 +77,9 @@ def test_non_admin_can_query_own_service_latest_metric() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 100_000
+    assert payload[0]["service_name"] == "mysql-xf2"
     assert payload[0]["unit_name"] == "proxy-01"
+    assert all(item["service_name"] == "mysql-xf2" for item in payload[:100])
     assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
 
 

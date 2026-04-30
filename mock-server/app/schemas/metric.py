@@ -10,6 +10,7 @@ from .service_detail import ApiSchema
 class LatestMetricPoint(ApiSchema):
     """最新监控点位。"""
 
+    service_name: str = Field(description="单元所属服务组名称")
     unit_name: str = Field(description="单元名称")
     service_type: str = Field(description="单元所属服务类型，例如 mysql、redis、proxy")
     value: Any = Field(description="监控值，具体类型由 dbaas_metric_catalog.json 的 value_type 决定")
