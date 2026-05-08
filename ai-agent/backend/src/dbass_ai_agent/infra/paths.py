@@ -13,6 +13,8 @@ class SessionPaths:
     meta_path: Path
     messages_path: Path
     approvals_path: Path
+    operations_path: Path
+    tasks_path: Path
 
 
 def build_session_paths(data_root: Path, user_id: str, session_id: str) -> SessionPaths:
@@ -27,6 +29,8 @@ def build_session_paths(data_root: Path, user_id: str, session_id: str) -> Sessi
         meta_path=session_root / "meta.json",
         messages_path=session_root / "messages.json",
         approvals_path=session_root / "approvals.json",
+        operations_path=session_root / "operations.json",
+        tasks_path=session_root / "tasks.json",
     )
 
 

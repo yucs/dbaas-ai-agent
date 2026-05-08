@@ -7,11 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from dbass_ai_agent.agent.factory import AgentFactoryError, delete_thread_checkpoint
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.logging import log_context
+from dbass_ai_agent.dbaas.task_status import is_terminal_task_status
+from dbass_ai_agent.operations.approval_service import ApprovalService
+from dbass_ai_agent.operations.task_service import TaskService
+from dbass_ai_agent.sessions.run_lock import session_locks
 from dbass_ai_agent.sessions.service import SessionService
 
-from .deps import get_app_settings, get_current_identity, get_session_service
+from .deps import (
+    get_app_settings,
+    get_approval_service,
+    get_current_identity,
+    get_session_service,
+    get_task_service,
+)
 from .schemas import (
-    ApprovalsResponse,
     CreateSessionRequest,
     DeleteSessionResponse,
     SessionListResponse,
@@ -63,22 +72,15 @@ def get_session(
     return SessionResponse(session=session_service.get_session(identity, session_id))
 
 
-@router.get("/{session_id}/approvals", response_model=ApprovalsResponse)
-def get_approvals(
-    session_id: str,
-    identity: Identity = Depends(get_current_identity),
-    session_service: SessionService = Depends(get_session_service),
-) -> ApprovalsResponse:
-    detail = session_service.get_session(identity, session_id)
-    return ApprovalsResponse(items=detail.approvals)
-
-
 @router.post("/{session_id}/archive", response_model=SessionMetaResponse)
 def archive_session(
     session_id: str,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
+    approval_service: ApprovalService = Depends(get_approval_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> SessionMetaResponse:
+    _assert_no_unfinished_items(identity, session_id, session_service, approval_service, task_service)
     return SessionMetaResponse(session=session_service.archive_session(identity, session_id).meta)
 
 
@@ -97,8 +99,11 @@ def delete_session(
     request: Request,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
+    approval_service: ApprovalService = Depends(get_approval_service),
+    task_service: TaskService = Depends(get_task_service),
     settings=Depends(get_app_settings),
 ) -> DeleteSessionResponse:
+    _assert_no_unfinished_items(identity, session_id, session_service, approval_service, task_service)
     detail = session_service.get_session(identity, session_id)
     with log_context(
         request_id=getattr(request.state, "request_id", "-"),
@@ -119,3 +124,38 @@ def delete_session(
         deleted_session_id = session_service.delete_session(identity, session_id)
         logger.info("session deleted")
         return DeleteSessionResponse(session_id=deleted_session_id)
+
+
+def _assert_no_unfinished_items(
+    identity: Identity,
+    session_id: str,
+    session_service: SessionService,
+    approval_service: ApprovalService,
+    task_service: TaskService,
+) -> None:
+    approval_service.expire_pending_approvals(identity, session_id)
+    detail = session_service.get_session(identity, session_id)
+    if session_locks.is_run_locked(detail.meta.session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "session_run_locked",
+                "detail": "当前 Session 正在执行 AI 请求，请等待本轮完成后再归档或删除。",
+            },
+        )
+    if any(approval.status == "pending" for approval in detail.approvals):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "session_has_pending_approval",
+                "detail": "当前 Session 存在待确认操作，请先批准或拒绝后再归档或删除。",
+            },
+        )
+    if any(not is_terminal_task_status(task.status) for task in task_service.list_tasks(detail.meta)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "session_has_running_tasks",
+                "detail": "当前 Session 存在运行中的 DBAAS 任务，请等待任务结束后再归档或删除。",
+            },
+        )

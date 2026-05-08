@@ -12,6 +12,7 @@ import httpx
 from dbass_ai_agent.agent.compression_events import CompressionNotice, publish_compression_notice
 from dbass_ai_agent.config import Settings
 from dbass_ai_agent.dbaas.tools import build_dbaas_tools
+from dbass_ai_agent.operations.action_registry import build_interrupt_on_config
 
 from .prompt import load_compression_prompt, load_system_prompt
 
@@ -248,6 +249,7 @@ def _create_runtime_agent(
             tools=build_dbaas_tools(settings),
             checkpointer=checkpointer,
             system_prompt=system_prompt,
+            interrupt_on=build_interrupt_on_config(),
         )
 
 

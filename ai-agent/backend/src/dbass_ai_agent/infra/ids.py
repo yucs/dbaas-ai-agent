@@ -49,3 +49,11 @@ def new_message_id() -> str:
 
 def new_run_id() -> str:
     return _build_prefixed_id("run", _build_user_scope("system"))
+
+
+def new_approval_id() -> str:
+    return _build_prefixed_id("appr", _build_user_scope("system"))
+
+
+def new_operation_id() -> str:
+    return _build_prefixed_id("op", _build_user_scope("system"))

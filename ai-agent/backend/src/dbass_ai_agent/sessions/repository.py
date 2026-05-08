@@ -16,6 +16,11 @@ from .models import (
     SessionIndexItem,
     SessionMeta,
 )
+from .operation_store import OperationStore
+from .run_lock import session_locks
+from .task_store import TaskStore
+
+from dbass_ai_agent.operations.models import OperationRecord, TaskRecord
 
 
 class SessionRepository:
@@ -25,11 +30,15 @@ class SessionRepository:
         index_store: IndexStore,
         message_store: MessageStore,
         approval_store: ApprovalStore,
+        operation_store: OperationStore | None = None,
+        task_store: TaskStore | None = None,
     ) -> None:
         self.data_root = data_root
         self.index_store = index_store
         self.message_store = message_store
         self.approval_store = approval_store
+        self.operation_store = operation_store or OperationStore()
+        self.task_store = task_store or TaskStore()
 
     def list_index(self, user_id: str) -> list[SessionIndexItem]:
         sessions_root = build_user_sessions_root(self.data_root, user_id)
@@ -64,15 +73,41 @@ class SessionRepository:
         )
 
     def load_approvals(self, user_id: str, session_id: str) -> list[ApprovalRecord]:
-        return self.approval_store.load(
+        return self.approval_store.load_latest(
             build_session_paths(self.data_root, user_id, session_id).approvals_path,
         )
+
+    def append_approval(self, user_id: str, session_id: str, approval: ApprovalRecord) -> None:
+        paths = build_session_paths(self.data_root, user_id, session_id)
+        with session_locks.file_lock(paths.session_root):
+            self.approval_store.append(paths.approvals_path, approval)
+
+    def load_operations(self, user_id: str, session_id: str) -> list[OperationRecord]:
+        return self.operation_store.load_latest(
+            build_session_paths(self.data_root, user_id, session_id).operations_path,
+        )
+
+    def append_operation(self, user_id: str, session_id: str, operation: OperationRecord) -> None:
+        paths = build_session_paths(self.data_root, user_id, session_id)
+        with session_locks.file_lock(paths.session_root):
+            self.operation_store.append(paths.operations_path, operation)
+
+    def load_tasks(self, user_id: str, session_id: str) -> list[TaskRecord]:
+        return self.task_store.load_latest(
+            build_session_paths(self.data_root, user_id, session_id).tasks_path,
+        )
+
+    def append_task(self, user_id: str, session_id: str, task: TaskRecord) -> None:
+        paths = build_session_paths(self.data_root, user_id, session_id)
+        with session_locks.file_lock(paths.session_root):
+            self.task_store.append(paths.tasks_path, task)
 
     def load_detail(self, user_id: str, session_id: str) -> SessionDetail:
         return SessionDetail(
             meta=self.load_meta(user_id, session_id),
             messages=self.load_messages(user_id, session_id),
             approvals=self.load_approvals(user_id, session_id),
+            operations=self.load_operations(user_id, session_id),
         )
 
     def upsert_index_item(self, user_id: str, item: SessionIndexItem) -> None:

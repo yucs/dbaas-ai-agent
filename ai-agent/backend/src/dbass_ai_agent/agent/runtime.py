@@ -3,18 +3,21 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterator
+from contextlib import nullcontext
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Literal
 
 from langchain_core.messages import BaseMessageChunk
+from langgraph.types import Command
 
 from dbass_ai_agent.config import Settings
 from dbass_ai_agent.dbaas.tools import dbaas_tool_identity
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.ids import new_run_id
 from dbass_ai_agent.infra.logging import elapsed_ms, log_context, redact_log_text
-from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta
+from dbass_ai_agent.operations.context import OperationRunContext, operation_run_context
+from dbass_ai_agent.sessions.models import ApprovalRecord, ChatMessage, SessionMeta
 
 from .compression_events import CompressionNotice, capture_compression_notices
 from .factory import RuntimeArtifacts, build_runtime_artifacts
@@ -28,11 +31,27 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class AgentApprovalRequest:
+    action_request: dict[str, Any]
+    review_config: dict[str, Any]
+    tool_call_id: str
+    interrupt_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunOutput:
+    content: str = ""
+    approval_request: AgentApprovalRequest | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentReply:
     run_id: str
     content: str
     mode: str
     warning: str | None = None
+    approval_request: AgentApprovalRequest | None = None
+    paused: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +61,9 @@ class AgentStreamEvent:
         "token",
         "compression_started",
         "compression_completed",
+        "approval_required",
+        "run_paused",
+        "run_resumed",
         "completed",
     ]
     run_id: str
@@ -86,8 +108,16 @@ class AgentInvocationError(RuntimeError):
 
 
 class DeepAgentRuntime:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        operation_service: Any | None = None,
+        task_service: Any | None = None,
+    ) -> None:
         self.artifacts: RuntimeArtifacts = build_runtime_artifacts(settings)
+        self.operation_service = operation_service
+        self.task_service = task_service
 
     def generate_reply(
         self,
@@ -111,8 +141,13 @@ class DeepAgentRuntime:
 
             started_at = perf_counter()
             try:
-                with dbaas_tool_identity(identity):
-                    reply = self._invoke_agent(session.thread_id, question)
+                with (
+                    dbaas_tool_identity(identity),
+                    self._operation_context(identity, session, run_id),
+                ):
+                    output = self._normalize_run_output(
+                        self._invoke_agent(session.thread_id, question)
+                    )
             except AgentInvocationError:
                 logger.exception("agent invoke failed")
                 raise
@@ -128,12 +163,71 @@ class DeepAgentRuntime:
                 "agent invoke completed duration_ms=%s",
                 elapsed_ms(started_at),
             )
-            logger.debug("agent invoke response response_chars=%s", len(reply))
+            logger.debug("agent invoke response response_chars=%s", len(output.content))
             return AgentReply(
                 run_id=run_id,
-                content=reply,
+                content=output.content,
                 mode="deepagent",
+                approval_request=output.approval_request,
+                paused=output.approval_request is not None,
             )
+
+    def resume_approval(
+        self,
+        *,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        decision: Literal["approved", "rejected"],
+        operation_service: Any,
+        task_service: Any,
+        reject_message: str | None = None,
+    ) -> AgentReply:
+        run_id = new_run_id()
+        mode = "deepagent"
+        resume_decision = _resume_decision_payload(decision, approval, reject_message=reject_message)
+        with log_context(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            run_id=run_id,
+        ):
+            logger.info("agent resume started approval_id=%s decision=%s", approval.approval_id, decision)
+            started_at = perf_counter()
+            try:
+                with (
+                    dbaas_tool_identity(identity),
+                    operation_run_context(
+                        OperationRunContext(
+                            identity=identity,
+                            session=session,
+                            run_id=run_id,
+                            operation_service=operation_service,
+                            task_service=task_service,
+                            approval=approval,
+                        )
+                    ),
+                ):
+                    result = self.artifacts.agent.invoke(
+                        Command(resume=resume_decision),
+                        config={"configurable": {"thread_id": session.thread_id}},
+                    )
+            except Exception as exc:  # pragma: no cover - provider/network/runtime specific
+                logger.exception("agent resume failed")
+                raise AgentInvocationError.from_exception(
+                    exc,
+                    fallback="恢复 DeepAgent 审批执行失败。",
+                    stage="resume",
+                ) from exc
+
+            output = self._normalize_run_output(result)
+            if output.approval_request is not None:
+                raise AgentInvocationError(
+                    "审批恢复后再次进入人工确认，P7A 暂不支持同一恢复链路内连续审批。",
+                    error_type="approval_nested_interrupt",
+                    stage="resume",
+                )
+            logger.info("agent resume completed duration_ms=%s", elapsed_ms(started_at))
+            return AgentReply(run_id=run_id, content=output.content, mode=mode)
 
     def stream_reply(
         self,
@@ -173,6 +267,7 @@ class DeepAgentRuntime:
                         with (
                             capture_compression_notices(_on_compression),
                             dbaas_tool_identity(identity),
+                            self._operation_context(identity, session, run_id),
                         ):
                             delta = next(agent_stream)
                     except StopIteration:
@@ -182,6 +277,20 @@ class DeepAgentRuntime:
                         mode,
                         compression_notices,
                     )
+                    if isinstance(delta, AgentApprovalRequest):
+                        yield AgentStreamEvent(
+                            event="approval_required",
+                            run_id=run_id,
+                            mode=mode,
+                            details={"approval_request": delta},
+                        )
+                        yield AgentStreamEvent(
+                            event="run_paused",
+                            run_id=run_id,
+                            mode=mode,
+                            content="本轮已暂停，等待人工确认。",
+                        )
+                        return
                     if not delta:
                         continue
                     parts.append(delta)
@@ -217,6 +326,21 @@ class DeepAgentRuntime:
             logger.debug("agent stream response response_chars=%s", len(content))
             yield AgentStreamEvent(event="completed", run_id=run_id, mode=mode, content=content)
 
+    def _operation_context(self, identity: Identity, session: SessionMeta, run_id: str):
+        operation_service = getattr(self, "operation_service", None)
+        task_service = getattr(self, "task_service", None)
+        if operation_service is None or task_service is None:
+            return nullcontext()
+        return operation_run_context(
+            OperationRunContext(
+                identity=identity,
+                session=session,
+                run_id=run_id,
+                operation_service=operation_service,
+                task_service=task_service,
+            )
+        )
+
     def _drain_compression_events(
         self,
         run_id: str,
@@ -250,33 +374,48 @@ class DeepAgentRuntime:
         await self.artifacts.http_async_client.aclose()
         self.artifacts.connection.close()
 
-    def _invoke_agent(self, thread_id: str, prompt: str) -> str:
+    def _invoke_agent(self, thread_id: str, prompt: str) -> AgentRunOutput:
         result = self.artifacts.agent.invoke(
             {"messages": [{"role": "user", "content": prompt}]},
             config={"configurable": {"thread_id": thread_id}},
         )
-        return self._extract_text(result)
+        return self._normalize_run_output(result)
 
-    def _stream_agent_text(self, thread_id: str, prompt: str) -> Iterator[str]:
+    def _stream_agent_text(self, thread_id: str, prompt: str) -> Iterator[str | AgentApprovalRequest]:
         stream = getattr(self.artifacts.agent, "stream", None)
         if not callable(stream):
             logger.debug("agent stream unavailable fallback=invoke")
-            yield self._invoke_agent(thread_id, prompt)
+            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            if output.approval_request:
+                yield output.approval_request
+            else:
+                yield output.content
             return
 
         input_payload = {"messages": [{"role": "user", "content": prompt}]}
         config = {"configurable": {"thread_id": thread_id}}
         try:
-            events = stream(input_payload, config=config, stream_mode="messages")
+            events = stream(input_payload, config=config, stream_mode=["messages", "updates"])
         except TypeError:
             logger.debug("agent stream type_error fallback=invoke")
-            yield self._invoke_agent(thread_id, prompt)
+            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            if output.approval_request:
+                yield output.approval_request
+            else:
+                yield output.content
             return
 
         emitted_chunk = False
         final_text = ""
         try:
             for event in events:
+                if self._is_stream_update(event):
+                    approval_request = self._extract_approval_request_from_update(event)
+                    if approval_request is not None:
+                        yield approval_request
+                        return
+                    continue
+
                 message, metadata = self._extract_stream_message(event)
                 if not self._should_emit_stream_message(message, metadata):
                     continue
@@ -297,7 +436,11 @@ class DeepAgentRuntime:
             if emitted_chunk:
                 raise
             logger.debug("agent stream event_type_error fallback=invoke")
-            yield self._invoke_agent(thread_id, prompt)
+            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            if output.approval_request:
+                yield output.approval_request
+            else:
+                yield output.content
 
     def _should_emit_stream_message(self, message: Any | None, metadata: dict[str, Any]) -> bool:
         if message is None:
@@ -312,10 +455,26 @@ class DeepAgentRuntime:
 
     @staticmethod
     def _extract_stream_message(event: Any) -> tuple[Any | None, dict[str, Any]]:
+        if (
+            isinstance(event, tuple)
+            and len(event) == 2
+            and event[0] == "messages"
+        ):
+            event = event[1]
         if isinstance(event, tuple) and len(event) == 2:
             message, metadata = event
             return message, metadata if isinstance(metadata, dict) else {}
         return None, {}
+
+    def _normalize_run_output(self, result: Any) -> AgentRunOutput:
+        if isinstance(result, AgentRunOutput):
+            return result
+        if isinstance(result, str):
+            return AgentRunOutput(content=result)
+        approval_request = self._extract_approval_request(result)
+        if approval_request is not None:
+            return AgentRunOutput(content="", approval_request=approval_request)
+        return AgentRunOutput(content=self._extract_text(result))
 
     def _extract_text(self, result: Any) -> str:
         messages = result.get("messages", [])
@@ -325,6 +484,63 @@ class DeepAgentRuntime:
         last_message = messages[-1]
         content = getattr(last_message, "content", "")
         return self._content_to_text(content)
+
+    def _extract_approval_request(self, result: Any) -> AgentApprovalRequest | None:
+        if not isinstance(result, dict):
+            return None
+        interrupts = result.get("__interrupt__")
+        if not interrupts:
+            return None
+        interrupt = interrupts[0]
+        value = getattr(interrupt, "value", None)
+        if not isinstance(value, dict):
+            return None
+        action_requests = value.get("action_requests")
+        review_configs = value.get("review_configs")
+        if not isinstance(action_requests, list) or not action_requests:
+            return None
+        if not isinstance(review_configs, list) or not review_configs:
+            return None
+        action_request = action_requests[0]
+        review_config = review_configs[0]
+        if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+            return None
+        tool_call_id = self._find_interrupted_tool_call_id(result, action_request)
+        return AgentApprovalRequest(
+            action_request=action_request,
+            review_config=review_config,
+            tool_call_id=tool_call_id,
+            interrupt_count=len(action_requests),
+        )
+
+    def _extract_approval_request_from_update(self, event: Any) -> AgentApprovalRequest | None:
+        if not self._is_stream_update(event):
+            return None
+        update = event[1]
+        if not isinstance(update, dict) or "__interrupt__" not in update:
+            return None
+        return self._extract_approval_request(update)
+
+    @staticmethod
+    def _is_stream_update(event: Any) -> bool:
+        return isinstance(event, tuple) and len(event) == 2 and event[0] == "updates"
+
+    @staticmethod
+    def _find_interrupted_tool_call_id(result: dict[str, Any], action_request: dict[str, Any]) -> str:
+        name = action_request.get("name")
+        args = action_request.get("args")
+        messages = result.get("messages", [])
+        for message in reversed(messages):
+            tool_calls = getattr(message, "tool_calls", None)
+            if not tool_calls:
+                continue
+            for tool_call in tool_calls:
+                if tool_call.get("name") == name and tool_call.get("args") == args:
+                    return str(tool_call.get("id") or "")
+            for tool_call in tool_calls:
+                if tool_call.get("name") == name:
+                    return str(tool_call.get("id") or "")
+        return ""
 
     @staticmethod
     def _content_to_text(content: Any) -> str:
@@ -377,6 +593,19 @@ class DeepAgentRuntime:
                         parts.append(nested_text)
             return "".join(parts)
         return ""
+
+
+def _resume_decision_payload(
+    decision: Literal["approved", "rejected"],
+    approval: ApprovalRecord,
+    *,
+    reject_message: str | None = None,
+) -> dict[str, list[dict[str, str]]]:
+    decision_count = max(1, getattr(approval, "interrupt_count", 1))
+    if decision == "approved":
+        return {"decisions": [{"type": "approve"} for _ in range(decision_count)]}
+    message = reject_message or "用户拒绝执行该操作。"
+    return {"decisions": [{"type": "reject", "message": message} for _ in range(decision_count)]}
 
 
 def _classify_exception(exc: Exception) -> str:

@@ -15,6 +15,7 @@ from .constants import SERVICES_KIND
 from .metric_tools import build_metric_tools
 from .query import query_dbaas_data
 from .schema import describe_schema
+from .write_tools import build_write_tools
 
 
 _current_identity: ContextVar[Identity | None] = ContextVar("dbaas_current_identity", default=None)
@@ -40,6 +41,7 @@ def build_dbaas_tools(settings: Settings) -> list[Any]:
     return [
         *build_service_tools(settings),
         *build_metric_tools(settings, _require_identity),
+        *build_write_tools(settings),
     ]
 
 

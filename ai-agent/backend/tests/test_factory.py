@@ -89,7 +89,10 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
 
             create_agent_mock.assert_called_once()
             kwargs = create_agent_mock.call_args.kwargs
-            self.assertEqual(set(kwargs), {"model", "tools", "checkpointer", "system_prompt"})
+            self.assertEqual(
+                set(kwargs),
+                {"model", "tools", "checkpointer", "system_prompt", "interrupt_on"},
+            )
             self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
             self.assertEqual(
@@ -101,6 +104,18 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                     "query_unit_latest_metric_data_tool",
                     "query_unit_metric_history_tool",
                     "get_current_time_tool",
+                    "update_service_resource_tool",
+                    "update_service_storage_tool",
+                    "create_service_image_upgrade_task_tool",
+                    "get_dbaas_task_tool",
+                },
+            )
+            self.assertEqual(
+                set(kwargs["interrupt_on"]),
+                {
+                    "update_service_resource_tool",
+                    "update_service_storage_tool",
+                    "create_service_image_upgrade_task_tool",
                 },
             )
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
