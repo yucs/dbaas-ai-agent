@@ -2261,7 +2261,70 @@ GET /api/v1/sessions/{session_id}/tasks
 - 控制面返回 task_id 时进入异步任务追踪
 - 控制面同步返回时记录 `changes[]`
 
-## 16. 不做事项
+## 16. 代码组织建议
+
+Phase7 不建议推翻当前目录结构。
+在现有 `agent/`、`api/`、`dbaas/`、`sessions/` 基础上，
+新增一个 `operations/` 业务编排层即可。
+
+推荐目录：
+
+```text
+backend/src/dbass_ai_agent/
+  operations/
+    models.py
+    action_registry.py
+    proposal_builder.py
+    approval_service.py
+    operation_service.py
+    task_service.py
+
+  sessions/
+    append_log_store.py
+    approval_store.py
+    operation_store.py
+    task_store.py
+    run_lock.py
+
+  dbaas/
+    write_client.py
+    write_tools.py
+    task_status.py
+
+  agent/
+    factory.py
+    runtime.py
+
+  api/
+    routes_approvals.py
+    routes_tasks.py
+    routes_sessions.py
+    routes_chat.py
+```
+
+职责边界：
+
+- `operations/` 放 Phase7 的操作模型和业务编排，例如 proposal 生成、approval 决策、operation/task 记录协调
+- `sessions/` 放 Session 文件投影、append-only store、`session_run_lock`、归档/删除未结束事项检查
+- `dbaas/` 放 DBAAS HTTP client、写工具、task 状态映射，不承载审批编排
+- `agent/` 只放 DeepAgent 相关接入，例如 tool 注册、`interrupt_on`、`Command(resume=...)` 封装
+- `api/` 只做 HTTP 入参出参、权限入口和 service 调用，不直接拼 DBAAS 写请求
+
+实现时避免：
+
+- 把 approval、operation、task 编排全部塞进 `routes_sessions.py`
+- 把 Phase7 业务编排塞进 `agent/runtime.py`
+- 把审批逻辑塞进 `dbaas/`
+- 在 API route 里直接调用 DBAAS 写接口
+
+这样可以保持：
+
+- DBAAS 写入只发生在受控 DeepAgent tool 内
+- 审批和操作审计有独立业务层
+- Session 层继续只负责产品层投影和生命周期
+- 后续迁移数据库时，append log store 和 operation/task store 有清晰替换点
+
+## 17. 不做事项
 
 第七阶段第一版不建议做：
 
@@ -2276,7 +2339,7 @@ GET /api/v1/sessions/{session_id}/tasks
 
 这些能力可以在写工具、审批和任务追踪稳定后再逐步扩展。
 
-## 17. 建议结论
+## 18. 建议结论
 
 第七阶段的主线可以概括为：
 
