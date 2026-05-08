@@ -104,7 +104,7 @@
 - `index.json`
 - `meta.json`
 - `messages.json`
-- `approvals.jsonl`
+- `approvals.json`
 
 当前的稳定分层是：
 

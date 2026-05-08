@@ -204,7 +204,7 @@ POST /api/v1/sessions
 - 创建 Session 目录
 - 初始化 `meta.json`
 - 初始化 `messages.json`
-- 初始化 `approvals.jsonl`
+- 初始化 `approvals.json`
 - 更新当前用户的 `index.json`
 
 #### 返回示例
@@ -240,7 +240,7 @@ GET /api/v1/sessions/{session_id}
 - 校验该 `session_id` 属于当前 `user_id`
 - 读取 `meta.json`
 - 读取 `messages.json`
-- 读取 `approvals.jsonl`
+- 读取 `approvals.json`
 
 #### 返回示例
 
@@ -544,36 +544,38 @@ GET /api/v1/sessions/{session_id}/approvals
 
 - `status`
   - 可选
-  - 可取值：`pending`、`approved`、`rejected`
+  - 可取值：`pending`、`approved`、`rejected`、`expired`
 
 #### 数据来源
 
 读取：
 
 ```text
-data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+data/users/<user_id>/sessions/<session_id>/approvals.json
 ```
 
 ### 6.2 提交审批决策
 
 ```http
-POST /api/v1/approvals/{approval_id}/decision
+POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 ```
 
 #### 请求体示例
 
 ```json
 {
-  "decision": "approved",
-  "comment": "确认执行"
+  "decision": "approved"
 }
 ```
 
 #### 行为
 
-- 更新审批记录状态
-- 触发对应 Session/Thread 恢复执行
+- 校验该 approval 属于当前 Session
+- 校验当前用户有权限访问该 Session，并满足 approval 要求的角色
+- 更新当前 Session 下的审批记录状态
+- 触发当前 Session 绑定的 Thread 恢复执行
 - 通过 SSE 推送 `approval.resolved` 和后续运行事件
+- P7A 不要求审批备注字段
 
 #### 决策值建议
 
@@ -634,14 +636,14 @@ GET /sessions
 GET /sessions/{session_id}
 -> data/users/<user_id>/sessions/<session_id>/meta.json
 -> data/users/<user_id>/sessions/<session_id>/messages.json
--> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+-> data/users/<user_id>/sessions/<session_id>/approvals.json
 ```
 
 ### 8.3 审批
 
 ```text
 GET /sessions/{session_id}/approvals
--> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+-> data/users/<user_id>/sessions/<session_id>/approvals.json
 ```
 
 ## 9. 第一版代码目录骨架建议
@@ -694,7 +696,7 @@ ai-agent/
 - `POST /api/v1/sessions/{session_id}/messages`
 - `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
 - `GET /api/v1/sessions/{session_id}/approvals`
-- `POST /api/v1/approvals/{approval_id}/decision`
+- `POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision`
 - `POST /api/v1/sessions/{session_id}/archive`
 - `POST /api/v1/sessions/{session_id}/restore`
 - `DELETE /api/v1/sessions/{session_id}`

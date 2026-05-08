@@ -149,7 +149,7 @@
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
 data/users/<user_id>/sessions/<session_id>/messages.json
-data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+data/users/<user_id>/sessions/<session_id>/approvals.json
 ```
 
 其中已经实际接入并参与主流程的是：
@@ -157,7 +157,7 @@ data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 - `index.json`
 - `meta.json`
 - `messages.json`
-- `approvals.jsonl`
+- `approvals.json`
 
 这里的“接入”含义是：
 

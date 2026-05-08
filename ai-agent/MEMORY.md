@@ -16,7 +16,7 @@
 - 产品层记录
   - `meta.json`
   - `messages.json`
-  - `approvals.jsonl`
+  - `approvals.json`
 - 运行时状态
   - `thread_id`
   - SQLite checkpoint

@@ -169,7 +169,7 @@ Session 目录当前仍然只保留：
 - `index.json`
 - `meta.json`
 - `messages.json`
-- `approvals.jsonl`
+- `approvals.json`
 
 所以压缩影响的是模型上下文，不是产品层记录。
 
