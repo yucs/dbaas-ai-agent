@@ -20,6 +20,7 @@ from dbass_ai_agent.sessions.service import SessionService
 
 
 ApiDecision = Literal["approved", "rejected"]
+USER_REJECTED_APPROVAL_MESSAGE = "用户已拒绝该操作，未执行 DBAAS 变更。"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,8 @@ class ApprovalDecisionResult:
     operation: OperationRecord | None
     task: TaskRecord | None
     reply: AgentReply | None
+    next_approval: ApprovalRecord | None = None
+    paused: bool = False
 
 
 class ApprovalService:
@@ -138,6 +141,8 @@ class ApprovalService:
                     operation=operation,
                     task=task,
                     reply=None,
+                    next_approval=None,
+                    paused=False,
                 )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -309,21 +314,37 @@ class ApprovalService:
         )
         if approval.resume_failed:
             self.repository.append_approval(session.user_id, session.session_id, cleared)
+        assistant_content = _decision_assistant_content(
+            reply.content,
+            decision=decision,
+            reject_message=reject_message,
+        )
         assistant_message = None
-        if reply.content.strip():
+        if assistant_content:
             assistant_message = self.session_service.append_assistant_message(
                 identity,
                 session.session_id,
-                reply.content,
+                assistant_content,
             )
         operation = operation_service.find_by_approval(session, approval.approval_id)
         task = self._find_task_for_operation(session, task_service, operation)
+        next_approval = None
+        if reply.approval_request is not None:
+            next_approval = self.create_approval(
+                identity,
+                session,
+                run_id=reply.run_id,
+                request_message_id=approval.request_message_id or "",
+                interrupt=_approval_interrupt_from_runtime(reply.approval_request),
+            )
         return ApprovalDecisionResult(
             approval=cleared,
             assistant_message=assistant_message,
             operation=operation,
             task=task,
             reply=reply,
+            next_approval=next_approval,
+            paused=next_approval is not None,
         )
 
     def _mark_expired(self, session: SessionMeta, approval: ApprovalRecord) -> ApprovalRecord:
@@ -376,3 +397,32 @@ class ApprovalService:
             if task.operation_id == operation.operation_id:
                 return task
         return None
+
+
+def _approval_interrupt_from_runtime(value: Any) -> ApprovalInterrupt:
+    action_request = getattr(value, "action_request", None)
+    review_config = getattr(value, "review_config", None)
+    tool_call_id = getattr(value, "tool_call_id", "")
+    interrupt_count = getattr(value, "interrupt_count", 1)
+    if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DeepAgent 审批暂停信息格式无效。",
+        )
+    return ApprovalInterrupt(
+        action_request=action_request,
+        review_config=review_config,
+        tool_call_id=str(tool_call_id or ""),
+        interrupt_count=max(1, int(interrupt_count or 1)),
+    )
+
+
+def _decision_assistant_content(
+    content: str,
+    *,
+    decision: ApiDecision,
+    reject_message: str | None,
+) -> str:
+    if decision == "rejected" and reject_message is None:
+        return USER_REJECTED_APPROVAL_MESSAGE
+    return content.strip()

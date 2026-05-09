@@ -71,7 +71,7 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         self.assertEqual(events[-1].content, "已通过 DBAAS 工具完成查询")
         self.assertEqual(calls, [(session.thread_id, user_message.content)])
 
-    def test_resume_nested_approval_returns_operation_result_message(self) -> None:
+    def test_resume_nested_approval_returns_next_approval_request(self) -> None:
         runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
         runtime.artifacts = SimpleNamespace(agent=FakeNestedApprovalAgent())
 
@@ -96,9 +96,11 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
             task_service=object(),
         )
 
-        self.assertEqual(reply.warning, "approval_nested_interrupt")
-        self.assertIn("已更新 mysql-xf2/mysql 的资源规格。", reply.content)
-        self.assertIn("后续还有新的写操作需要单独确认", reply.content)
+        self.assertTrue(reply.paused)
+        self.assertIsNotNone(reply.approval_request)
+        self.assertEqual(reply.approval_request.tool_call_id, "call_nested")
+        self.assertEqual(reply.warning, None)
+        self.assertEqual(reply.content, "")
 
 
 class FakeNestedApprovalAgent:

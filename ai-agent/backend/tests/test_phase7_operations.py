@@ -27,7 +27,7 @@ from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.infra.clock import utc_now  # noqa: E402
 from dbass_ai_agent.operations.approval_service import ApprovalInterrupt, ApprovalService  # noqa: E402
-from dbass_ai_agent.operations.models import OperationTarget, TaskRecord  # noqa: E402
+from dbass_ai_agent.operations.models import OperationResult, OperationTarget, TaskRecord  # noqa: E402
 from dbass_ai_agent.operations.task_service import TaskService  # noqa: E402
 from dbass_ai_agent.sessions.approval_store import ApprovalStore  # noqa: E402
 from dbass_ai_agent.sessions.index_store import IndexStore  # noqa: E402
@@ -78,6 +78,87 @@ class ResumeRuntime:
             run_id="run_phase7_resume",
             content=f"审批已{decision}",
             mode="deepagent",
+        )
+
+
+class RejectRuntime:
+    def resume_approval(
+        self,
+        *,
+        identity,
+        session,
+        approval,
+        decision,
+        operation_service,
+        task_service,
+        reject_message=None,
+    ):
+        return AgentReply(
+            run_id="run_phase7_reject",
+            content="操作被系统拒绝，可能原因：用户没有权限。",
+            mode="deepagent",
+        )
+
+
+class NestedResumeRuntime:
+    def resume_approval(
+        self,
+        *,
+        identity,
+        session,
+        approval,
+        decision,
+        operation_service,
+        task_service,
+        reject_message=None,
+    ):
+        target = OperationTarget(
+            kind="service",
+            id="mysql-xf2",
+            name="mysql-xf2",
+            qualifiers={"child_service_type": "mysql"},
+        )
+        operation = operation_service.start_operation(
+            session,
+            approval=approval,
+            run_id="run_phase7_nested_resume",
+            action="service.resource.update",
+            execution_mode="sync",
+        )
+        operation_service.complete_operation(
+            session,
+            operation,
+            status="succeeded",
+            result=OperationResult(
+                operation_id=operation.operation_id,
+                approval_id=operation.approval_id,
+                action=operation.action,
+                targets=[target],
+                execution_mode="sync",
+                status="succeeded",
+                summary="已更新 mysql-xf2/mysql 的资源规格。",
+            ),
+        )
+        return AgentReply(
+            run_id="run_phase7_nested_resume",
+            content="",
+            mode="deepagent",
+            approval_request=AgentApprovalRequest(
+                action_request={
+                    "name": "update_service_storage_tool",
+                    "args": {
+                        "service_name": "mysql-xf2",
+                        "child_service_type": "mysql",
+                        "data_volume_size": 600,
+                    },
+                },
+                review_config={
+                    "action_name": "update_service_storage_tool",
+                    "allowed_decisions": ["approve", "reject"],
+                },
+                tool_call_id="call_phase7_nested_002",
+            ),
+            paused=True,
         )
 
 
@@ -159,6 +240,112 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(payload["approval"]["status"], "approved")
             self.assertEqual(payload["assistant_message"]["content"], "审批已approved")
             self.assertEqual(service.get_session(identity, detail.meta.session_id).messages[-1].role, "assistant")
+
+    def test_user_rejected_approval_persists_fixed_assistant_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 reject")
+            approval_service = ApprovalService(service.repository, service)
+            approval = approval_service.create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_approval",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_request={
+                        "name": "update_service_resource_tool",
+                        "args": {
+                            "service_name": "mysql-xf2",
+                            "child_service_type": "mysql",
+                            "memory": 15,
+                        },
+                    },
+                    review_config={
+                        "action_name": "update_service_resource_tool",
+                        "allowed_decisions": ["approve", "reject"],
+                    },
+                    tool_call_id="call_phase7_001",
+                ),
+            )
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: RejectRuntime()
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "rejected"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            expected = "用户已拒绝该操作，未执行 DBAAS 变更。"
+            self.assertEqual(payload["approval"]["status"], "rejected")
+            self.assertEqual(payload["assistant_message"]["content"], expected)
+            self.assertEqual(
+                service.get_session(identity, detail.meta.session_id).messages[-1].content,
+                expected,
+            )
+
+    def test_approval_decision_can_return_next_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 next approval")
+            approval_service = ApprovalService(service.repository, service)
+            approval = approval_service.create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_approval",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_request={
+                        "name": "update_service_resource_tool",
+                        "args": {
+                            "service_name": "mysql-xf2",
+                            "child_service_type": "mysql",
+                            "memory": 15,
+                        },
+                    },
+                    review_config={
+                        "action_name": "update_service_resource_tool",
+                        "allowed_decisions": ["approve", "reject"],
+                    },
+                    tool_call_id="call_phase7_001",
+                ),
+            )
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: NestedResumeRuntime()
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["approval"]["status"], "approved")
+            self.assertEqual(payload["operation"]["status"], "succeeded")
+            self.assertTrue(payload["paused"])
+            self.assertEqual(payload["next_approval"]["status"], "pending")
+            self.assertEqual(
+                payload["next_approval"]["interrupted_tool_call"]["tool_name"],
+                "update_service_storage_tool",
+            )
+            session = service.get_session(identity, detail.meta.session_id)
+            self.assertEqual(
+                [item.status for item in session.approvals],
+                ["approved", "pending"],
+            )
+            self.assertEqual(len(session.operations), 1)
+            self.assertEqual(session.operations[0].status, "succeeded")
 
 
 class TaskLazyRefreshTests(unittest.TestCase):

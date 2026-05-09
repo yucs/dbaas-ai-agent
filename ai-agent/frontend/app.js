@@ -52,6 +52,14 @@ function formatTime(value) {
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
+function timeValue(value) {
+  if (!value) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
 function truncatePreview(content) {
   return String(content || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
@@ -140,6 +148,10 @@ function approvalPreview(approval) {
   return approval?.proposal?.summary || approval?.action || "等待人工确认";
 }
 
+function getApprovalHandledAt(approval) {
+  return approval.decided_at || approval.expired_at || null;
+}
+
 function renderApprovalCard(approval) {
   const proposal = approval.proposal || {};
   const targets = proposal.targets || [];
@@ -169,6 +181,14 @@ function renderApprovalCard(approval) {
         <div>
           <span>所需角色</span>
           <strong>${escapeHtml(proposal.required_role || "user")}</strong>
+        </div>
+        <div>
+          <span>申请时间</span>
+          <strong>${formatTime(approval.created_at)}</strong>
+        </div>
+        <div>
+          <span>处理时间</span>
+          <strong>${formatTime(getApprovalHandledAt(approval))}</strong>
         </div>
         <div>
           <span>过期时间</span>
@@ -228,10 +248,6 @@ function renderApprovalCard(approval) {
       }
     </article>
   `;
-}
-
-function renderSessionApprovals(detail) {
-  return (detail.approvals || []).map(renderApprovalCard).join("");
 }
 
 function renderOperationChange(change) {
@@ -296,8 +312,74 @@ function renderOperationCard(operation) {
   `;
 }
 
-function renderSessionOperations(detail) {
-  return (detail.operations || []).map(renderOperationCard).join("");
+function renderMessageCard(message) {
+  return `
+    <article class="message ${message.role} ${message.pending ? "pending" : ""} ${message.error ? "error" : ""}">
+      <div class="message-meta">
+        <span>${getMessageAuthorLabel(message)}</span>
+        <span>${formatTime(message.created_at)}</span>
+      </div>
+      <div class="message-content ${message.typing ? "typing" : ""}">${messageToHtml(message.content)}</div>
+    </article>
+  `;
+}
+
+function getOperationTimelineTime(operation) {
+  return operation.completed_at || operation.started_at || operation.created_at;
+}
+
+function buildSessionTimeline(detail) {
+  const items = [];
+
+  for (const [index, message] of (detail.messages || []).entries()) {
+    items.push({
+      type: "message",
+      data: message,
+      at: timeValue(message.created_at),
+      priority: 0,
+      index,
+    });
+  }
+
+  for (const [index, approval] of (detail.approvals || []).entries()) {
+    items.push({
+      type: "approval",
+      data: approval,
+      at: timeValue(approval.created_at),
+      priority: 1,
+      index,
+    });
+  }
+
+  for (const [index, operation] of (detail.operations || []).entries()) {
+    items.push({
+      type: "operation",
+      data: operation,
+      at: timeValue(getOperationTimelineTime(operation)),
+      priority: 2,
+      index,
+    });
+  }
+
+  return items.sort((left, right) => {
+    if (left.at !== right.at) {
+      return left.at - right.at;
+    }
+    if (left.priority !== right.priority) {
+      return left.priority - right.priority;
+    }
+    return left.index - right.index;
+  });
+}
+
+function renderTimelineItem(item) {
+  if (item.type === "message") {
+    return renderMessageCard(item.data);
+  }
+  if (item.type === "approval") {
+    return renderApprovalCard(item.data);
+  }
+  return renderOperationCard(item.data);
 }
 
 function formatApiDetail(detail) {
@@ -547,28 +629,14 @@ function renderCurrentSession() {
   elements.sessionSubtitle.textContent = "当前页面只显示当前登录用户自己的会话。";
   elements.sessionStatus.textContent = detail.meta.status;
 
-  const messageHtml = (detail.messages || [])
-    .map(
-      (message) => `
-        <article class="message ${message.role} ${message.pending ? "pending" : ""} ${message.error ? "error" : ""}">
-          <div class="message-meta">
-            <span>${getMessageAuthorLabel(message)}</span>
-            <span>${formatTime(message.created_at)}</span>
-          </div>
-          <div class="message-content ${message.typing ? "typing" : ""}">${messageToHtml(message.content)}</div>
-        </article>
-      `,
-    )
-    .join("");
-  const approvalHtml = renderSessionApprovals(detail);
-  const operationHtml = renderSessionOperations(detail);
+  const timelineHtml = buildSessionTimeline(detail).map(renderTimelineItem).join("");
 
-  if (!messageHtml && !approvalHtml && !operationHtml) {
+  if (!timelineHtml) {
     elements.messages.innerHTML = `<div class="empty-state">当前会话还没有消息，开始提问吧。</div>`;
     return;
   }
 
-  elements.messages.innerHTML = `${messageHtml}${approvalHtml}${operationHtml}`;
+  elements.messages.innerHTML = timelineHtml;
 
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
@@ -1128,7 +1196,7 @@ async function handleApprovalDecision(approvalId, decision) {
   clearFlash();
 
   try {
-    await api(`/api/v1/sessions/${sessionId}/approvals/${approvalId}/decision`, {
+    const payload = await api(`/api/v1/sessions/${sessionId}/approvals/${approvalId}/decision`, {
       method: "POST",
       body: JSON.stringify({ decision }),
     });
@@ -1137,7 +1205,11 @@ async function handleApprovalDecision(approvalId, decision) {
     } else {
       await fetchSessions();
     }
-    showFlash(decision === "approved" ? "操作已批准，执行结果已更新。" : "操作已拒绝。");
+    if (payload.next_approval) {
+      showFlash("当前操作已处理，后续操作等待确认。");
+    } else {
+      showFlash(decision === "approved" ? "操作已批准，执行结果已更新。" : "操作已拒绝。");
+    }
   } catch (error) {
     showFlash(error.message || "审批处理失败", "error");
     if (state.currentSessionId === sessionId) {

@@ -221,17 +221,16 @@ class DeepAgentRuntime:
 
             output = self._normalize_run_output(result)
             if output.approval_request is not None:
-                operation = operation_service.find_by_approval(session, approval.approval_id)
                 logger.info(
-                    "agent resume stopped before nested approval approval_id=%s operation_id=%s",
+                    "agent resume paused before next approval approval_id=%s",
                     approval.approval_id,
-                    operation.operation_id if operation else "-",
                 )
                 return AgentReply(
                     run_id=run_id,
-                    content=_nested_approval_content(operation),
+                    content=output.content,
                     mode=mode,
-                    warning="approval_nested_interrupt",
+                    approval_request=output.approval_request,
+                    paused=True,
                 )
             logger.info("agent resume completed duration_ms=%s", elapsed_ms(started_at))
             return AgentReply(run_id=run_id, content=output.content, mode=mode)
@@ -611,23 +610,8 @@ def _resume_decision_payload(
     decision_count = max(1, getattr(approval, "interrupt_count", 1))
     if decision == "approved":
         return {"decisions": [{"type": "approve"} for _ in range(decision_count)]}
-    message = reject_message or "用户拒绝执行该操作。"
+    message = reject_message or "用户在审批卡中拒绝该操作；该操作未执行 DBAAS 变更。不要描述为系统拒绝。"
     return {"decisions": [{"type": "reject", "message": message} for _ in range(decision_count)]}
-
-
-def _nested_approval_content(operation: Any | None) -> str:
-    if operation is not None and getattr(operation, "result", None) is not None:
-        summary = operation.result.summary
-        return (
-            f"{summary}\n\n"
-            "后续还有新的写操作需要单独确认。当前版本不会在一次批准后连续弹出第二个确认，"
-            "请继续发送下一步操作指令后再确认。"
-        )
-    return (
-        "本次批准后的执行已结束。\n\n"
-        "后续还有新的写操作需要单独确认。当前版本不会在一次批准后连续弹出第二个确认，"
-        "请继续发送下一步操作指令后再确认。"
-    )
 
 
 def _classify_exception(exc: Exception) -> str:

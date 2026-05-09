@@ -1549,7 +1549,9 @@ expired
   "approval": {},
   "assistant_message": {},
   "operation": {},
-  "task": null
+  "task": null,
+  "next_approval": null,
+  "paused": false
 }
 ```
 
@@ -1559,6 +1561,38 @@ expired
 - `assistant_message`：resume 后生成并写入 `messages.json` 的助手消息；如果拒绝后没有助手消息，可为 `null`
 - `operation`：本次审批触发的最新 operation；拒绝或超时时可为 `null`
 - `task`：异步任务创建成功时返回当前 task latest view；同步操作或拒绝时为 `null`
+- `next_approval`：本次 resume 继续执行后，如果再次命中写 tool interrupt，则返回新创建的待确认审批；否则为 `null`
+- `paused`：是否因为 `next_approval` 再次暂停；普通完成或拒绝时为 `false`
+
+审批恢复后的再次 interrupt 语义：
+
+- 每次批准只放行当前 approval 对应的一个受保护 tool，不自动批准后续 tool
+- `Command(resume=...)` 恢复后，如果 AI 继续调用第二个写 tool，DeepAgent 会再次 interrupt
+- 后端必须先保留当前 approval 的终态，例如 `approved` 或 `rejected`
+- 如果当前 approval 已触发 operation，则 operation 结果仍应写入 `operations.json`
+- 如果恢复链路再次返回 approval request，后端创建新的 `pending approval`，并通过 `next_approval` 返回
+- 同一个 Session 同一时间仍只允许一个 `pending approval`
+- 该响应不应返回 `502`，也不应自动继续执行第二个写 tool
+
+典型连续审批响应：
+
+```json
+{
+  "approval": {"status": "approved"},
+  "assistant_message": null,
+  "operation": {"status": "succeeded"},
+  "task": null,
+  "next_approval": {"status": "pending"},
+  "paused": true
+}
+```
+
+前端语义：
+
+- 旧 approval card 显示为 `已批准`，不隐藏
+- 本次 operation result card 显示为成功、失败、超时或待核查
+- `next_approval` 显示为新的待确认卡片
+- 用户继续点击 `next_approval` 的批准或拒绝，进入下一轮 decision
 
 前端提交审批决策后，应刷新当前 Session 详情。
 如果响应中包含 `task`，或当前 Session 已有任务面板，
@@ -1663,6 +1697,8 @@ operations.json  -> 已执行或尝试执行的操作结果
 - `approved`：恢复已确认卡片，按钮禁用
 - `rejected`：恢复已拒绝卡片，按钮禁用
 - `expired`：恢复已超时取消卡片，按钮禁用
+- `operations` 中已有结果时，无论是否存在 assistant message，都恢复操作结果卡
+- 如果审批决策响应带 `next_approval`，刷新后同时展示旧审批卡、旧操作结果卡和新的待确认卡
 
 确认或拒绝仍然通过 session-scoped 接口提交：
 
@@ -2172,6 +2208,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - 用户请求扩容时，前端收到审批请求
 - 用户拒绝时，不调用 DBAAS 写接口
 - 用户批准时，工具执行且返回结果
+- 同一恢复链路内再次触发写 tool 时，返回新的 `next_approval`，不返回 `502`
+- 连续写操作必须逐个审批，不允许一次批准自动放行后续写 tool
 - 同步操作能展示 `changes[]`
 - 同步写操作超时时返回 `timeout`，不自动重试写接口
 - 同步写操作超时时记录 `reconcile_required`
