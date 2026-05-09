@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -17,12 +18,16 @@ if str(SRC_ROOT) not in sys.path:
 from dbass_ai_agent.agent.runtime import AgentApprovalRequest, AgentReply  # noqa: E402
 from dbass_ai_agent.api.deps import (  # noqa: E402
     get_agent_runtime,
+    get_app_settings,
     get_current_identity,
     get_session_service,
+    get_task_service,
 )
 from dbass_ai_agent.api.routes_approvals import router as approvals_router  # noqa: E402
 from dbass_ai_agent.api.routes_chat import router as chat_router  # noqa: E402
 from dbass_ai_agent.api.routes_sessions import router as sessions_router  # noqa: E402
+from dbass_ai_agent.api.routes_tasks import router as tasks_router  # noqa: E402
+from dbass_ai_agent.config import Settings  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.infra.clock import utc_now  # noqa: E402
@@ -349,6 +354,99 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
 
 class TaskLazyRefreshTests(unittest.TestCase):
+    def test_refresh_task_skips_terminal_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="terminal task")
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=UnexpectedTaskClient(),
+            )
+            terminal = _running_task(detail.meta.session_id).model_copy(
+                update={"status": "succeeded", "source_status": "SUCCESS"}
+            )
+            service.repository.append_task(detail.meta.user_id, detail.meta.session_id, terminal)
+
+            refreshed = task_service.refresh_task(identity, detail.meta, terminal)
+
+            self.assertEqual(refreshed.status, "succeeded")
+            self.assertEqual(refreshed.source_status, "SUCCESS")
+            self.assertEqual(task_service.list_tasks(detail.meta), [terminal])
+
+    def test_tasks_endpoint_lazy_refreshes_current_session_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="task route")
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=FakeTaskClient(),
+            )
+            service.repository.append_task(
+                detail.meta.user_id,
+                detail.meta.session_id,
+                _running_task(detail.meta.session_id),
+            )
+            app = FastAPI()
+            app.include_router(tasks_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+            app.dependency_overrides[get_app_settings] = lambda: Settings(
+                dbaas_task_refresh_interval_seconds=1,
+            )
+
+            with TestClient(app) as client:
+                response = client.get(f"/api/v1/sessions/{detail.meta.session_id}/tasks")
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["items"][0]["status"], "succeeded")
+            self.assertEqual(payload["items"][0]["source_status"], "SUCCESS")
+
+    def test_task_events_streams_task_status_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="task events")
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=FakeTaskClient(),
+            )
+            service.repository.append_task(
+                detail.meta.user_id,
+                detail.meta.session_id,
+                _running_task(detail.meta.session_id),
+            )
+            app = FastAPI()
+            app.include_router(tasks_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+            app.dependency_overrides[get_app_settings] = lambda: Settings(
+                dbaas_task_refresh_interval_seconds=1,
+            )
+
+            with TestClient(app) as client:
+                with client.stream(
+                    "GET",
+                    f"/api/v1/sessions/{detail.meta.session_id}/tasks/events",
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    body = "".join(response.iter_text())
+
+            events = _parse_sse_events(body)
+            self.assertEqual([event_name for event_name, _payload in events], ["task_status_changed"])
+            payload = events[0][1]
+            self.assertEqual(payload["session_id"], detail.meta.session_id)
+            self.assertEqual(payload["task"]["task_id"], "task-001")
+            self.assertEqual(payload["task"]["previous_status"], "running")
+            self.assertEqual(payload["task"]["status"], "succeeded")
+
     def test_lazy_refresh_updates_non_terminal_task_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user=None)
@@ -360,31 +458,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 config,
                 write_client=FakeTaskClient(),
             )
-            target = OperationTarget(
-                kind="service",
-                id="mysql-xf2",
-                name="mysql-xf2",
-                qualifiers={"child_service_type": "mysql"},
-            )
-            now = utc_now()
-            task = TaskRecord(
-                task_id="task-001",
-                operation_id="op-001",
-                session_id=detail.meta.session_id,
-                action="service.image.upgrade",
-                operation_conflict_key="service.image.upgrade|service:mysql-xf2:child_service_type=mysql",
-                targets=[target],
-                dbaas_type="service.image.upgrade",
-                status="running",
-                source_status="RUNNING",
-                message="running",
-                reason=None,
-                result=None,
-                last_error=None,
-                created_at=now,
-                updated_at=now,
-                last_checked_at=now,
-            )
+            task = _running_task(detail.meta.session_id)
             service.repository.append_task(detail.meta.user_id, detail.meta.session_id, task)
 
             refreshed = task_service.list_tasks_with_lazy_refresh(identity, detail.meta)
@@ -410,6 +484,55 @@ class FakeTaskClient:
             "createdAt": "2026-05-08T00:00:00Z",
             "updatedAt": "2026-05-08T00:00:02Z",
         }
+
+
+class UnexpectedTaskClient:
+    def get_task(self, identity, task_id, *, timeout_seconds=None):
+        raise AssertionError("terminal tasks must not be refreshed")
+
+
+def _running_task(session_id: str) -> TaskRecord:
+    target = OperationTarget(
+        kind="service",
+        id="mysql-xf2",
+        name="mysql-xf2",
+        qualifiers={"child_service_type": "mysql"},
+    )
+    now = utc_now()
+    return TaskRecord(
+        task_id="task-001",
+        operation_id="op-001",
+        session_id=session_id,
+        action="service.image.upgrade",
+        operation_conflict_key="service.image.upgrade|service:mysql-xf2:child_service_type=mysql",
+        targets=[target],
+        dbaas_type="service.image.upgrade",
+        status="running",
+        source_status="RUNNING",
+        message="running",
+        reason=None,
+        result=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
+        last_checked_at=now,
+    )
+
+
+def _parse_sse_events(body: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    for block in body.strip().split("\n\n"):
+        if not block.strip():
+            continue
+        event_name = "message"
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                event_name = line.removeprefix("event:").strip()
+            if line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").strip())
+        events.append((event_name, json.loads("\n".join(data_lines))))
+    return events
 
 
 def _session_service(tmpdir: str) -> SessionService:

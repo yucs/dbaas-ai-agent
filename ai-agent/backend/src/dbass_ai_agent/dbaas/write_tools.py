@@ -404,11 +404,30 @@ def build_write_tools(settings: Settings) -> list[Any]:
             "message": "当前 Session 没有记录该 task_id。",
         }
 
+    @tool("list_current_session_tasks_tool")
+    def list_current_session_tasks_tool(status: str | None = None) -> dict[str, Any]:
+        """列出当前 Session 已记录的 DBAAS 异步任务；用户询问有哪些任务在跑或刚才任务状态时使用。"""
+
+        context = require_operation_context()
+        tasks = context.task_service.list_tasks_with_lazy_refresh(
+            context.identity,
+            context.session,
+        )
+        normalized_status = (status or "").strip().lower()
+        if normalized_status:
+            tasks = [task for task in tasks if task.status == normalized_status]
+        return {
+            "session_id": context.session.session_id,
+            "count": len(tasks),
+            "items": [task.model_dump(mode="json") for task in tasks],
+        }
+
     return [
         update_service_resource_tool,
         update_service_storage_tool,
         create_service_image_upgrade_task_tool,
         get_dbaas_task_tool,
+        list_current_session_tasks_tool,
     ]
 
 

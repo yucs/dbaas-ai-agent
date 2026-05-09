@@ -108,6 +108,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                     "update_service_storage_tool",
                     "create_service_image_upgrade_task_tool",
                     "get_dbaas_task_tool",
+                    "list_current_session_tasks_tool",
                 },
             )
             self.assertEqual(

@@ -71,6 +71,8 @@ dir = "./data/runtime/dbaas_workspace"
 sync_interval_seconds = 8
 # 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
 ttl_seconds = 30
+# 当前 Session 任务 SSE 订阅期间刷新非终态 task 的间隔，单位秒。
+task_refresh_interval_seconds = 10
 # 单次 jq 查询最多运行多久，单位秒。
 jq_timeout_seconds = 5
 # 返回给大模型的最大预览条数。

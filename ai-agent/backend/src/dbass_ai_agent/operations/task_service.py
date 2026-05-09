@@ -98,6 +98,9 @@ class TaskService:
         session: SessionMeta,
         task: TaskRecord,
     ) -> TaskRecord:
+        if is_terminal_task_status(task.status):
+            return task
+
         checked_at = utc_now()
         try:
             payload = self.write_client.get_task(

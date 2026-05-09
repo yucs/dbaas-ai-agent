@@ -375,6 +375,9 @@ action 名面向审计、事件和长期兼容。
 确认发生在工具执行前。
 前端审批接口不直接调用 DBAAS。
 DBAAS 写入只能发生在受控工具内部。
+AI 不应手写自然语言确认表来替代受控写工具调用。
+用户提出写操作时，AI 应调用对应写工具，由 DeepAgent interrupt 和后端 proposal
+生成确认卡。
 
 ### 5.2 DeepAgent interrupt_on
 
@@ -1031,6 +1034,7 @@ ai-agent 重启恢复语义：
 
 - 用户自然语言请求，例如“查一下刚才升级任务进度”
 - `get_dbaas_task_tool(task_id)`
+- `list_current_session_tasks_tool(status?)`
 - `GET /api/v1/sessions/{session_id}/tasks` lazy refresh
 - 当前 Session 页面打开时的任务 SSE
 
@@ -1068,7 +1072,8 @@ DBAAS 的 `task_id` 可以是全局唯一标识，
 建议配置：
 
 ```text
-dbaas_task_refresh_interval_seconds = 10 或 30
+[dbaas_workspace]
+task_refresh_interval_seconds = 10 或 30
 ```
 
 SSE 订阅期间的 refresh loop 可以使用单进程内 asyncio task。
@@ -2280,6 +2285,7 @@ GET /api/v1/sessions/{session_id}/tasks
 - 实现当前 Session 的 task lazy refresh
 - 实现当前 Session task SSE 订阅期间的 refresh loop
 - 实现 `get_dbaas_task_tool`
+- 实现 `list_current_session_tasks_tool`
 - 实现 `tasks.json`
 - 实现 Session 下任务列表接口
 - Agent 能回答“刚才那个任务怎么样了”
@@ -2313,6 +2319,15 @@ GET /api/v1/sessions/{session_id}/tasks
 - 自然语言查询“有哪些任务在跑”只回答当前 Session 内任务
 - 任务成功或失败后，任务接口和任务面板能反映最新状态
 - Session 有非终态异步任务时不允许归档或删除
+
+建议开发顺序：
+
+1. 补齐 `TaskService` 和 `GET /api/v1/sessions/{session_id}/tasks` lazy refresh
+2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.json`
+3. 实现 `GET /api/v1/sessions/{session_id}/tasks/events`，推送 `task_status_changed`
+4. 前端会话页增加当前 Session 任务下拉框或任务面板
+5. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
+6. 补归档/删除保护、刷新失败语义和回归测试
 
 ### 15.3 P7C：生命周期操作与高风险策略
 

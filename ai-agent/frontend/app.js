@@ -5,6 +5,9 @@ const state = {
   sessions: [],
   currentSessionId: null,
   currentSession: null,
+  currentTasks: [],
+  taskEventsController: null,
+  taskEventsSessionId: null,
   sending: false,
   bootstrapping: false,
   decidingApprovalIds: new Set(),
@@ -30,6 +33,7 @@ const elements = {
   messageInput: document.getElementById("message-input"),
   sendButton: document.getElementById("send-button"),
   flash: document.getElementById("flash"),
+  taskPanel: document.getElementById("task-panel"),
 };
 
 function escapeHtml(value) {
@@ -113,6 +117,22 @@ function formatOperationStatus(value) {
     task_created: "任务已创建",
   };
   return labels[value] || value || "-";
+}
+
+function formatTaskStatus(value) {
+  const labels = {
+    running: "运行中",
+    succeeded: "已成功",
+    failed: "已失败",
+    canceled: "已取消",
+    unknown: "待核查",
+    refresh_failed: "刷新失败",
+  };
+  return labels[value] || value || "-";
+}
+
+function isTerminalTaskStatus(status) {
+  return ["succeeded", "failed", "canceled"].includes(status);
 }
 
 function renderApprovalTarget(target) {
@@ -309,6 +329,72 @@ function renderOperationCard(operation) {
           : ""
       }
     </article>
+  `;
+}
+
+function renderTaskTarget(target) {
+  const name = target.name || target.id || "-";
+  const qualifiers = target.qualifiers || {};
+  const qualifierText = Object.entries(qualifiers)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("，");
+  return `${escapeHtml(name)}${qualifierText ? ` <span>${escapeHtml(qualifierText)}</span>` : ""}`;
+}
+
+function renderTaskRow(task) {
+  const targets = task.targets || [];
+  const targetText = targets.length
+    ? targets.map(renderTaskTarget).join("；")
+    : "-";
+  const message = task.last_error || task.reason || task.message || "-";
+  return `
+    <li class="task-row ${escapeHtml(task.status)}" data-task-id="${escapeHtml(task.task_id)}">
+      <div class="task-row-main">
+        <span class="status-pill task-status">${escapeHtml(formatTaskStatus(task.status))}</span>
+        <div>
+          <strong>${escapeHtml(task.action || task.dbaas_type || "异步任务")}</strong>
+          <p>${targetText}</p>
+        </div>
+      </div>
+      <div class="task-row-meta">
+        <span>task_id: ${escapeHtml(task.task_id)}</span>
+        <span>更新: ${formatTime(task.updated_at || task.last_checked_at)}</span>
+      </div>
+      <div class="task-row-message">${escapeHtml(message)}</div>
+    </li>
+  `;
+}
+
+function renderTaskPanel() {
+  if (!elements.taskPanel) {
+    return;
+  }
+  const tasks = state.currentTasks || [];
+  if (!state.currentSession || !tasks.length) {
+    elements.taskPanel.classList.add("hidden");
+    elements.taskPanel.innerHTML = "";
+    return;
+  }
+
+  const runningCount = tasks.filter((task) => !isTerminalTaskStatus(task.status)).length;
+  const failedCount = tasks.filter((task) => task.status === "failed" || task.status === "refresh_failed").length;
+  const summary = runningCount
+    ? `${runningCount} 个运行中`
+    : failedCount
+      ? `${failedCount} 个异常`
+      : "全部完成";
+
+  elements.taskPanel.classList.remove("hidden");
+  elements.taskPanel.innerHTML = `
+    <details class="task-panel-card" ${runningCount ? "open" : ""}>
+      <summary>
+        <span>当前 Session 任务</span>
+        <strong>${escapeHtml(summary)}</strong>
+      </summary>
+      <ul class="task-list">
+        ${tasks.map(renderTaskRow).join("")}
+      </ul>
+    </details>
   `;
 }
 
@@ -621,6 +707,7 @@ function renderCurrentSession() {
       : "请先登录。";
     elements.sessionStatus.textContent = "-";
     elements.messages.innerHTML = `<div class="empty-state">请选择或创建一个会话。</div>`;
+    renderTaskPanel();
     return;
   }
 
@@ -664,13 +751,14 @@ function setComposerState() {
   const noSession = !state.currentSessionId;
   const pendingApproval = hasPendingApproval();
   const decidingApproval = state.decidingApprovalIds.size > 0;
+  const runningTask = hasRunningTask();
   const disableActions = noSession || state.bootstrapping || pendingApproval || decidingApproval;
 
   elements.messageInput.disabled = disableActions;
   elements.sendButton.disabled = disableActions || state.sending;
   elements.sendButton.textContent = state.sending ? "发送中..." : pendingApproval ? "待确认" : "发送";
   elements.newSessionButton.disabled = state.bootstrapping || !state.auth;
-  elements.deleteButton.disabled = noSession || state.bootstrapping || pendingApproval || decidingApproval;
+  elements.deleteButton.disabled = noSession || state.bootstrapping || pendingApproval || decidingApproval || runningTask;
 }
 
 function upsertSessionItem(meta, preview) {
@@ -709,6 +797,37 @@ function upsertApproval(approvals, approval) {
   const next = [...current];
   next[index] = approval;
   return next;
+}
+
+function sortTasks(tasks) {
+  return [...(tasks || [])].sort((left, right) => {
+    const leftDone = isTerminalTaskStatus(left.status);
+    const rightDone = isTerminalTaskStatus(right.status);
+    if (leftDone !== rightDone) {
+      return leftDone ? 1 : -1;
+    }
+    const leftValue = left.updated_at || left.last_checked_at || left.created_at || "";
+    const rightValue = right.updated_at || right.last_checked_at || right.created_at || "";
+    return rightValue.localeCompare(leftValue);
+  });
+}
+
+function upsertTask(tasks, task) {
+  if (!task) {
+    return sortTasks(tasks || []);
+  }
+  const current = tasks || [];
+  const index = current.findIndex((item) => item.task_id === task.task_id);
+  if (index === -1) {
+    return sortTasks([task, ...current]);
+  }
+  const next = [...current];
+  next[index] = task;
+  return sortTasks(next);
+}
+
+function hasRunningTask() {
+  return Boolean((state.currentTasks || []).some((task) => !isTerminalTaskStatus(task.status)));
 }
 
 function appendOptimisticMessages(content) {
@@ -1071,13 +1190,117 @@ async function fetchAppConfig() {
   }
 }
 
+function stopTaskEvents() {
+  if (state.taskEventsController) {
+    state.taskEventsController.abort();
+  }
+  state.taskEventsController = null;
+  state.taskEventsSessionId = null;
+}
+
+async function fetchSessionTasks(sessionId = state.currentSessionId) {
+  if (!sessionId || !state.auth) {
+    state.currentTasks = [];
+    renderTaskPanel();
+    setComposerState();
+    stopTaskEvents();
+    return;
+  }
+
+  const payload = await api(`/api/v1/sessions/${sessionId}/tasks`);
+  if (state.currentSessionId !== sessionId) {
+    return;
+  }
+  state.currentTasks = sortTasks(payload.items || []);
+  renderTaskPanel();
+  setComposerState();
+  syncTaskEventSubscription();
+}
+
+function syncTaskEventSubscription() {
+  const sessionId = state.currentSessionId;
+  if (!sessionId || !hasRunningTask()) {
+    stopTaskEvents();
+    return;
+  }
+  if (state.taskEventsController && state.taskEventsSessionId === sessionId) {
+    return;
+  }
+  subscribeTaskEvents(sessionId);
+}
+
+async function subscribeTaskEvents(sessionId) {
+  stopTaskEvents();
+  const controller = new AbortController();
+  state.taskEventsController = controller;
+  state.taskEventsSessionId = sessionId;
+
+  try {
+    const response = await fetch(`/api/v1/sessions/${sessionId}/tasks/events`, {
+      method: "GET",
+      headers: {
+        ...authHeaders(),
+        Accept: "text/event-stream",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(formatApiDetail(payload.detail) || "任务事件订阅失败");
+    }
+
+    await readSseResponse(response, (eventName, payload) => {
+      if (eventName !== "task_status_changed") {
+        return;
+      }
+      applyTaskStatusChanged(payload, sessionId);
+    });
+  } catch (error) {
+    if (error.name !== "AbortError" && state.currentSessionId === sessionId) {
+      showFlash(error.message || "任务事件订阅失败", "error");
+    }
+  } finally {
+    if (state.taskEventsController === controller) {
+      state.taskEventsController = null;
+      state.taskEventsSessionId = null;
+      if (state.currentSessionId === sessionId && hasRunningTask()) {
+        window.setTimeout(() => syncTaskEventSubscription(), 3000);
+      }
+    }
+  }
+}
+
+function applyTaskStatusChanged(payload, sessionId) {
+  if (!payload || payload.session_id !== sessionId || state.currentSessionId !== sessionId) {
+    return;
+  }
+  const task = payload.task;
+  if (!task) {
+    return;
+  }
+  state.currentTasks = upsertTask(state.currentTasks, task);
+  renderTaskPanel();
+  setComposerState();
+  if (isTerminalTaskStatus(task.status)) {
+    showFlash(`任务 ${task.task_id} ${formatTaskStatus(task.status)}。`);
+  }
+}
+
 async function loadSession(sessionId) {
+  if (state.currentSessionId !== sessionId) {
+    stopTaskEvents();
+    state.currentTasks = [];
+    renderTaskPanel();
+  }
   const payload = await api(`/api/v1/sessions/${sessionId}`);
   state.currentSessionId = sessionId;
   state.currentSession = payload.session;
   renderSessions();
   renderCurrentSession();
   setComposerState();
+  await fetchSessionTasks(sessionId).catch((error) => {
+    showFlash(error.message || "任务列表加载失败", "error");
+  });
 }
 
 async function createSession() {
@@ -1126,16 +1349,19 @@ async function reconcileCurrentSession() {
 }
 
 function switchUser() {
+  stopTaskEvents();
   clearAuth();
   state.auth = null;
   state.sessions = [];
   state.currentSessionId = null;
   state.currentSession = null;
+  state.currentTasks = [];
   state.sending = false;
   state.bootstrapping = false;
   renderIdentity();
   renderSessions();
   renderCurrentSession();
+  renderTaskPanel();
   setComposerState();
   clearFlash();
   openLoginModal();
@@ -1153,13 +1379,16 @@ async function handleDelete(sessionId) {
   removeSessionItem(sessionId);
 
   if (state.currentSessionId === sessionId) {
+    stopTaskEvents();
     state.currentSessionId = null;
     state.currentSession = null;
+    state.currentTasks = [];
     if (state.sessions.length) {
       await loadSession(state.sessions[0].session_id);
     } else {
       renderSessions();
       renderCurrentSession();
+      renderTaskPanel();
       setComposerState();
     }
     return;
@@ -1360,6 +1589,10 @@ elements.messages.addEventListener("click", async (event) => {
 });
 
 elements.composer.addEventListener("submit", sendMessage);
+
+window.addEventListener("beforeunload", () => {
+  stopTaskEvents();
+});
 
 bootstrap().catch((error) => {
   showFlash(error.message || "初始化失败", "error");

@@ -84,6 +84,7 @@ textarea {
 .sidebar-section,
 .identity-card,
 .flash,
+.task-panel,
 .login-card,
 .message {
   border: 1px solid var(--line);
@@ -94,7 +95,8 @@ textarea {
 
 .identity-card,
 .sidebar-section,
-.flash {
+.flash,
+.task-panel {
   padding: 16px;
 }
 
@@ -301,6 +303,94 @@ p {
 .operation-card.unknown {
   border-color: #cdbb9d;
   background: #f8f1e4;
+}
+
+.task-panel {
+  max-width: 760px;
+  background: #f3fbf8;
+  border-color: #b8d9cd;
+}
+
+.task-panel-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.task-panel-card summary strong {
+  color: var(--text);
+}
+
+.task-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-row {
+  border-top: 1px solid #cbe4da;
+  padding-top: 12px;
+}
+
+.task-row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.task-row-main strong {
+  display: block;
+  line-height: 1.45;
+}
+
+.task-row-main p,
+.task-row-meta,
+.task-row-message {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.task-row-main p {
+  margin-top: 4px;
+}
+
+.task-row-main p span {
+  display: block;
+}
+
+.task-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+
+.task-row-message {
+  margin-top: 4px;
+}
+
+.task-status {
+  background: #dcefe7;
+  color: #1b5b45;
+}
+
+.task-row.failed .task-status,
+.task-row.refresh_failed .task-status {
+  background: #f1d7d2;
+  color: #7a2d22;
+}
+
+.task-row.canceled .task-status,
+.task-row.unknown .task-status {
+  background: #f8e7be;
+  color: #68470d;
 }
 
 .approval-header,
