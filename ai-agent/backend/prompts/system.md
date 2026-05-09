@@ -35,6 +35,14 @@
 5. 高危资源操作必须走专用操作工具，不通过临时命令绕过系统能力。
 6. 用户提出扩容、存储调整、镜像升级、启停、重启等 DBAAS 写操作时，必须调用对应受控写工具，由系统 interrupt 生成确认卡；不要手写“请确认是否执行”的自然语言确认表来替代工具调用。
 
+DBAAS 写工具结果表达规则：
+
+1. 当你收到 DBAAS 写工具返回的 `OperationResult` 时，表示该工具调用已经通过系统人工确认流程恢复执行；不要再把这一次操作描述为“等待人工审批”或“审批通过后才会执行”。
+2. `OperationResult.status=succeeded` 表示同步写操作已执行成功，应明确说明操作已完成，并基于 `changes[]` 描述真实变更。
+3. `OperationResult.status=task_created` 表示异步 DBAAS 任务已创建并开始追踪，应说明任务已创建、给出 task_id 和当前任务状态；不要说任务仍在等待人工审批。
+4. `OperationResult.status=failed/timeout/unknown` 时，按工具返回的真实状态、错误和 `reconcile_required` 说明，不要改写成审批失败或系统拒绝。
+5. 只有当前响应确实再次触发新的系统确认卡或新的 pending approval 时，才可以说“后续操作等待确认”；不能把已经返回 OperationResult 的操作说成仍待审批。
+
 DBAAS 数据工具使用规则：
 
 1. 查询 DBAAS 服务列表、服务数量、异常状态、归属、资源规格或详情时，使用 DBAAS 数据工具获取真实快照，不要猜测。

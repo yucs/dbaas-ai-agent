@@ -12,7 +12,7 @@ from dbass_ai_agent.infra.clock import utc_now
 from dbass_ai_agent.infra.ids import new_approval_id
 from dbass_ai_agent.operations.action_registry import require_action_config
 from dbass_ai_agent.operations.models import InterruptedToolCall, OperationRecord, TaskRecord
-from dbass_ai_agent.operations.proposal_builder import build_operation_proposal
+from dbass_ai_agent.operations.proposal_builder import build_batch_operation_proposal
 from dbass_ai_agent.sessions.models import ApprovalRecord, ChatMessage, SessionMeta
 from dbass_ai_agent.sessions.repository import SessionRepository
 from dbass_ai_agent.sessions.run_lock import session_locks
@@ -25,18 +25,17 @@ USER_REJECTED_APPROVAL_MESSAGE = "用户已拒绝该操作，未执行 DBAAS 变
 
 @dataclass(frozen=True, slots=True)
 class ApprovalInterrupt:
-    action_request: dict[str, Any]
-    review_config: dict[str, Any]
-    tool_call_id: str
-    interrupt_count: int = 1
+    action_requests: list[dict[str, Any]]
+    review_configs: list[dict[str, Any]]
+    tool_call_ids: list[str]
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovalDecisionResult:
     approval: ApprovalRecord
     assistant_message: ChatMessage | None
-    operation: OperationRecord | None
-    task: TaskRecord | None
+    operations: list[OperationRecord]
+    tasks: list[TaskRecord]
     reply: AgentReply | None
     next_approval: ApprovalRecord | None = None
     paused: bool = False
@@ -65,33 +64,55 @@ class ApprovalService:
         interrupt: ApprovalInterrupt,
     ) -> ApprovalRecord:
         self._assert_no_pending_approval(session)
-        tool_name = str(interrupt.action_request.get("name") or "")
-        tool_args = interrupt.action_request.get("args")
-        if not isinstance(tool_args, dict):
-            tool_args = {}
-        config = require_action_config(tool_name)
-        proposal = build_operation_proposal(tool_name, tool_args)
+        if not interrupt.action_requests:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="DeepAgent 审批暂停信息缺少待确认工具调用。",
+            )
+        if len(interrupt.action_requests) != len(interrupt.review_configs):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="DeepAgent 审批暂停信息中 action_requests 与 review_configs 数量不一致。",
+            )
+        tool_calls: list[tuple[str, dict[str, Any]]] = []
+        interrupted_tool_calls: list[InterruptedToolCall] = []
+        ttl_seconds: int | None = None
+        for index, action_request in enumerate(interrupt.action_requests):
+            tool_name = str(action_request.get("name") or "")
+            tool_args = action_request.get("args")
+            if not isinstance(tool_args, dict):
+                tool_args = {}
+            config = require_action_config(tool_name)
+            ttl_seconds = (
+                config.approval_ttl_seconds
+                if ttl_seconds is None
+                else min(ttl_seconds, config.approval_ttl_seconds)
+            )
+            tool_calls.append((tool_name, tool_args))
+            interrupted_tool_calls.append(
+                InterruptedToolCall(
+                    tool_call_id=interrupt.tool_call_ids[index] if index < len(interrupt.tool_call_ids) else "",
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                )
+            )
+        proposal = build_batch_operation_proposal(tool_calls)
         self._assert_decision_role(identity, proposal.required_role)
         now = utc_now()
         approval = ApprovalRecord(
             approval_id=new_approval_id(),
             status="pending",
-            action=proposal.action,
+            action=proposal.items[0].action if len(proposal.items) == 1 else "batch",
             session_id=session.session_id,
             thread_id=session.thread_id,
             run_id=run_id,
             request_message_id=request_message_id,
             proposal=proposal,
-            interrupted_tool_call=InterruptedToolCall(
-                tool_call_id=interrupt.tool_call_id,
-                tool_name=tool_name,
-                tool_args=tool_args,
-            ),
-            interrupt_count=interrupt.interrupt_count,
+            interrupted_tool_calls=interrupted_tool_calls,
             allowed_decisions=["approve", "reject"],
             decided_by=None,
             created_at=now,
-            expires_at=now + timedelta(seconds=config.approval_ttl_seconds),
+            expires_at=now + timedelta(seconds=ttl_seconds or 30 * 60),
             decided_at=None,
             expired_at=None,
             resume_failed=False,
@@ -123,9 +144,9 @@ class ApprovalService:
         terminal = {"approved", "rejected", "expired"}
         if approval.status in terminal:
             if approval.status == decision:
-                operation = operation_service.find_by_approval(session, approval.approval_id)
-                task = self._find_task_for_operation(session, task_service, operation)
-                if approval.resume_failed and operation is None:
+                operations = operation_service.find_all_by_approval(session, approval.approval_id)
+                tasks = self._find_tasks_for_operations(session, task_service, operations)
+                if approval.resume_failed and not operations:
                     return self._resume_terminal(
                         identity,
                         session,
@@ -138,8 +159,8 @@ class ApprovalService:
                 return ApprovalDecisionResult(
                     approval=approval,
                     assistant_message=None,
-                    operation=operation,
-                    task=task,
+                    operations=operations,
+                    tasks=tasks,
                     reply=None,
                     next_approval=None,
                     paused=False,
@@ -326,8 +347,8 @@ class ApprovalService:
                 session.session_id,
                 assistant_content,
             )
-        operation = operation_service.find_by_approval(session, approval.approval_id)
-        task = self._find_task_for_operation(session, task_service, operation)
+        operations = operation_service.find_all_by_approval(session, approval.approval_id)
+        tasks = self._find_tasks_for_operations(session, task_service, operations)
         next_approval = None
         if reply.approval_request is not None:
             next_approval = self.create_approval(
@@ -335,13 +356,13 @@ class ApprovalService:
                 session,
                 run_id=reply.run_id,
                 request_message_id=approval.request_message_id or "",
-                interrupt=_approval_interrupt_from_runtime(reply.approval_request),
+                interrupt=approval_interrupt_from_runtime(reply.approval_request),
             )
         return ApprovalDecisionResult(
             approval=cleared,
             assistant_message=assistant_message,
-            operation=operation,
-            task=task,
+            operations=operations,
+            tasks=tasks,
             reply=reply,
             next_approval=next_approval,
             paused=next_approval is not None,
@@ -386,34 +407,52 @@ class ApprovalService:
         return approval.expires_at is not None and approval.expires_at <= utc_now()
 
     @staticmethod
-    def _find_task_for_operation(
+    def _find_tasks_for_operations(
         session: SessionMeta,
         task_service: Any,
-        operation: OperationRecord | None,
-    ) -> TaskRecord | None:
-        if operation is None:
-            return None
-        for task in task_service.list_tasks(session):
-            if task.operation_id == operation.operation_id:
-                return task
-        return None
+        operations: list[OperationRecord],
+    ) -> list[TaskRecord]:
+        operation_ids = {operation.operation_id for operation in operations}
+        return [task for task in task_service.list_tasks(session) if task.operation_id in operation_ids]
 
 
-def _approval_interrupt_from_runtime(value: Any) -> ApprovalInterrupt:
-    action_request = getattr(value, "action_request", None)
-    review_config = getattr(value, "review_config", None)
-    tool_call_id = getattr(value, "tool_call_id", "")
-    interrupt_count = getattr(value, "interrupt_count", 1)
-    if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+def approval_interrupt_from_runtime(value: Any) -> ApprovalInterrupt:
+    action_requests = getattr(value, "action_requests", None)
+    review_configs = getattr(value, "review_configs", None)
+    tool_call_ids = getattr(value, "tool_call_ids", None)
+    if not isinstance(action_requests, list) or not action_requests:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="DeepAgent 审批暂停信息格式无效。",
         )
+    if not isinstance(review_configs, list) or not review_configs:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DeepAgent 审批暂停信息格式无效。",
+        )
+    if len(action_requests) != len(review_configs):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="DeepAgent 审批暂停信息中 action_requests 与 review_configs 数量不一致。",
+        )
+    normalized_action_requests: list[dict[str, Any]] = []
+    normalized_review_configs: list[dict[str, Any]] = []
+    for action_request, review_config in zip(action_requests, review_configs, strict=True):
+        if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="DeepAgent 审批暂停信息格式无效。",
+            )
+        normalized_action_requests.append(action_request)
+        normalized_review_configs.append(review_config)
+    normalized_tool_call_ids = [
+        str(tool_call_id or "")
+        for tool_call_id in (tool_call_ids if isinstance(tool_call_ids, list) else [])
+    ]
     return ApprovalInterrupt(
-        action_request=action_request,
-        review_config=review_config,
-        tool_call_id=str(tool_call_id or ""),
-        interrupt_count=max(1, int(interrupt_count or 1)),
+        action_requests=normalized_action_requests,
+        review_configs=normalized_review_configs,
+        tool_call_ids=normalized_tool_call_ids,
     )
 
 

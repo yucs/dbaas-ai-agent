@@ -13,7 +13,7 @@ from dbass_ai_agent.agent.runtime import AgentInvocationError, DeepAgentRuntime
 from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.logging import log_context
-from dbass_ai_agent.operations.approval_service import ApprovalInterrupt, ApprovalService
+from dbass_ai_agent.operations.approval_service import ApprovalService, approval_interrupt_from_runtime
 from dbass_ai_agent.sessions.service import SessionService
 from dbass_ai_agent.sessions.run_lock import session_locks
 
@@ -96,7 +96,7 @@ def send_message(
                 session,
                 run_id=reply.run_id,
                 request_message_id=user_message.message_id,
-                interrupt=_approval_interrupt_from_runtime(reply.approval_request),
+                interrupt=approval_interrupt_from_runtime(reply.approval_request),
             )
             latest_session = session_service.get_session(identity, session_id).meta
             return SendMessageResponse(
@@ -246,7 +246,7 @@ def stream_message(
                                 session,
                                 run_id=event.run_id,
                                 request_message_id=user_message.message_id,
-                                interrupt=_approval_interrupt_from_runtime(approval_request),
+                                interrupt=approval_interrupt_from_runtime(approval_request),
                             )
                             paused_approval = approval
                             yield _sse_event(
@@ -446,24 +446,6 @@ def _assert_no_pending_approval(
                 "detail": "当前 Session 存在待确认操作，请先批准或拒绝后再发送消息。",
             },
         )
-
-
-def _approval_interrupt_from_runtime(value: Any) -> ApprovalInterrupt:
-    action_request = getattr(value, "action_request", None)
-    review_config = getattr(value, "review_config", None)
-    tool_call_id = getattr(value, "tool_call_id", "")
-    interrupt_count = getattr(value, "interrupt_count", 1)
-    if not isinstance(action_request, dict) or not isinstance(review_config, dict):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="DeepAgent 审批暂停信息格式无效。",
-        )
-    return ApprovalInterrupt(
-        action_request=action_request,
-        review_config=review_config,
-        tool_call_id=str(tool_call_id or ""),
-        interrupt_count=max(1, int(interrupt_count or 1)),
-    )
 
 
 def _build_ai_agent_error_content(

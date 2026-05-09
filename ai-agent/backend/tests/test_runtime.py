@@ -78,9 +78,9 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         def normalize_run_output(_result):
             return AgentRunOutput(
                 approval_request=AgentApprovalRequest(
-                    action_request={"name": "update_service_storage_tool", "args": {}},
-                    review_config={"allowed_decisions": ["approve", "reject"]},
-                    tool_call_id="call_nested",
+                    action_requests=[{"name": "update_service_storage_tool", "args": {}}],
+                    review_configs=[{"allowed_decisions": ["approve", "reject"]}],
+                    tool_call_ids=["call_nested"],
                 )
             )
 
@@ -98,9 +98,72 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
 
         self.assertTrue(reply.paused)
         self.assertIsNotNone(reply.approval_request)
-        self.assertEqual(reply.approval_request.tool_call_id, "call_nested")
+        self.assertEqual(reply.approval_request.tool_call_ids, ["call_nested"])
         self.assertEqual(reply.warning, None)
         self.assertEqual(reply.content, "")
+
+    def test_extract_approval_request_preserves_batch_action_requests(self) -> None:
+        runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
+        result = {
+            "__interrupt__": [
+                SimpleNamespace(
+                    value={
+                        "action_requests": [
+                            {
+                                "name": "create_service_image_upgrade_task_tool",
+                                "args": {
+                                    "service_name": "analytics",
+                                    "child_service_type": "clickhouse",
+                                    "image": "clickhouse:24.4.2",
+                                },
+                            },
+                            {
+                                "name": "create_service_image_upgrade_task_tool",
+                                "args": {
+                                    "service_name": "analytics",
+                                    "child_service_type": "keeper",
+                                    "image": "keeper:24.5.1",
+                                },
+                            },
+                        ],
+                        "review_configs": [
+                            {"allowed_decisions": ["approve", "reject"]},
+                            {"allowed_decisions": ["approve", "reject"]},
+                        ],
+                    }
+                )
+            ],
+            "messages": [
+                SimpleNamespace(
+                    tool_calls=[
+                        {
+                            "id": "call_clickhouse",
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "analytics",
+                                "child_service_type": "clickhouse",
+                                "image": "clickhouse:24.4.2",
+                            },
+                        },
+                        {
+                            "id": "call_keeper",
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "analytics",
+                                "child_service_type": "keeper",
+                                "image": "keeper:24.5.1",
+                            },
+                        },
+                    ]
+                )
+            ],
+        }
+
+        output = runtime._normalize_run_output(result)
+
+        self.assertIsNotNone(output.approval_request)
+        self.assertEqual(len(output.approval_request.action_requests), 2)
+        self.assertEqual(output.approval_request.tool_call_ids, ["call_clickhouse", "call_keeper"])
 
 
 class FakeNestedApprovalAgent:

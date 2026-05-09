@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 RiskLevel = Literal["low", "medium", "high", "critical"]
 RequiredRole = Literal["user", "admin"]
 ExecutionMode = Literal["sync", "async"]
+ProposalExecutionMode = Literal["sync", "async", "mixed"]
 OperationStatus = Literal[
     "started",
     "succeeded",
@@ -16,6 +17,7 @@ OperationStatus = Literal[
     "timeout",
     "unknown",
     "task_created",
+    "canceled",
 ]
 TaskStatus = Literal["running", "succeeded", "failed", "canceled", "unknown", "refresh_failed"]
 
@@ -36,7 +38,7 @@ class OperationParameter(BaseModel):
     current_unit: str | None = None
 
 
-class OperationProposal(BaseModel):
+class OperationProposalItem(BaseModel):
     action: str
     targets: list[OperationTarget] = Field(default_factory=list)
     summary: str
@@ -45,6 +47,14 @@ class OperationProposal(BaseModel):
     execution_mode: ExecutionMode
     parameters: list[OperationParameter] = Field(default_factory=list)
     risk_notes: list[str] = Field(default_factory=list)
+
+
+class OperationProposal(BaseModel):
+    summary: str
+    risk_level: RiskLevel = "medium"
+    required_role: RequiredRole = "user"
+    execution_mode: ProposalExecutionMode
+    items: list[OperationProposalItem] = Field(default_factory=list)
 
 
 class InterruptedToolCall(BaseModel):

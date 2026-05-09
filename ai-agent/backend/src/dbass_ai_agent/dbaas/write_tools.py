@@ -43,10 +43,20 @@ def build_write_tools(settings: Settings) -> list[Any]:
         context = require_operation_context()
         _assert_required_role(context.identity.role, config.required_role)
         target = _service_target(service_name, child_service_type)
+        tool_args = _compact_tool_args(
+            service_name=service_name,
+            child_service_type=child_service_type,
+            platform_auto=platform_auto,
+            cpu=cpu,
+            memory=memory,
+        )
         existing_operation = context.operation_service.find_existing(
             context.session,
             approval=context.approval,
             action=config.action,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
         if existing_operation is not None:
             existing = context.operation_service.result_from_existing(existing_operation)
@@ -64,6 +74,9 @@ def build_write_tools(settings: Settings) -> list[Any]:
             run_id=context.run_id,
             action=config.action,
             execution_mode=config.execution_mode,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
 
         try:
@@ -152,10 +165,20 @@ def build_write_tools(settings: Settings) -> list[Any]:
         context = require_operation_context()
         _assert_required_role(context.identity.role, config.required_role)
         target = _service_target(service_name, child_service_type)
+        tool_args = _compact_tool_args(
+            service_name=service_name,
+            child_service_type=child_service_type,
+            platform_auto=platform_auto,
+            data_volume_size=data_volume_size,
+            log_volume_size=log_volume_size,
+        )
         existing_operation = context.operation_service.find_existing(
             context.session,
             approval=context.approval,
             action=config.action,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
         if existing_operation is not None:
             existing = context.operation_service.result_from_existing(existing_operation)
@@ -173,6 +196,9 @@ def build_write_tools(settings: Settings) -> list[Any]:
             run_id=context.run_id,
             action=config.action,
             execution_mode=config.execution_mode,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
 
         try:
@@ -261,10 +287,20 @@ def build_write_tools(settings: Settings) -> list[Any]:
         context = require_operation_context()
         _assert_required_role(context.identity.role, config.required_role)
         target = _service_target(service_name, child_service_type)
+        tool_args = _compact_tool_args(
+            service_name=service_name,
+            child_service_type=child_service_type,
+            image=image,
+            version=version,
+            unit_ids=unit_ids,
+        )
         existing_operation = context.operation_service.find_existing(
             context.session,
             approval=context.approval,
             action=config.action,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
         if existing_operation is not None:
             existing = context.operation_service.result_from_existing(existing_operation)
@@ -282,6 +318,9 @@ def build_write_tools(settings: Settings) -> list[Any]:
             run_id=context.run_id,
             action=config.action,
             execution_mode=config.execution_mode,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
         )
 
         try:
@@ -443,6 +482,10 @@ def _service_target(service_name: str, child_service_type: str) -> OperationTarg
         name=service_name,
         qualifiers={"child_service_type": child_service_type},
     )
+
+
+def _compact_tool_args(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _resource_changes(

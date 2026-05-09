@@ -285,7 +285,8 @@ p {
 .approval-card.rejected,
 .approval-card.expired,
 .operation-card.failed,
-.operation-card.timeout {
+.operation-card.timeout,
+.operation-card.canceled {
   border-color: #d49b92;
   background: #fff2ef;
 }
@@ -421,7 +422,8 @@ p {
 .approval-card.rejected .approval-status,
 .approval-card.expired .approval-status,
 .operation-card.failed .operation-status,
-.operation-card.timeout .operation-status {
+.operation-card.timeout .operation-status,
+.operation-card.canceled .operation-status {
   background: #f1d7d2;
   color: #7a2d22;
 }
@@ -458,6 +460,30 @@ p {
 .approval-param-list strong {
   display: block;
   margin-top: 4px;
+}
+
+.approval-item {
+  margin-top: 14px;
+  border-top: 1px solid #ead7a6;
+  padding-top: 14px;
+}
+
+.approval-item-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approval-item-title strong {
+  line-height: 1.45;
+}
+
+.approval-item-title span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .approval-section {
@@ -680,7 +706,8 @@ textarea {
   }
 
   .approval-header,
-  .approval-actions {
+  .approval-actions,
+  .approval-item-title {
     flex-direction: column;
     align-items: stretch;
   }

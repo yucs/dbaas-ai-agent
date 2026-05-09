@@ -59,8 +59,8 @@ class ApprovalDecisionRequest(BaseModel):
 class ApprovalDecisionResponse(BaseModel):
     approval: ApprovalRecord
     assistant_message: ChatMessage | None = None
-    operation: OperationRecord | None = None
-    task: TaskRecord | None = None
+    operations: list[OperationRecord] = Field(default_factory=list)
+    tasks: list[TaskRecord] = Field(default_factory=list)
     next_approval: ApprovalRecord | None = None
     paused: bool = False
     run_id: str | None = None

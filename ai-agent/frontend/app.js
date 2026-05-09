@@ -93,6 +93,7 @@ function formatExecutionMode(value) {
   const labels = {
     sync: "同步",
     async: "异步",
+    mixed: "混合",
   };
   return labels[value] || value || "-";
 }
@@ -115,6 +116,7 @@ function formatOperationStatus(value) {
     timeout: "已超时",
     unknown: "待核查",
     task_created: "任务已创建",
+    canceled: "已取消",
   };
   return labels[value] || value || "-";
 }
@@ -164,6 +166,44 @@ function renderApprovalParameter(parameter) {
   `;
 }
 
+function renderApprovalItem(item, index, total) {
+  const targets = item.targets || [];
+  const parameters = item.parameters || [];
+  const riskNotes = item.risk_notes || [];
+  const title = total > 1 ? `操作 ${index + 1}：${item.summary || item.action || "待确认操作"}` : item.summary || item.action || "待确认操作";
+
+  return `
+    <div class="approval-item">
+      <div class="approval-item-title">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(formatRiskLevel(item.risk_level))} · ${escapeHtml(formatExecutionMode(item.execution_mode))}</span>
+      </div>
+
+      <div class="approval-section">
+        <span>目标资源</span>
+        <ul class="approval-list">
+          ${targets.length ? targets.map(renderApprovalTarget).join("") : "<li><strong>-</strong></li>"}
+        </ul>
+      </div>
+
+      <div class="approval-section">
+        <span>变更参数</span>
+        <ul class="approval-param-list">
+          ${parameters.length ? parameters.map(renderApprovalParameter).join("") : "<li><span>-</span><strong>-</strong></li>"}
+        </ul>
+      </div>
+
+      ${
+        riskNotes.length
+          ? `<div class="approval-section"><span>风险提示</span><ul class="approval-list">${riskNotes
+              .map((note) => `<li>${escapeHtml(note)}</li>`)
+              .join("")}</ul></div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
 function approvalPreview(approval) {
   return approval?.proposal?.summary || approval?.action || "等待人工确认";
 }
@@ -174,11 +214,10 @@ function getApprovalHandledAt(approval) {
 
 function renderApprovalCard(approval) {
   const proposal = approval.proposal || {};
-  const targets = proposal.targets || [];
-  const parameters = proposal.parameters || [];
-  const riskNotes = proposal.risk_notes || [];
+  const items = proposal.items || [];
   const isPending = approval.status === "pending";
   const deciding = isPending && state.decidingApprovalIds.has(approval.approval_id);
+  const isBatch = items.length > 1;
 
   return `
     <article class="approval-card ${escapeHtml(approval.status)}" data-approval-id="${escapeHtml(approval.approval_id)}">
@@ -216,27 +255,7 @@ function renderApprovalCard(approval) {
         </div>
       </div>
 
-      <div class="approval-section">
-        <span>目标资源</span>
-        <ul class="approval-list">
-          ${targets.length ? targets.map(renderApprovalTarget).join("") : "<li><strong>-</strong></li>"}
-        </ul>
-      </div>
-
-      <div class="approval-section">
-        <span>变更参数</span>
-        <ul class="approval-param-list">
-          ${parameters.length ? parameters.map(renderApprovalParameter).join("") : "<li><span>-</span><strong>-</strong></li>"}
-        </ul>
-      </div>
-
-      ${
-        riskNotes.length
-          ? `<div class="approval-section"><span>风险提示</span><ul class="approval-list">${riskNotes
-              .map((note) => `<li>${escapeHtml(note)}</li>`)
-              .join("")}</ul></div>`
-          : ""
-      }
+      ${items.length ? items.map((item, index) => renderApprovalItem(item, index, items.length)).join("") : ""}
 
       ${
         approval.resume_failed
@@ -255,14 +274,14 @@ function renderApprovalCard(approval) {
                 data-approval-decision="approved"
                 data-approval-id="${escapeHtml(approval.approval_id)}"
                 ${deciding ? "disabled" : ""}
-              >${deciding ? "处理中..." : "批准"}</button>
+              >${deciding ? "处理中..." : isBatch ? "批准全部" : "批准"}</button>
               <button
                 class="danger-button"
                 type="button"
                 data-approval-decision="rejected"
                 data-approval-id="${escapeHtml(approval.approval_id)}"
                 ${deciding ? "disabled" : ""}
-              >拒绝</button>
+              >${isBatch ? "拒绝全部" : "拒绝"}</button>
             </div>`
           : ""
       }

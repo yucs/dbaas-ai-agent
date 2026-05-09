@@ -32,10 +32,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class AgentApprovalRequest:
-    action_request: dict[str, Any]
-    review_config: dict[str, Any]
-    tool_call_id: str
-    interrupt_count: int = 1
+    action_requests: list[dict[str, Any]]
+    review_configs: list[dict[str, Any]]
+    tool_call_ids: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,16 +506,20 @@ class DeepAgentRuntime:
             return None
         if not isinstance(review_configs, list) or not review_configs:
             return None
-        action_request = action_requests[0]
-        review_config = review_configs[0]
-        if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+        if len(action_requests) != len(review_configs):
             return None
-        tool_call_id = self._find_interrupted_tool_call_id(result, action_request)
+        normalized_action_requests: list[dict[str, Any]] = []
+        normalized_review_configs: list[dict[str, Any]] = []
+        for action_request, review_config in zip(action_requests, review_configs, strict=True):
+            if not isinstance(action_request, dict) or not isinstance(review_config, dict):
+                return None
+            normalized_action_requests.append(action_request)
+            normalized_review_configs.append(review_config)
+        tool_call_ids = self._find_interrupted_tool_call_ids(result, normalized_action_requests)
         return AgentApprovalRequest(
-            action_request=action_request,
-            review_config=review_config,
-            tool_call_id=tool_call_id,
-            interrupt_count=len(action_requests),
+            action_requests=normalized_action_requests,
+            review_configs=normalized_review_configs,
+            tool_call_ids=tool_call_ids,
         )
 
     def _extract_approval_request_from_update(self, event: Any) -> AgentApprovalRequest | None:
@@ -532,21 +535,42 @@ class DeepAgentRuntime:
         return isinstance(event, tuple) and len(event) == 2 and event[0] == "updates"
 
     @staticmethod
-    def _find_interrupted_tool_call_id(result: dict[str, Any], action_request: dict[str, Any]) -> str:
-        name = action_request.get("name")
-        args = action_request.get("args")
+    def _find_interrupted_tool_call_ids(
+        result: dict[str, Any],
+        action_requests: list[dict[str, Any]],
+    ) -> list[str]:
         messages = result.get("messages", [])
+        tool_calls: list[dict[str, Any]] = []
         for message in reversed(messages):
-            tool_calls = getattr(message, "tool_calls", None)
-            if not tool_calls:
+            message_tool_calls = getattr(message, "tool_calls", None)
+            if not message_tool_calls:
                 continue
-            for tool_call in tool_calls:
-                if tool_call.get("name") == name and tool_call.get("args") == args:
-                    return str(tool_call.get("id") or "")
-            for tool_call in tool_calls:
-                if tool_call.get("name") == name:
-                    return str(tool_call.get("id") or "")
-        return ""
+            tool_calls.extend(tool_call for tool_call in message_tool_calls if isinstance(tool_call, dict))
+            if tool_calls:
+                break
+
+        used_indexes: set[int] = set()
+        tool_call_ids: list[str] = []
+        for action_request in action_requests:
+            matched_index = _find_matching_tool_call_index(
+                tool_calls,
+                action_request,
+                used_indexes,
+                exact_args=True,
+            )
+            if matched_index is None:
+                matched_index = _find_matching_tool_call_index(
+                    tool_calls,
+                    action_request,
+                    used_indexes,
+                    exact_args=False,
+                )
+            if matched_index is None:
+                tool_call_ids.append("")
+                continue
+            used_indexes.add(matched_index)
+            tool_call_ids.append(str(tool_calls[matched_index].get("id") or ""))
+        return tool_call_ids
 
     @staticmethod
     def _content_to_text(content: Any) -> str:
@@ -607,11 +631,29 @@ def _resume_decision_payload(
     *,
     reject_message: str | None = None,
 ) -> dict[str, list[dict[str, str]]]:
-    decision_count = max(1, getattr(approval, "interrupt_count", 1))
+    decision_count = max(1, len(approval.interrupted_tool_calls))
     if decision == "approved":
         return {"decisions": [{"type": "approve"} for _ in range(decision_count)]}
     message = reject_message or "用户在审批卡中拒绝该操作；该操作未执行 DBAAS 变更。不要描述为系统拒绝。"
     return {"decisions": [{"type": "reject", "message": message} for _ in range(decision_count)]}
+
+
+def _find_matching_tool_call_index(
+    tool_calls: list[dict[str, Any]],
+    action_request: dict[str, Any],
+    used_indexes: set[int],
+    *,
+    exact_args: bool,
+) -> int | None:
+    name = action_request.get("name")
+    args = action_request.get("args")
+    for index, tool_call in enumerate(tool_calls):
+        if index in used_indexes or tool_call.get("name") != name:
+            continue
+        if exact_args and tool_call.get("args") != args:
+            continue
+        return index
+    return None
 
 
 def _classify_exception(exc: Exception) -> str:

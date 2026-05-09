@@ -32,7 +32,8 @@ from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.infra.clock import utc_now  # noqa: E402
 from dbass_ai_agent.operations.approval_service import ApprovalInterrupt, ApprovalService  # noqa: E402
-from dbass_ai_agent.operations.models import OperationResult, OperationTarget, TaskRecord  # noqa: E402
+from dbass_ai_agent.operations.models import OperationResult, OperationTarget, OperationTaskRef, TaskRecord  # noqa: E402
+from dbass_ai_agent.operations.operation_service import OperationService  # noqa: E402
 from dbass_ai_agent.operations.task_service import TaskService  # noqa: E402
 from dbass_ai_agent.sessions.approval_store import ApprovalStore  # noqa: E402
 from dbass_ai_agent.sessions.index_store import IndexStore  # noqa: E402
@@ -49,19 +50,23 @@ class ApprovalRuntime:
             content="",
             mode="deepagent",
             approval_request=AgentApprovalRequest(
-                action_request={
-                    "name": "update_service_resource_tool",
-                    "args": {
-                        "service_name": "mysql-xf2",
-                        "child_service_type": "mysql",
-                        "memory": 15,
+                action_requests=[
+                    {
+                        "name": "update_service_resource_tool",
+                        "args": {
+                            "service_name": "mysql-xf2",
+                            "child_service_type": "mysql",
+                            "memory": 15,
+                        },
                     },
-                },
-                review_config={
-                    "action_name": "update_service_resource_tool",
-                    "allowed_decisions": ["approve", "reject"],
-                },
-                tool_call_id="call_phase7_001",
+                ],
+                review_configs=[
+                    {
+                        "action_name": "update_service_resource_tool",
+                        "allowed_decisions": ["approve", "reject"],
+                    },
+                ],
+                tool_call_ids=["call_phase7_001"],
             ),
             paused=True,
         )
@@ -149,21 +154,76 @@ class NestedResumeRuntime:
             content="",
             mode="deepagent",
             approval_request=AgentApprovalRequest(
-                action_request={
-                    "name": "update_service_storage_tool",
-                    "args": {
-                        "service_name": "mysql-xf2",
-                        "child_service_type": "mysql",
-                        "data_volume_size": 600,
+                action_requests=[
+                    {
+                        "name": "update_service_storage_tool",
+                        "args": {
+                            "service_name": "mysql-xf2",
+                            "child_service_type": "mysql",
+                            "data_volume_size": 600,
+                        },
                     },
-                },
-                review_config={
-                    "action_name": "update_service_storage_tool",
-                    "allowed_decisions": ["approve", "reject"],
-                },
-                tool_call_id="call_phase7_nested_002",
+                ],
+                review_configs=[
+                    {
+                        "action_name": "update_service_storage_tool",
+                        "allowed_decisions": ["approve", "reject"],
+                    },
+                ],
+                tool_call_ids=["call_phase7_nested_002"],
             ),
             paused=True,
+        )
+
+
+class BatchResumeRuntime:
+    def resume_approval(
+        self,
+        *,
+        identity,
+        session,
+        approval,
+        decision,
+        operation_service,
+        task_service,
+        reject_message=None,
+    ):
+        for tool_call in approval.interrupted_tool_calls:
+            args = tool_call.tool_args
+            target = OperationTarget(
+                kind="service",
+                id=args["service_name"],
+                name=args["service_name"],
+                qualifiers={"child_service_type": args["child_service_type"]},
+            )
+            operation = operation_service.start_operation(
+                session,
+                approval=approval,
+                run_id="run_phase7_batch_resume",
+                action="service.resource.update",
+                execution_mode="sync",
+                tool_name=tool_call.tool_name,
+                tool_args=args,
+                targets=[target],
+            )
+            operation_service.complete_operation(
+                session,
+                operation,
+                status="succeeded",
+                result=OperationResult(
+                    operation_id=operation.operation_id,
+                    approval_id=operation.approval_id,
+                    action=operation.action,
+                    targets=[target],
+                    execution_mode="sync",
+                    status="succeeded",
+                    summary=f"已更新 {args['service_name']}/{args['child_service_type']} 的资源规格。",
+                ),
+            )
+        return AgentReply(
+            run_id="run_phase7_batch_resume",
+            content="批量审批已执行。",
+            mode="deepagent",
         )
 
 
@@ -197,7 +257,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertTrue(payload["paused"])
             self.assertIsNone(payload["assistant_message"])
             self.assertEqual(payload["approval"]["status"], "pending")
-            self.assertEqual(payload["approval"]["proposal"]["action"], "service.resource.update")
+            self.assertEqual(payload["approval"]["proposal"]["items"][0]["action"], "service.resource.update")
             self.assertEqual(blocked.status_code, 409)
             self.assertEqual(blocked.json()["detail"]["error_type"], "session_has_pending_approval")
 
@@ -213,19 +273,23 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                 run_id="run_phase7_approval",
                 request_message_id="msg_request",
                 interrupt=ApprovalInterrupt(
-                    action_request={
-                        "name": "update_service_resource_tool",
-                        "args": {
-                            "service_name": "mysql-xf2",
-                            "child_service_type": "mysql",
-                            "memory": 15,
+                    action_requests=[
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "memory": 15,
+                            },
                         },
-                    },
-                    review_config={
-                        "action_name": "update_service_resource_tool",
-                        "allowed_decisions": ["approve", "reject"],
-                    },
-                    tool_call_id="call_phase7_001",
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_001"],
                 ),
             )
             app = FastAPI()
@@ -258,19 +322,23 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                 run_id="run_phase7_approval",
                 request_message_id="msg_request",
                 interrupt=ApprovalInterrupt(
-                    action_request={
-                        "name": "update_service_resource_tool",
-                        "args": {
-                            "service_name": "mysql-xf2",
-                            "child_service_type": "mysql",
-                            "memory": 15,
+                    action_requests=[
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "memory": 15,
+                            },
                         },
-                    },
-                    review_config={
-                        "action_name": "update_service_resource_tool",
-                        "allowed_decisions": ["approve", "reject"],
-                    },
-                    tool_call_id="call_phase7_001",
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_001"],
                 ),
             )
             app = FastAPI()
@@ -307,19 +375,23 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                 run_id="run_phase7_approval",
                 request_message_id="msg_request",
                 interrupt=ApprovalInterrupt(
-                    action_request={
-                        "name": "update_service_resource_tool",
-                        "args": {
-                            "service_name": "mysql-xf2",
-                            "child_service_type": "mysql",
-                            "memory": 15,
+                    action_requests=[
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "memory": 15,
+                            },
                         },
-                    },
-                    review_config={
-                        "action_name": "update_service_resource_tool",
-                        "allowed_decisions": ["approve", "reject"],
-                    },
-                    tool_call_id="call_phase7_001",
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_001"],
                 ),
             )
             app = FastAPI()
@@ -337,11 +409,11 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["approval"]["status"], "approved")
-            self.assertEqual(payload["operation"]["status"], "succeeded")
+            self.assertEqual(payload["operations"][0]["status"], "succeeded")
             self.assertTrue(payload["paused"])
             self.assertEqual(payload["next_approval"]["status"], "pending")
             self.assertEqual(
-                payload["next_approval"]["interrupted_tool_call"]["tool_name"],
+                payload["next_approval"]["interrupted_tool_calls"][0]["tool_name"],
                 "update_service_storage_tool",
             )
             session = service.get_session(identity, detail.meta.session_id)
@@ -351,6 +423,73 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             )
             self.assertEqual(len(session.operations), 1)
             self.assertEqual(session.operations[0].status, "succeeded")
+
+    def test_batch_approval_displays_all_items_and_returns_all_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 batch approval")
+            approval_service = ApprovalService(service.repository, service)
+            approval = approval_service.create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_batch_approval",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_requests=[
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "memory": 15,
+                            },
+                        },
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "proxy",
+                                "memory": 4,
+                            },
+                        },
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_batch_001", "call_phase7_batch_002"],
+                ),
+            )
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: BatchResumeRuntime()
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(len(approval.proposal.items), 2)
+            self.assertEqual(len(approval.interrupted_tool_calls), 2)
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["approval"]["status"], "approved")
+            self.assertEqual(len(payload["operations"]), 2)
+            self.assertEqual(
+                {item["tool_call_id"] for item in payload["operations"]},
+                {"call_phase7_batch_001", "call_phase7_batch_002"},
+            )
+            self.assertEqual(payload["tasks"], [])
 
 
 class TaskLazyRefreshTests(unittest.TestCase):
@@ -468,6 +607,64 @@ class TaskLazyRefreshTests(unittest.TestCase):
             self.assertEqual(refreshed[0].source_status, "SUCCESS")
             persisted = task_service.list_tasks(detail.meta)
             self.assertEqual(persisted[0].status, "succeeded")
+
+    def test_terminal_task_refresh_syncs_operation_final_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="task operation sync")
+            operation_service = OperationService(service.repository)
+            target = OperationTarget(
+                kind="service",
+                id="mysql-xf2",
+                name="mysql-xf2",
+                qualifiers={"child_service_type": "mysql"},
+            )
+            operation = operation_service.start_operation(
+                detail.meta,
+                approval=None,
+                run_id="run_task_operation_sync",
+                action="service.image.upgrade",
+                execution_mode="async",
+            )
+            operation_service.complete_operation(
+                detail.meta,
+                operation,
+                status="task_created",
+                result=OperationResult(
+                    operation_id=operation.operation_id,
+                    approval_id=None,
+                    action=operation.action,
+                    targets=[target],
+                    execution_mode="async",
+                    status="task_created",
+                    summary="已创建镜像升级任务 task-001。",
+                    task=OperationTaskRef(
+                        task_id="task-001",
+                        type="service.image.upgrade",
+                        status="running",
+                    ),
+                ),
+            )
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=FakeTaskClient(),
+            )
+            service.repository.append_task(
+                detail.meta.user_id,
+                detail.meta.session_id,
+                _running_task(detail.meta.session_id).model_copy(
+                    update={"operation_id": operation.operation_id}
+                ),
+            )
+
+            task_service.list_tasks_with_lazy_refresh(identity, detail.meta)
+
+            operations = operation_service.list_operations(detail.meta)
+            self.assertEqual(operations[0].status, "succeeded")
+            self.assertEqual(operations[0].result.status, "succeeded")
+            self.assertEqual(operations[0].result.task.status, "succeeded")
 
 
 class FakeTaskClient:

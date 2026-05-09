@@ -56,8 +56,7 @@ class ApprovalRecord(BaseModel):
     run_id: str | None = None
     request_message_id: str | None = None
     proposal: OperationProposal | None = None
-    interrupted_tool_call: InterruptedToolCall | None = None
-    interrupt_count: int = 1
+    interrupted_tool_calls: list[InterruptedToolCall] = Field(default_factory=list)
     allowed_decisions: list[Literal["approve", "reject"]] = Field(default_factory=list)
     decided_by: str | None = None
     created_at: datetime

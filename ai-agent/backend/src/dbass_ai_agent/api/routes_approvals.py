@@ -65,8 +65,8 @@ def decide_approval(
     return ApprovalDecisionResponse(
         approval=result.approval,
         assistant_message=result.assistant_message,
-        operation=result.operation,
-        task=result.task,
+        operations=result.operations,
+        tasks=result.tasks,
         next_approval=result.next_approval,
         paused=result.paused,
         run_id=result.reply.run_id if result.reply else None,

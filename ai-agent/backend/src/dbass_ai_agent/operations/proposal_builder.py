@@ -1,15 +1,54 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from .action_registry import require_action_config
-from .models import OperationParameter, OperationProposal, OperationTarget
+from .models import (
+    ExecutionMode,
+    OperationParameter,
+    OperationProposal,
+    OperationProposalItem,
+    OperationTarget,
+    ProposalExecutionMode,
+    RequiredRole,
+    RiskLevel,
+)
+
+
+_RISK_ORDER: dict[RiskLevel, int] = {
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "critical": 3,
+}
+_ROLE_ORDER: dict[RequiredRole, int] = {
+    "user": 0,
+    "admin": 1,
+}
 
 
 def build_operation_proposal(tool_name: str, tool_args: dict[str, Any]) -> OperationProposal:
+    return build_batch_operation_proposal([(tool_name, tool_args)])
+
+
+def build_batch_operation_proposal(tool_calls: list[tuple[str, dict[str, Any]]]) -> OperationProposal:
+    items = [build_operation_proposal_item(tool_name, tool_args) for tool_name, tool_args in tool_calls]
+    if not items:
+        raise ValueError("operation proposal must contain at least one item")
+    return OperationProposal(
+        summary=f"本次将执行 {len(items)} 个 DBAAS 变更操作",
+        risk_level=_max_risk(item.risk_level for item in items),
+        required_role=_max_role(item.required_role for item in items),
+        execution_mode=_aggregate_execution_mode([item.execution_mode for item in items]),
+        items=items,
+    )
+
+
+def build_operation_proposal_item(tool_name: str, tool_args: dict[str, Any]) -> OperationProposalItem:
     config = require_action_config(tool_name)
     target = _service_target(tool_args)
-    return OperationProposal(
+    return OperationProposalItem(
         action=config.action,
         targets=[target],
         summary=_summary(config.action, tool_args),
@@ -19,6 +58,23 @@ def build_operation_proposal(tool_name: str, tool_args: dict[str, Any]) -> Opera
         parameters=_parameters(config.action, tool_args),
         risk_notes=list(config.risk_notes),
     )
+
+
+def _max_risk(values: Iterable[RiskLevel]) -> RiskLevel:
+    risks = list(values)
+    return max(risks, key=lambda value: _RISK_ORDER[value])
+
+
+def _max_role(values: Iterable[RequiredRole]) -> RequiredRole:
+    roles = list(values)
+    return max(roles, key=lambda value: _ROLE_ORDER[value])
+
+
+def _aggregate_execution_mode(values: list[ExecutionMode]) -> ProposalExecutionMode:
+    modes = set(values)
+    if len(modes) == 1:
+        return values[0]
+    return "mixed"
 
 
 def _service_target(tool_args: dict[str, Any]) -> OperationTarget:

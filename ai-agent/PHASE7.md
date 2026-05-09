@@ -96,35 +96,43 @@ AI 只生成 tool call；后端根据被 DeepAgent interrupt 拦截到的 tool c
 当前身份、action 配置和风险配置生成 proposal。
 
 Proposal 是给用户和前端看的展示结构，不包含原始 `tool_name` 和 `tool_args`。
-原始工具调用记录保存在 `ApprovalRecord.interrupted_tool_call`。
+原始工具调用记录只保存在 `ApprovalRecord.interrupted_tool_calls[]`。
 
 建议字段：
 
 ```json
 {
-  "action": "service.resource.update",
-  "targets": [
-    {
-      "kind": "service",
-      "id": "mysql-xf2",
-      "name": "mysql-xf2",
-      "qualifiers": {
-        "child_service_type": "mysql"
-      }
-    }
-  ],
-  "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+  "summary": "本次将执行 1 个 DBAAS 变更操作",
   "risk_level": "medium",
   "required_role": "user",
   "execution_mode": "sync",
-  "parameters": [
+  "items": [
     {
-      "key": "memory",
-      "label": "内存",
-      "current_value": 8,
-      "current_unit": "GB",
-      "value": 15,
-      "unit": "GB"
+      "action": "service.resource.update",
+      "targets": [
+        {
+          "kind": "service",
+          "id": "mysql-xf2",
+          "name": "mysql-xf2",
+          "qualifiers": {
+            "child_service_type": "mysql"
+          }
+        }
+      ],
+      "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+      "risk_level": "medium",
+      "required_role": "user",
+      "execution_mode": "sync",
+      "parameters": [
+        {
+          "key": "memory",
+          "label": "内存",
+          "current_value": 8,
+          "current_unit": "GB",
+          "value": 15,
+          "unit": "GB"
+        }
+      ]
     }
   ]
 }
@@ -134,33 +142,133 @@ Proposal 是给用户和前端看的展示结构，不包含原始 `tool_name` �
 
 ```json
 {
-  "action": "host.lifecycle.reboot",
-  "targets": [
-    {
-      "kind": "host",
-      "id": "host-001",
-      "name": "db-host-001"
-    }
-  ],
-  "summary": "重启主机 db-host-001",
+  "summary": "本次将执行 1 个 DBAAS 变更操作",
   "risk_level": "critical",
   "required_role": "admin",
   "execution_mode": "async",
-  "parameters": []
+  "items": [
+    {
+      "action": "host.lifecycle.reboot",
+      "targets": [
+        {
+          "kind": "host",
+          "id": "host-001",
+          "name": "db-host-001"
+        }
+      ],
+      "summary": "重启主机 db-host-001",
+      "risk_level": "critical",
+      "required_role": "admin",
+      "execution_mode": "async",
+      "parameters": []
+    }
+  ]
 }
 ```
 
 设计约束：
 
-- `targets` 支持 service、cluster、host 等资源，也支持一个操作影响多个对象
-- service 特有字段放入 `targets[].qualifiers`，例如 `child_service_type`
-- `parameters[]` 是从原始工具参数派生出的可展示参数，不是执行参数
-- `parameters[].current_value/current_unit` 是可选展示字段，用于审批卡展示 `8GB -> 15GB`
+- `items[]` 必填，单操作时也只有一个 item
+- `items[].targets` 支持 service、cluster、host 等资源，也支持一个操作影响多个对象
+- service 特有字段放入 `items[].targets[].qualifiers`，例如 `child_service_type`
+- `items[].parameters[]` 是从原始工具参数派生出的可展示参数，不是执行参数
+- `items[].parameters[].current_value/current_unit` 是可选展示字段，用于审批卡展示 `8GB -> 15GB`
 - 如果当前值无法可靠获取，可以不填 current 字段，不允许 AI 编造当前值
-- `required_role` 用于在创建 approval 前做权限校验
-- `interrupted_tool_call.tool_args` 才是被审批的原始工具参数
+- 顶层 `required_role` 用于在创建 approval 前做权限校验
+- 顶层 `required_role` 是审批权限校验的唯一权威字段；`items[].required_role` 只用于展示单项权限风险
+- 顶层 `risk_level` 是批量最高风险；`items[].risk_level` 只用于展示单项风险
+- `interrupted_tool_calls[].tool_args` 才是被审批的原始工具参数
 - P7A 不实现独立 `OperationProposal` 存储或 API
 - P7A 中 proposal 只作为 `ApprovalRecord` 的展示字段保存
+
+#### 4.1.1 批量 OperationProposal
+
+真实大模型联调发现，同一句用户请求可能包含多个写操作，例如：
+
+```text
+将 clickhouse 升级到 24.4.2，keeper 升级到 24.5.1
+```
+
+模型可能在同一次回复中发起多个 write tool call。
+DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中所有命中
+`interrupt_on` 的 tool call 聚合成一个 interrupt，
+其 `value.action_requests` 是一个列表。
+
+因此 ai-agent 不能假设一个 DeepAgent interrupt 只对应一个写操作。
+同一个 interrupt 内的多个 `action_requests` 视为一次批量审批。
+
+批量审批的 `OperationProposal` 建议增加 `items[]`：
+
+```json
+{
+  "summary": "本次将执行 2 个 DBAAS 变更操作",
+  "risk_level": "high",
+  "required_role": "admin",
+  "execution_mode": "async",
+  "items": [
+    {
+      "action": "service.image.upgrade",
+      "targets": [
+        {
+          "kind": "service",
+          "id": "analytics-clickhouse-perf-cn-north-1-0628",
+          "name": "analytics-clickhouse-perf-cn-north-1-0628",
+          "qualifiers": {
+            "child_service_type": "clickhouse"
+          }
+        }
+      ],
+      "summary": "将 clickhouse 升级到 24.4.2",
+      "risk_level": "high",
+      "required_role": "admin",
+      "execution_mode": "async",
+      "parameters": [
+        {
+          "key": "version",
+          "label": "版本",
+          "value": "24.4.2"
+        }
+      ]
+    },
+    {
+      "action": "service.image.upgrade",
+      "targets": [
+        {
+          "kind": "service",
+          "id": "analytics-clickhouse-perf-cn-north-1-0628",
+          "name": "analytics-clickhouse-perf-cn-north-1-0628",
+          "qualifiers": {
+            "child_service_type": "keeper"
+          }
+        }
+      ],
+      "summary": "将 keeper 升级到 24.5.1",
+      "risk_level": "high",
+      "required_role": "admin",
+      "execution_mode": "async",
+      "parameters": [
+        {
+          "key": "version",
+          "label": "版本",
+          "value": "24.5.1"
+        }
+      ]
+    }
+  ]
+}
+```
+
+聚合规则：
+
+- `items[]` 中每个 item 都是一项具体操作提案
+- 顶层 `summary` 是批量摘要，用于审批卡标题
+- 顶层 `risk_level` 取所有 item 的最高风险
+- 顶层 `required_role` 取所有 item 的最高权限要求
+- 顶层 `execution_mode` 全同步为 `sync`，全异步为 `async`，混合为 `mixed`
+- 单操作也必须带 `items[]`，此时只有一个 item
+
+批量审批第一版只支持“批准全部 / 拒绝全部”。
+不支持部分批准、单项参数编辑或自动拆分成多条审批。
 
 ### 4.2 OperationResult
 
@@ -309,7 +417,7 @@ mysql-xf2/mysql
 ```text
 AI：生成 tool call，决定调用哪个工具和参数
 DeepAgent：通过 interrupt_on 在写工具执行前暂停
-后端：记录 interrupted_tool_call，并派生 OperationProposal/ApprovalRecord
+后端：记录 interrupted_tool_calls[]，并派生 OperationProposal/ApprovalRecord
 用户：批准或拒绝
 后端：通过 Command(resume=...) 恢复同一个 thread
 工具：真实执行 DBAAS 操作并生成 OperationResult
@@ -318,10 +426,10 @@ AI：根据 OperationResult 解释执行结果
 
 这样可以保证：
 
-- 审批展示由 `proposal` 提供，真实被审批的原始工具调用记录在 `interrupted_tool_call`
+- 审批展示由 `proposal` 提供，真实被审批的原始工具调用记录在 `interrupted_tool_calls[]`
 - 权限、风险等级和执行模式由代码控制
 - 工具结果以 DBAAS 返回为准
-- 后端不通过 `interrupted_tool_call` 直接调用 DBAAS
+- 后端不通过 `interrupted_tool_calls[]` 直接调用 DBAAS
 - AI 不负责判断操作是否真的成功
 
 ### 4.4 action 命名
@@ -425,6 +533,52 @@ reject
 
 这些能力可以放到后续阶段。
 
+### 5.2.1 批量 interrupt 背景与审批语义
+
+DeepAgent 的 human-in-the-loop 机制是在模型返回后检查最后一条 AI message。
+如果这一条消息里同时包含多个 tool call，且这些 tool call 都命中
+`interrupt_on`，框架会创建一个 HITL request：
+
+```json
+{
+  "action_requests": [
+    {"name": "create_service_image_upgrade_task_tool", "args": {}},
+    {"name": "create_service_image_upgrade_task_tool", "args": {}}
+  ],
+  "review_configs": [
+    {"action_name": "create_service_image_upgrade_task_tool"},
+    {"action_name": "create_service_image_upgrade_task_tool"}
+  ]
+}
+```
+
+这意味着一个 DeepAgent interrupt 可以天然包含多个待审批写操作。
+
+当前实现曾出现过一个风险：后端只使用 `action_requests[0]` 生成审批卡，
+但审批恢复时按 `action_requests` 数量返回两个 approve decision，
+导致用户只看到第一个操作，却实际批准了两个 DBAAS 写操作。
+
+第七阶段应按以下语义处理：
+
+- 同一个 interrupt 内多个 `action_requests` = 一张批量审批卡
+- 审批卡必须完整展示所有待执行操作
+- 用户点击批准表示批准本批次全部操作
+- 用户点击拒绝表示拒绝本批次全部操作
+- `Command(resume=...)` 的 `decisions` 数量必须等于 `action_requests` 数量
+- 本阶段不支持批量内部分批准或部分拒绝
+
+批量审批和连续审批需要区分：
+
+```text
+批量审批：
+一次 interrupt -> 多个 action_requests -> 一张审批卡 -> 一次批准全部
+
+连续审批：
+approve 当前 approval -> resume 后再次触发新 interrupt -> 创建 next_approval
+```
+
+上一次批准不能自动放行 resume 后新产生的 interrupt。
+
 ### 5.3 ApprovalRecord
 
 现有 `ApprovalRecord` 只有 `approval_id`、`status`、`action` 和 `created_at`，
@@ -441,42 +595,52 @@ reject
   "run_id": "run_xxx",
   "request_message_id": "msg_user_xxx",
   "proposal": {
-    "action": "service.resource.update",
-    "targets": [
-      {
-        "kind": "service",
-        "id": "mysql-xf2",
-        "name": "mysql-xf2",
-        "qualifiers": {
-          "child_service_type": "mysql"
-        }
-      }
-    ],
-    "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+    "summary": "本次将执行 1 个 DBAAS 变更操作",
     "risk_level": "medium",
     "required_role": "user",
     "execution_mode": "sync",
-    "parameters": [
+    "items": [
       {
-        "key": "memory",
-        "label": "内存",
-        "value": 15,
-        "unit": "GB"
+        "action": "service.resource.update",
+        "targets": [
+          {
+            "kind": "service",
+            "id": "mysql-xf2",
+            "name": "mysql-xf2",
+            "qualifiers": {
+              "child_service_type": "mysql"
+            }
+          }
+        ],
+        "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+        "risk_level": "medium",
+        "required_role": "user",
+        "execution_mode": "sync",
+        "parameters": [
+          {
+            "key": "memory",
+            "label": "内存",
+            "value": 15,
+            "unit": "GB"
+          }
+        ],
+        "risk_notes": [
+          "会变更该子服务下所有 unit 的资源规格"
+        ]
       }
-    ],
-    "risk_notes": [
-      "会变更该子服务下所有 unit 的资源规格"
     ]
   },
-  "interrupted_tool_call": {
-    "tool_call_id": "call_xxx",
-    "tool_name": "update_service_resource_tool",
-    "tool_args": {
-      "service_name": "mysql-xf2",
-      "child_service_type": "mysql",
-      "memory": 15
+  "interrupted_tool_calls": [
+    {
+      "tool_call_id": "call_xxx",
+      "tool_name": "update_service_resource_tool",
+      "tool_args": {
+        "service_name": "mysql-xf2",
+        "child_service_type": "mysql",
+        "memory": 15
+      }
     }
-  },
+  ],
   "allowed_decisions": ["approve", "reject"],
   "decided_by": null,
   "created_at": "2026-05-06T10:00:00Z",
@@ -488,6 +652,15 @@ reject
   "resume_last_attempt_at": null
 }
 ```
+
+字段规则：
+
+- `interrupted_tool_calls[]` 必填，保存本次 interrupt 中所有被审批的原始 tool call
+- 单操作时 `interrupted_tool_calls[]` 只有一项
+- 批量审批时 `interrupted_tool_calls[]` 项数必须和 `proposal.items[]` 一致
+- 审批恢复时以 `len(interrupted_tool_calls)` 生成同等数量的 approve/reject decisions
+- 不允许只展示第一个 proposal item 却批准多个 interrupted tool call
+- 第七阶段不考虑旧审批记录兼容，不再保存单数字段 `interrupted_tool_call`
 
 审批完成后：
 
@@ -725,6 +898,10 @@ TTL 第一版建议：
 - 过期时间或倒计时
 - 批准按钮
 - 拒绝按钮
+
+如果 `proposal.items[]` 有多项，前端必须把每个 item 的摘要、对象、参数和风险说明都展示出来。
+按钮语义应明确为“批准全部 / 拒绝全部”。
+不允许只展示第一个 item 却提交整批 approval decision。
 
 按钮只调用审批决策接口。
 前端不拼 DBAAS 控制面请求，也不绕过后端工具执行。
@@ -1025,10 +1202,24 @@ ai-agent 重启恢复语义：
 本地 `tasks.json` 保存任务引用、上下文和 last known status，
 用于当前 Session 展示和 DBAAS 不可用时的兜底展示。
 
-异步任务创建成功后，`operations.json` 中对应 operation 保持 `task_created`。
-任务后续的 `running/succeeded/failed/canceled/refresh_failed` 状态只写入 `tasks.json`。
-前端展示时通过 `operation.result.task.task_id` 或 `operation_id` 关联 operation 和 task，
-不要把 task 最终状态再反写到 operation，避免两份状态不一致。
+异步任务创建成功后，`operations.json` 中对应 operation 先记录为 `task_created`。
+任务后续的观测状态写入 `tasks.json`，`tasks.json` 是任务状态的事实源。
+
+当 task 进入终态时，后端应把对应 `OperationRecord.status` 同步更新为最终状态：
+
+```text
+task succeeded -> operation succeeded
+task failed    -> operation failed
+task canceled  -> operation canceled
+```
+
+这样可以让 `operations.json` 在任务完成后也具备最终结果视图。
+`refresh_failed` 只是刷新失败，不代表 DBAAS 任务失败；
+此时不应把 operation 改成 `failed`，只更新 task 的 `last_error` 和
+`last_checked_at`。
+
+前端展示时通过 `operation.result.task.task_id` 或 `operation_id` 关联 operation 和 task。
+如果 operation 与 task 状态暂时不一致，正在运行和刷新中的展示以 task latest view 为准。
 
 后续任务状态查询通过以下方式实现：
 
@@ -1203,6 +1394,43 @@ P7B 不做 force archive/delete。
 
 只要 Session 关联了非终态异步任务，该 Session 就仍有未结束事项。
 
+### 7.1 DBAAS 全异步演进方向
+
+当前 Phase7 需要同时支持 `sync`、`async` 和 `mixed`。
+原因是现有 mock-server 和部分 DBAAS 写接口仍是同步接口，
+例如资源规格更新和存储规格更新直接返回最终业务结果。
+
+长期推荐 DBAAS 将所有写操作统一 task 化：
+
+```text
+写接口 -> 返回 task_id
+```
+
+当 DBAAS 写接口全部异步化后，ai-agent 的模型会自然收敛为：
+
+```text
+approval -> operations[] -> tasks[] -> task_status_changed
+```
+
+这会简化以下问题：
+
+- 审批接口不需要长时间等待同步 DBAAS 操作完成
+- 不需要处理“同步 HTTP 超时但 DBAAS 可能已执行”的不确定性
+- 批量审批后每个操作都只负责创建一个 DBAAS task
+- 前端统一展示任务提交、运行中、成功、失败
+- ai-agent 重启后只需要基于 `tasks.json` 恢复任务追踪
+
+但当前阶段不在 ai-agent 侧把同步 DBAAS 接口包装成本地异步任务。
+否则 ai-agent 需要自建本地任务执行器、重启恢复和后台执行状态管理，
+复杂度会高于收益。
+
+因此 Phase7 的接口形态策略是：
+
+- DBAAS 返回最终结果：按 `sync OperationResult` 记录
+- DBAAS 返回 `task_id`：按 `async TaskRecord` 追踪
+- 同一批审批内既有 sync 又有 async：顶层 proposal 标记为 `mixed`
+- 后续 DBAAS 全部 task 化后，逐步减少 sync 工具，不需要推翻审批模型
+
 ## 8. 本地重复执行保护
 
 第七阶段不实现独立 `idempotency_key` 机制。
@@ -1224,7 +1452,7 @@ P7A 先依赖已有记录做本地重复执行保护。
 - `approval_id`
 - `thread_id`
 - `run_id`
-- `interrupted_tool_call.tool_call_id`
+- `interrupted_tool_calls[].tool_call_id`
 - `operations.json`
 - `tasks.json`
 
@@ -1484,26 +1712,32 @@ data: {
     "status": "pending",
     "expires_at": "2026-05-06T10:30:00Z",
     "proposal": {
-      "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+      "summary": "本次将执行 1 个 DBAAS 变更操作",
       "risk_level": "medium",
       "required_role": "user",
       "execution_mode": "sync",
-      "targets": [
+      "items": [
         {
-          "kind": "service",
-          "id": "mysql-xf2",
-          "name": "mysql-xf2",
-          "qualifiers": {
-            "child_service_type": "mysql"
-          }
-        }
-      ],
-      "parameters": [
-        {
-          "key": "memory",
-          "label": "内存",
-          "value": 15,
-          "unit": "GB"
+          "action": "service.resource.update",
+          "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+          "targets": [
+            {
+              "kind": "service",
+              "id": "mysql-xf2",
+              "name": "mysql-xf2",
+              "qualifiers": {
+                "child_service_type": "mysql"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "key": "memory",
+              "label": "内存",
+              "value": 15,
+              "unit": "GB"
+            }
+          ]
         }
       ]
     }
@@ -1570,8 +1804,8 @@ expired
 {
   "approval": {},
   "assistant_message": {},
-  "operation": {},
-  "task": null,
+  "operations": [],
+  "tasks": [],
   "next_approval": null,
   "paused": false
 }
@@ -1581,20 +1815,47 @@ expired
 
 - `approval`：审批最新状态
 - `assistant_message`：resume 后写入 `messages.json` 的助手消息；用户主动拒绝审批时使用固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`
-- `operation`：本次审批触发的最新 operation；拒绝或超时时可为 `null`
-- `task`：异步任务创建成功时返回当前 task latest view；同步操作或拒绝时为 `null`
+- `operations`：本次 approval resume 触发的所有 operation；单操作时返回一项
+- `tasks`：本次 approval resume 创建或关联的所有 task；同步操作或拒绝时为空数组
 - `next_approval`：本次 resume 继续执行后，如果再次命中写 tool interrupt，则返回新创建的待确认审批；否则为 `null`
 - `paused`：是否因为 `next_approval` 再次暂停；普通完成或拒绝时为 `false`
 
+返回规则：
+
+- 单操作场景也通过 `operations[]` / `tasks[]` 返回，数组长度通常为 1 或 0
+- 批量场景同样通过 `operations[]` / `tasks[]` 返回，数组长度可以大于 1
+- 不再返回单数字段 `operation` / `task`，避免前端维护两套读取逻辑
+
+真实大模型联调发现，`Command(resume=approve)` 后模型有概率在自然语言总结里继续使用
+“等待人工审批”“审批通过后执行”这类话术，即使接口数据已经是
+`approval.status=approved` 且 `operation.status=succeeded/task_created`。
+
+原因是模型会同时看到历史里的人工确认约束、工具描述和审批上下文，
+不一定稳定区分“写工具执行前的确认卡”和“审批恢复后已经返回的
+`OperationResult`”。
+
+本阶段先通过系统提示词约束该类表达：
+
+- 收到写工具返回的 `OperationResult` 后，必须认为当前 tool 已经过人工批准并恢复执行
+- `status=succeeded` 表示同步写操作已完成，不得再说等待审批
+- `status=task_created` 表示异步任务已创建并开始追踪，不得再说等待审批
+- 只有再次触发新的 `next_approval` / pending approval 时，才可以说后续操作等待确认
+
+P7A 先不做后端固定成功文案兜底。
+除用户主动拒绝审批使用固定文案外，批准后的助手消息仍由模型基于
+`OperationResult` 生成；前端展示的权威执行状态以 `operations[]` 和 `tasks[]`
+为准。
+
 审批恢复后的再次 interrupt 语义：
 
-- 每次批准只放行当前 approval 对应的一个受保护 tool，不自动批准后续 tool
-- `Command(resume=...)` 恢复后，如果 AI 继续调用第二个写 tool，DeepAgent 会再次 interrupt
+- 每次批准只放行当前 approval 对应的 interrupted tool calls
+- 如果当前 approval 是批量审批，一次批准可以放行同一个 interrupt 内的多个 tool call
+- `Command(resume=...)` 恢复后，如果 AI 继续调用新的写 tool，DeepAgent 会再次 interrupt
 - 后端必须先保留当前 approval 的终态，例如 `approved` 或 `rejected`
-- 如果当前 approval 已触发 operation，则 operation 结果仍应写入 `operations.json`
+- 如果当前 approval 已触发 operation，则所有 operation 结果仍应写入 `operations.json`
 - 如果恢复链路再次返回 approval request，后端创建新的 `pending approval`，并通过 `next_approval` 返回
 - 同一个 Session 同一时间仍只允许一个 `pending approval`
-- 该响应不应返回 `502`，也不应自动继续执行第二个写 tool
+- 该响应不应返回 `502`，也不应自动继续执行后续新 interrupt 的写 tool
 
 典型连续审批响应：
 
@@ -1602,22 +1863,71 @@ expired
 {
   "approval": {"status": "approved"},
   "assistant_message": null,
-  "operation": {"status": "succeeded"},
-  "task": null,
+  "operations": [{"status": "succeeded"}],
+  "tasks": [],
   "next_approval": {"status": "pending"},
   "paused": true
 }
 ```
 
+批量审批响应示例：
+
+```json
+{
+  "approval": {"status": "approved"},
+  "assistant_message": {"content": "两个升级任务已创建成功。"},
+  "operations": [
+    {"action": "service.image.upgrade", "status": "task_created"},
+    {"action": "service.image.upgrade", "status": "task_created"}
+  ],
+  "tasks": [
+    {"task_id": "task-0001", "status": "running"},
+    {"task_id": "task-0002", "status": "running"}
+  ],
+  "next_approval": null,
+  "paused": false
+}
+```
+
+批量审批不是事务。
+批准只表示用户授权本批次全部操作执行。
+每个 tool 独立执行、独立记录 `OperationRecord`；
+只有 DBAAS 返回 `task_id` 的异步 tool 才记录 `TaskRecord`。
+如果部分操作成功、部分失败，ai-agent 不自动补偿、不自动回滚。
+
+批量展示状态在 API 或前端展示层按 `approval_id` 聚合，不写入
+`ApprovalRecord.status`。
+`ApprovalRecord.status` 只表示审批状态：
+
+```text
+pending / approved / rejected / expired
+```
+
+执行聚合状态建议：
+
+```text
+succeeded       全部 operation/task 成功
+failed          全部 operation/task 失败或取消
+partial_failed  有成功也有失败/取消，且没有仍在运行的任务
+running         有任务仍在运行，且当前没有失败/取消
+partial_running 有任务仍在运行，同时已有失败/取消或部分完成
+```
+
+同步操作没有 task，直接以 `OperationRecord.status` 参与聚合。
+异步操作优先以 `TaskRecord.status` 参与聚合；
+当 task 进入 `succeeded/failed/canceled` 终态时，
+后端应把对应 `OperationRecord.status` 同步更新为最终状态，
+方便后续只看 `operations.json` 也能知道最终结果。
+
 前端语义：
 
-- 旧 approval card 显示为 `已批准`，不隐藏
+- 已处理的 approval card 显示为 `已批准`，不隐藏
 - 本次 operation result card 显示为成功、失败、超时或待核查
 - `next_approval` 显示为新的待确认卡片
 - 用户继续点击 `next_approval` 的批准或拒绝，进入下一轮 decision
 
 前端提交审批决策后，应刷新当前 Session 详情。
-如果响应中包含 `task`，或当前 Session 已有任务面板，
+如果响应中包含非空 `tasks[]`，或当前 Session 已有任务面板，
 再调用 `GET /api/v1/sessions/{session_id}/tasks` 补齐最新任务列表。
 
 审批决策接口的 timeout 语义：
@@ -1899,11 +2209,14 @@ DELETE /api/v1/sessions/{session_id}
 
 ```text
 summary
-targets
 risk_level
 required_role
 execution_mode
-parameters
+items[].summary
+items[].targets
+items[].parameters
+items[].risk_level
+items[].risk_notes
 ```
 
 执行后展示 `OperationResult` 的用户子集：
@@ -1942,7 +2255,7 @@ result 简要信息
 
 ```text
 thread_id
-interrupted_tool_call
+interrupted_tool_calls
 details
 原始 DBAAS response
 ```
@@ -2160,6 +2473,9 @@ critical
 - 异步操作创建后说明 task_id 和当前状态，不承诺最终成功
 - 查询任务状态必须调用任务查询工具
 - 高风险操作必须明确影响范围和风险点
+- 审批恢复后，如果写工具返回 `OperationResult.status=succeeded`，必须说明操作已执行成功，不得再说等待人工审批
+- 审批恢复后，如果写工具返回 `OperationResult.status=task_created`，必须说明异步任务已创建并开始追踪，不得再说审批通过后才执行
+- 只有当前响应确实产生新的 pending approval 时，才可以说后续操作等待确认
 
 需要避免在 prompt 中硬塞完整接口 schema。
 工具描述和结构化返回应承担主要约束。
@@ -2243,8 +2559,14 @@ GET /api/v1/sessions/{session_id}/tasks
 - 用户主动拒绝审批时，Session 展示固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`，不展示模型自由生成的“系统拒绝”类文案
 - 用户批准时，工具执行且返回结果
 - 同一恢复链路内再次触发写 tool 时，返回新的 `next_approval`，不返回 `502`
-- 连续写操作必须逐个审批，不允许一次批准自动放行后续写 tool
+- 同一个 DeepAgent interrupt 内多个 `action_requests` 展示为一张完整批量审批卡
+- 批量审批卡必须展示所有 `proposal.items[]`，不允许只展示第一项
+- 批量审批只支持批准全部或拒绝全部，不支持部分批准
+- 用户批准批量审批后，可以放行同一个 interrupt 内的所有 interrupted tool calls
+- resume 后再次触发的新 interrupt 必须返回新的 `next_approval`，不允许被上一次批准自动放行
+- 批量审批产生多个 operation 时，`operations[]` 返回完整列表，并通过同一个 `approval_id` 关联
 - 同步操作能展示 `changes[]`
+- 批量同步操作部分成功或失败时，逐项展示每个 operation 的真实结果
 - 同步写操作超时时返回 `timeout`，不自动重试写接口
 - 同步写操作超时时记录 `reconcile_required`
 - `timeout` 或 `unknown/reconcile_required` 不自动 reconcile、不自动补偿、不自动判断最终成功
@@ -2252,6 +2574,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - ai-agent 重启后，`started` operation 会标记为 `unknown/reconcile_required`
 - 异步升级能返回 task_id
 - 异步升级创建 task 后写入当前 Session 的 `tasks.json`
+- 批量异步操作创建多个 task 时，`tasks[]` 返回完整列表，并逐项展示任务状态
+- task 进入终态时，对应 operation 最终状态同步更新为 `succeeded/failed/canceled`
 - 第一批上线后，异步 task 可以通过 `GET /api/v1/sessions/{session_id}/tasks` lazy refresh 到最终状态
 - `tasks.json` 中保存稳定的 `operation_conflict_key`
 - 同一 Session 下 `approvals.json`、`operations.json`、`tasks.json` 共用一把 Session 级文件锁
@@ -2303,7 +2627,9 @@ GET /api/v1/sessions/{session_id}/tasks
 - `GET /sessions/{session_id}/tasks` 第一版不分页，不要求 `limit/status` 参数
 - `GET /sessions/{session_id}/tasks` 只 lazy refresh 当前 Session 的非终态任务，不反复查询终态任务
 - 当前 Session task SSE 订阅期间，refresh loop 会更新非终态任务的 last known status
-- 异步 operation 创建 task 后保持 `task_created`，task 最终状态只更新 `tasks.json`
+- 异步 operation 创建 task 后先记录为 `task_created`
+- task 终态后同步更新对应 operation 为 `succeeded/failed/canceled`
+- `refresh_failed` 不回写 operation 为 `failed`
 - `refresh_failed` 属于非终态，不表示任务失败
 - `refresh_failed` 仍阻止归档或删除，P7B 不做 force archive/delete
 - 当前 Session 打开时，可通过任务 SSE 收到 `task_status_changed`
