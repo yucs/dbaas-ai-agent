@@ -128,6 +128,7 @@ class TaskRecord(BaseModel):
     reason: str | None = None
     result: dict[str, Any] | None = None
     last_error: str | None = None
+    agent_followup_triggered: bool = False
     created_at: datetime
     updated_at: datetime
     last_checked_at: datetime | None = None

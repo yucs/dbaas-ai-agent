@@ -1278,14 +1278,35 @@ DBAAS 查询失败时：
 - 记录 `last_error`
 - 下次 lazy refresh 或 SSE refresh loop 继续刷新
 
-任务刷新只更新任务状态，不自动唤醒 AI，也不自动写 assistant 消息。
-前端任务面板或用户自然语言查询读取本地最新状态，
+任务刷新以更新任务状态为主。
+当当前 Session 的任务 SSE 观察到异步任务从非终态进入终态时，
+不立即按单个 task 触发 AI 回访，而是先找到该 task 所属的操作组。
+操作组优先使用 `approval_id`：
+
+- 有 `approval_id`：以一次人工确认按钮对应的 approval 为回访维度
+- 无 `approval_id`：fallback 到 `operation_id`
+- 仍无法关联 operation 时：fallback 到单个 `task_id`
+
+同一操作组内只要仍存在非终态异步 task，就只更新任务状态和任务面板，
+不触发 AI 回访。
+只有该组所有异步 task 都进入 `succeeded/failed/canceled` 后，
+ai-agent 才自动触发一次轻量 AI 回访：
+
+- 先写入一条 `ai-agent` 消息，说明检测到任务已结束
+- 再用同一个 `thread_id` 调用 DeepAgent 主动查询任务执行结果
+- DeepAgent 输出作为普通 `assistant` 消息写入当前 Session
+- 自动回访只允许查询和建议，不允许发起新的 DBAAS 写操作
+- 如果自动回访过程中模型触发写 tool interrupt，不创建审批卡，直接中止该次自动回访
+- 自动回访中使用 `get_dbaas_task_tool` 查询指定 task 时，应强制向 DBAAS 刷新一次；
+  普通 `GET /tasks` lazy refresh 仍不反复查询终态任务
+
+前端任务面板或用户自然语言查询仍读取本地最新状态，
 必要时重新调用 `GET /api/v1/sessions/{session_id}/tasks` 触发 lazy refresh。
 
 如果当前 Session 页面正在打开，P7B 可以通过当前 Session 的任务 SSE 推送状态变化。
 这是独立 HTTP SSE endpoint，不复用 `/messages/stream`。
 `/messages/stream` 只负责当前 AI run 和审批事件，
-`tasks/events` 只负责异步任务状态变化。
+`tasks/events` 负责当前 Session 的异步任务状态变化和任务自动回访事件。
 
 SSE endpoint：
 
@@ -1298,6 +1319,9 @@ SSE 事件名使用当前项目已有风格：
 
 ```text
 task_status_changed
+task_followup_started
+task_followup_completed
+task_followup_failed
 ```
 
 事件示例：
@@ -1322,11 +1346,54 @@ data: {
 
 - 只推当前 Session 的任务状态变化
 - 不跨 Session
-- 不触发 AI 自动回复
-- 不写 assistant 消息
+- 只在某个操作组全部异步 task 进入终态后触发一次 AI 自动回访
+- AI 自动回访会写入 `ai-agent` 消息和普通 `assistant` 总结消息
 - 不写入 `/messages/stream`
 - 不替代 `tasks.json`
 - SSE 断线或页面刷新后，通过 `GET /sessions/{session_id}/tasks` 补齐状态
+
+AI 自动回访去重：
+
+- `tasks.json` 中每个 task 记录 `agent_followup_triggered`
+- 该字段表示“该 task 已经被纳入某次操作组自动回访”，
+  不是表示单个 task 单独生成过总结
+- 只有同一操作组内所有 task 都是 `terminal` 且仍存在 `agent_followup_triggered=false`
+  的 task 时，才可以进入自动回访
+- 触发前先把该操作组内所有 terminal task 标记为 `agent_followup_triggered=true`
+- 页面刷新、SSE 重连或重复 lazy refresh 不会重复触发
+- 批处理场景下，不以单个 task 完成时间为准；
+  等同一个 `approval_id` 关联的所有异步 task 都结束后，合并成一次 DeepAgent 回访
+
+如果同一次 approval 同时产生同步 operation 和异步 task：
+
+- 同步 operation 仍按原有逻辑立即写入 `operations.json`
+- 自动回访等待该 approval 下所有异步 task 终态后触发
+- 自动回访 prompt 可以携带同 approval 下的同步 operation 结果作为上下文
+- 不因为同步 operation 已成功而提前触发整组回访
+
+自动回访触发示例：
+
+```text
+approval appr_001 一次批准创建 task_a、task_b
+
+task_a -> succeeded
+  -> 只更新 task card，不触发 AI 回访，因为 task_b 仍 running
+
+task_b -> failed
+  -> appr_001 下所有 async task 已终态
+  -> 写入一条 ai-agent 消息
+  -> 调用一次 DeepAgent 查询 task_a/task_b 结果并总结建议
+```
+
+自动回访提示词原则：
+
+```text
+这是 AI Agent 自动触发的异步任务终态回访，不是用户新请求。
+请先使用 DBAAS 任务查询工具查询这些 task 的执行结果；
+必要时查询目标资源当前状态。
+只允许查询和总结，不要调用任何写工具。
+如果需要后续变更，只能给出建议，等待用户再次发起并走人工审批。
+```
 
 前端打开或刷新 Session 页面时：
 
@@ -1345,9 +1412,10 @@ data: {
 
 - 优先用事件 payload 局部更新 task card
 - 如果本地找不到 task 或 payload 不完整，则调用 `GET /api/v1/sessions/{session_id}/tasks`
-- 不默认刷新整个 Session
-- 只有发现 Session 状态明显不一致时，才调用 `GET /api/v1/sessions/{session_id}`
-- 任务进入终态时，只更新 task card 或展示 toast，不自动追加 assistant 消息
+- 任务进入终态时展示 toast，并刷新当前 Session，使 operation card 同步为终态
+- 收到 `task_followup_started` 时展示新增的 `ai-agent` 消息
+- 收到 `task_followup_completed` 或 `task_followup_failed` 时刷新当前 Session，
+  以展示自动回访结果或失败提示
 
 前端切换 Session 或关闭页面时，应关闭旧的 task SSE 连接。
 浏览器刷新、SSE 断线或重连不会影响任务状态恢复，
@@ -2059,7 +2127,12 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 - 任务提醒不是 `system` role message，也不是 assistant message
 - 页面刷新后，任务提醒由 `GET /api/v1/sessions/{session_id}/tasks` 恢复
 - 当前页面收到 `task_status_changed` 后，局部更新对应 task card
-- 任务进入终态时，可以展示 toast 或状态变化提示，但不自动追加 assistant 消息
+- 任务进入终态时，可以展示 toast 或状态变化提示
+- 当前 Session 的任务 SSE 观察到非终态到终态的转换后，
+  如果该任务所属操作组的所有异步 task 都已终态，
+  ai-agent 会自动写入一条 `ai-agent` 提示消息，并触发一次 AI 查询总结
+- 批量审批产生多个异步任务时，等待同一个 `approval_id` 下所有异步任务结束后，
+  只追加一次 AI 回访总结
 
 因此，会话中看到的“任务处理中”属于产品层状态，
 不是对话历史的一部分。
@@ -2133,9 +2206,19 @@ GET /api/v1/sessions/{session_id}/tasks/events
 这样前端既能展示已完成/失败历史，也不会对终态任务产生不必要的 DBAAS 查询。
 如果后续单个 Session 下任务数量过多，再增加 `limit`、`status` 或单任务详情接口。
 
-`tasks/events` 是当前 Session 的任务 SSE 订阅接口，
-用于接收 `task_status_changed` 事件。
-任务状态变化不通过 `/messages/stream` 推送。
+`tasks/events` 是当前 Session 的任务事件流，
+用于接收任务状态变化和任务自动回访事件。
+第一版事件包括：
+
+```text
+task_status_changed
+task_followup_started
+task_followup_completed
+task_followup_failed
+```
+
+任务状态变化和任务自动回访事件不通过 `/messages/stream` 推送。
+`/messages/stream` 只负责用户主动发起的当前 AI run、token、审批和压缩事件。
 
 P7B 先不新增前端可见的单任务详情接口或手动 refresh 接口：
 
@@ -2248,7 +2331,8 @@ result 简要信息
 它通过 `GET /api/v1/sessions/{session_id}/tasks` 初始化和刷新，
 通过 `task_status_changed` 局部更新任务卡。
 任务成功或失败后保留在任务面板中供用户查看结果，
-但不自动写入 assistant 消息。
+并在其所属操作组全部异步 task 结束后，由 task SSE 触发一次 AI 自动回访。
+自动回访会写入一条 `ai-agent` 提示消息和一条普通 `assistant` 总结消息。
 
 完整结构只用于审计、排障或管理员调试页面。
 普通前端不应强依赖：
@@ -2633,14 +2717,18 @@ GET /api/v1/sessions/{session_id}/tasks
 - `refresh_failed` 属于非终态，不表示任务失败
 - `refresh_failed` 仍阻止归档或删除，P7B 不做 force archive/delete
 - 当前 Session 打开时，可通过任务 SSE 收到 `task_status_changed`
-- 收到 `task_status_changed` 后，前端更新 task card，不写 assistant 消息
+- 收到 `task_status_changed` 后，前端更新 task card，并在任务终态时刷新当前 Session
 - `task_status_changed` 不通过 `/messages/stream` 推送
 - 页面刷新后，`GET /sessions/{session_id}/tasks` 能恢复非终态任务提醒或 task card
 - 页面刷新后，任务下拉框或任务面板能恢复当前 Session 的任务列表和最新状态
 - 页面刷新后，前端重新订阅当前 Session 的 task SSE
 - 切换 Session 后，前端关闭旧 Session 的 task SSE，并只展示新 Session 的任务
 - 不提供跨 Session 任务中心、用户级任务列表或全局 `/tasks` 接口
-- 任务成功或失败后，只更新任务面板或展示 toast，不自动追加 assistant 消息
+- 操作组内所有异步任务成功、失败或取消后，当前 task SSE 会触发一次 AI 自动回访并写入 assistant 总结
+- 批量异步任务按同一个 `approval_id` 聚合，不按单个 task 完成时间分别触发
+- 批量审批创建两个异步 task 且先后完成时，只在最后一个 task 终态后触发一次 AI 自动回访
+- 同一 approval 下同步 operation 与异步 task 混合时，自动回访等待异步 task 全部终态后触发，
+  并可在总结中引用同步 operation 结果
 - 自然语言查询任务进度会调用任务工具
 - 自然语言查询“有哪些任务在跑”只回答当前 Session 内任务
 - 任务成功或失败后，任务接口和任务面板能反映最新状态
@@ -2652,8 +2740,9 @@ GET /api/v1/sessions/{session_id}/tasks
 2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.json`
 3. 实现 `GET /api/v1/sessions/{session_id}/tasks/events`，推送 `task_status_changed`
 4. 前端会话页增加当前 Session 任务下拉框或任务面板
-5. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
-6. 补归档/删除保护、刷新失败语义和回归测试
+5. 实现 approval 维度的 AI 自动回访和 `task_followup_*` 事件
+6. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
+7. 补归档/删除保护、刷新失败语义和回归测试
 
 ### 15.3 P7C：生命周期操作与高风险策略
 

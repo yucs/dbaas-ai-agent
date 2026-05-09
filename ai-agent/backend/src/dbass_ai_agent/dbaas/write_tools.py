@@ -435,7 +435,12 @@ def build_write_tools(settings: Settings) -> list[Any]:
         context = require_operation_context()
         for task in context.task_service.list_tasks(context.session):
             if task.task_id == task_id:
-                refreshed = context.task_service.refresh_task(context.identity, context.session, task)
+                refreshed = context.task_service.refresh_task(
+                    context.identity,
+                    context.session,
+                    task,
+                    force=True,
+                )
                 return refreshed.model_dump(mode="json")
         return {
             "status": "error",

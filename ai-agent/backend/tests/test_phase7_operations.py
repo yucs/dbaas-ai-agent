@@ -227,6 +227,19 @@ class BatchResumeRuntime:
         )
 
 
+class FollowupRuntime:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate_followup(self, *, identity, session, prompt):
+        self.prompts.append(prompt)
+        return AgentReply(
+            run_id="run_phase7_followup",
+            content="任务执行结果已查询，当前状态正常。",
+            mode="deepagent",
+        )
+
+
 class Phase7ApprovalApiTests(unittest.TestCase):
     def test_send_message_creates_pending_approval_and_blocks_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -524,6 +537,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 _dbaas_config(tmpdir),
                 write_client=FakeTaskClient(),
             )
+            runtime = FollowupRuntime()
             service.repository.append_task(
                 detail.meta.user_id,
                 detail.meta.session_id,
@@ -534,6 +548,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
             app.dependency_overrides[get_current_identity] = lambda: identity
             app.dependency_overrides[get_session_service] = lambda: service
             app.dependency_overrides[get_task_service] = lambda: task_service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
             app.dependency_overrides[get_app_settings] = lambda: Settings(
                 dbaas_task_refresh_interval_seconds=1,
             )
@@ -556,6 +571,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 _dbaas_config(tmpdir),
                 write_client=FakeTaskClient(),
             )
+            runtime = FollowupRuntime()
             service.repository.append_task(
                 detail.meta.user_id,
                 detail.meta.session_id,
@@ -566,6 +582,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
             app.dependency_overrides[get_current_identity] = lambda: identity
             app.dependency_overrides[get_session_service] = lambda: service
             app.dependency_overrides[get_task_service] = lambda: task_service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
             app.dependency_overrides[get_app_settings] = lambda: Settings(
                 dbaas_task_refresh_interval_seconds=1,
             )
@@ -579,12 +596,95 @@ class TaskLazyRefreshTests(unittest.TestCase):
                     body = "".join(response.iter_text())
 
             events = _parse_sse_events(body)
-            self.assertEqual([event_name for event_name, _payload in events], ["task_status_changed"])
+            self.assertEqual(
+                [event_name for event_name, _payload in events],
+                ["task_status_changed", "task_followup_started", "task_followup_completed"],
+            )
             payload = events[0][1]
             self.assertEqual(payload["session_id"], detail.meta.session_id)
             self.assertEqual(payload["task"]["task_id"], "task-001")
             self.assertEqual(payload["task"]["previous_status"], "running")
             self.assertEqual(payload["task"]["status"], "succeeded")
+            self.assertIn("task-001", runtime.prompts[0])
+            messages = service.get_session(identity, detail.meta.session_id).messages
+            self.assertEqual([message.role for message in messages], ["ai-agent", "assistant"])
+            self.assertEqual(messages[0].content, "AI Agent 检测到异步任务 task-001 已成功。")
+            self.assertEqual(messages[1].content, "任务执行结果已查询，当前状态正常。")
+            self.assertTrue(task_service.list_tasks(detail.meta)[0].agent_followup_triggered)
+
+            with TestClient(app) as client:
+                with client.stream(
+                    "GET",
+                    f"/api/v1/sessions/{detail.meta.session_id}/tasks/events",
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    second_body = "".join(response.iter_text())
+
+            self.assertEqual(_parse_sse_events(second_body), [])
+            self.assertEqual(len(runtime.prompts), 1)
+
+    def test_task_events_groups_batch_terminal_followup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="task batch followup")
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=FakeTaskClient(),
+            )
+            runtime = FollowupRuntime()
+            first = _running_task(detail.meta.session_id)
+            second_target = OperationTarget(
+                kind="service",
+                id="mysql-xf2",
+                name="mysql-xf2",
+                qualifiers={"child_service_type": "proxy"},
+            )
+            second = _running_task(detail.meta.session_id).model_copy(
+                update={
+                    "task_id": "task-002",
+                    "operation_id": "op-002",
+                    "operation_conflict_key": "service.image.upgrade|service:mysql-xf2:child_service_type=proxy",
+                    "targets": [second_target],
+                }
+            )
+            service.repository.append_task(detail.meta.user_id, detail.meta.session_id, first)
+            service.repository.append_task(detail.meta.user_id, detail.meta.session_id, second)
+            app = FastAPI()
+            app.include_router(tasks_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+            app.dependency_overrides[get_app_settings] = lambda: Settings(
+                dbaas_task_refresh_interval_seconds=1,
+            )
+
+            with TestClient(app) as client:
+                with client.stream(
+                    "GET",
+                    f"/api/v1/sessions/{detail.meta.session_id}/tasks/events",
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    body = "".join(response.iter_text())
+
+            events = _parse_sse_events(body)
+            self.assertEqual(
+                [event_name for event_name, _payload in events],
+                [
+                    "task_status_changed",
+                    "task_status_changed",
+                    "task_followup_started",
+                    "task_followup_completed",
+                ],
+            )
+            self.assertEqual(len(runtime.prompts), 1)
+            self.assertIn("task-001", runtime.prompts[0])
+            self.assertIn("task-002", runtime.prompts[0])
+            messages = service.get_session(identity, detail.meta.session_id).messages
+            self.assertEqual(messages[0].content, "AI Agent 检测到 2 个异步任务已结束。")
+            self.assertEqual([task.agent_followup_triggered for task in task_service.list_tasks(detail.meta)], [True, True])
 
     def test_lazy_refresh_updates_non_terminal_task_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

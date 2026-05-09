@@ -234,6 +234,56 @@ class DeepAgentRuntime:
             logger.info("agent resume completed duration_ms=%s", elapsed_ms(started_at))
             return AgentReply(run_id=run_id, content=output.content, mode=mode)
 
+    def generate_followup(
+        self,
+        *,
+        identity: Identity,
+        session: SessionMeta,
+        prompt: str,
+    ) -> AgentReply:
+        run_id = new_run_id()
+        mode = "deepagent"
+        with log_context(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            run_id=run_id,
+        ):
+            question = prompt.strip()
+            logger.info(
+                "agent followup started message_chars=%s user_input=%s",
+                len(question),
+                redact_log_text(question),
+            )
+
+            started_at = perf_counter()
+            try:
+                with (
+                    dbaas_tool_identity(identity),
+                    self._operation_context(identity, session, run_id),
+                ):
+                    output = self._normalize_run_output(
+                        self._invoke_agent(session.thread_id, question)
+                    )
+            except AgentInvocationError:
+                logger.exception("agent followup failed")
+                raise
+            except Exception as exc:  # pragma: no cover - provider/network/runtime specific
+                logger.exception("agent followup failed")
+                raise AgentInvocationError.from_exception(
+                    exc,
+                    fallback="调用真实 DeepAgent 自动回访失败。",
+                    stage="followup",
+                ) from exc
+
+            logger.info("agent followup completed duration_ms=%s", elapsed_ms(started_at))
+            return AgentReply(
+                run_id=run_id,
+                content=output.content,
+                mode=mode,
+                approval_request=output.approval_request,
+                paused=output.approval_request is not None,
+            )
+
     def stream_reply(
         self,
         *,

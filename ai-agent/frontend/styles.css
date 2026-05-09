@@ -377,6 +377,34 @@ p {
   margin-top: 4px;
 }
 
+.task-row-message strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.task-result-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-result-list div {
+  min-width: 0;
+}
+
+.task-result-list dt {
+  color: var(--muted);
+}
+
+.task-result-list dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .task-status {
   background: #dcefe7;
   color: #1b5b45;
@@ -713,7 +741,8 @@ textarea {
   }
 
   .approval-grid,
-  .approval-param-list {
+  .approval-param-list,
+  .task-result-list {
     grid-template-columns: 1fr;
   }
 }

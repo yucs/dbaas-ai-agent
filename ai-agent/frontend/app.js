@@ -360,12 +360,51 @@ function renderTaskTarget(target) {
   return `${escapeHtml(name)}${qualifierText ? ` <span>${escapeHtml(qualifierText)}</span>` : ""}`;
 }
 
+function formatTaskResultValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  if (Array.isArray(value)) {
+    return value.map(formatTaskResultValue).join("，");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function renderTaskResult(task) {
+  const result = task.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return "";
+  }
+  const entries = Object.entries(result).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (!entries.length) {
+    return "";
+  }
+  return `
+    <dl class="task-result-list">
+      ${entries
+        .map(
+          ([key, value]) => `
+            <div>
+              <dt>${escapeHtml(key)}</dt>
+              <dd>${escapeHtml(formatTaskResultValue(value))}</dd>
+            </div>
+          `,
+        )
+        .join("")}
+    </dl>
+  `;
+}
+
 function renderTaskRow(task) {
   const targets = task.targets || [];
   const targetText = targets.length
     ? targets.map(renderTaskTarget).join("；")
     : "-";
-  const message = task.last_error || task.reason || task.message || "-";
+  const message = task.last_error || task.reason || task.message || "";
+  const messageLabel = task.last_error ? "错误" : task.reason ? "原因" : "说明";
   return `
     <li class="task-row ${escapeHtml(task.status)}" data-task-id="${escapeHtml(task.task_id)}">
       <div class="task-row-main">
@@ -377,9 +416,13 @@ function renderTaskRow(task) {
       </div>
       <div class="task-row-meta">
         <span>task_id: ${escapeHtml(task.task_id)}</span>
+        <span>operation_id: ${escapeHtml(task.operation_id || "-")}</span>
+        <span>类型: ${escapeHtml(task.dbaas_type || "-")}</span>
+        <span>源状态: ${escapeHtml(task.source_status || "-")}</span>
         <span>更新: ${formatTime(task.updated_at || task.last_checked_at)}</span>
       </div>
-      <div class="task-row-message">${escapeHtml(message)}</div>
+      ${message ? `<div class="task-row-message"><strong>${escapeHtml(messageLabel)}:</strong> ${escapeHtml(message)}</div>` : ""}
+      ${renderTaskResult(task)}
     </li>
   `;
 }
@@ -1269,10 +1312,31 @@ async function subscribeTaskEvents(sessionId) {
     }
 
     await readSseResponse(response, (eventName, payload) => {
-      if (eventName !== "task_status_changed") {
+      if (eventName === "task_status_changed") {
+        applyTaskStatusChanged(payload, sessionId);
         return;
       }
-      applyTaskStatusChanged(payload, sessionId);
+
+      if (eventName === "task_followup_started") {
+        if (payload.ai_agent_message) {
+          applyStreamAiAgentMessage(payload.ai_agent_message, null, sessionId);
+        } else {
+          reconcileCurrentSession().catch((error) => {
+            if (state.currentSessionId === sessionId) {
+              showFlash(error.message || "会话刷新失败", "error");
+            }
+          });
+        }
+        return;
+      }
+
+      if (eventName === "task_followup_completed" || eventName === "task_followup_failed") {
+        reconcileCurrentSession().catch((error) => {
+          if (state.currentSessionId === sessionId) {
+            showFlash(error.message || "会话刷新失败", "error");
+          }
+        });
+      }
     });
   } catch (error) {
     if (error.name !== "AbortError" && state.currentSessionId === sessionId) {
@@ -1302,7 +1366,26 @@ function applyTaskStatusChanged(payload, sessionId) {
   setComposerState();
   if (isTerminalTaskStatus(task.status)) {
     showFlash(`任务 ${task.task_id} ${formatTaskStatus(task.status)}。`);
+    refreshCurrentSessionDetail(sessionId).catch((error) => {
+      if (state.currentSessionId === sessionId) {
+        showFlash(error.message || "会话刷新失败", "error");
+      }
+    });
   }
+}
+
+async function refreshCurrentSessionDetail(sessionId = state.currentSessionId) {
+  if (!sessionId || state.currentSessionId !== sessionId) {
+    return;
+  }
+  const payload = await api(`/api/v1/sessions/${sessionId}`);
+  if (state.currentSessionId !== sessionId) {
+    return;
+  }
+  state.currentSession = payload.session;
+  renderSessions();
+  renderCurrentSession();
+  setComposerState();
 }
 
 async function loadSession(sessionId) {

@@ -99,13 +99,30 @@ class TaskService:
         self.repository.append_task(session.user_id, session.session_id, task)
         return task
 
+    def mark_agent_followup_triggered(
+        self,
+        session: SessionMeta,
+        tasks: list[TaskRecord],
+    ) -> list[TaskRecord]:
+        marked: list[TaskRecord] = []
+        for task in tasks:
+            if task.agent_followup_triggered:
+                marked.append(task)
+                continue
+            updated = task.model_copy(update={"agent_followup_triggered": True})
+            self.repository.append_task(session.user_id, session.session_id, updated)
+            marked.append(updated)
+        return marked
+
     def refresh_task(
         self,
         identity: Identity,
         session: SessionMeta,
         task: TaskRecord,
+        *,
+        force: bool = False,
     ) -> TaskRecord:
-        if is_terminal_task_status(task.status):
+        if is_terminal_task_status(task.status) and not force:
             self._sync_terminal_operation_status(session, task)
             return task
 
@@ -117,6 +134,8 @@ class TaskService:
                 timeout_seconds=self.dbaas_config.request_timeout_seconds,
             )
         except DbaasWriteClientError as exc:
+            if is_terminal_task_status(task.status):
+                return task
             candidate = task.model_copy(
                 update={
                     "status": "refresh_failed",
