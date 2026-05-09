@@ -221,10 +221,17 @@ class DeepAgentRuntime:
 
             output = self._normalize_run_output(result)
             if output.approval_request is not None:
-                raise AgentInvocationError(
-                    "审批恢复后再次进入人工确认，P7A 暂不支持同一恢复链路内连续审批。",
-                    error_type="approval_nested_interrupt",
-                    stage="resume",
+                operation = operation_service.find_by_approval(session, approval.approval_id)
+                logger.info(
+                    "agent resume stopped before nested approval approval_id=%s operation_id=%s",
+                    approval.approval_id,
+                    operation.operation_id if operation else "-",
+                )
+                return AgentReply(
+                    run_id=run_id,
+                    content=_nested_approval_content(operation),
+                    mode=mode,
+                    warning="approval_nested_interrupt",
                 )
             logger.info("agent resume completed duration_ms=%s", elapsed_ms(started_at))
             return AgentReply(run_id=run_id, content=output.content, mode=mode)
@@ -606,6 +613,21 @@ def _resume_decision_payload(
         return {"decisions": [{"type": "approve"} for _ in range(decision_count)]}
     message = reject_message or "用户拒绝执行该操作。"
     return {"decisions": [{"type": "reject", "message": message} for _ in range(decision_count)]}
+
+
+def _nested_approval_content(operation: Any | None) -> str:
+    if operation is not None and getattr(operation, "result", None) is not None:
+        summary = operation.result.summary
+        return (
+            f"{summary}\n\n"
+            "后续还有新的写操作需要单独确认。当前版本不会在一次批准后连续弹出第二个确认，"
+            "请继续发送下一步操作指令后再确认。"
+        )
+    return (
+        "本次批准后的执行已结束。\n\n"
+        "后续还有新的写操作需要单独确认。当前版本不会在一次批准后连续弹出第二个确认，"
+        "请继续发送下一步操作指令后再确认。"
+    )
 
 
 def _classify_exception(exc: Exception) -> str:

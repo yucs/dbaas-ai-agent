@@ -7,6 +7,7 @@ const state = {
   currentSession: null,
   sending: false,
   bootstrapping: false,
+  decidingApprovalIds: new Set(),
   config: {
     messageMaxChars: 20000,
   },
@@ -53,6 +54,250 @@ function formatTime(value) {
 
 function truncatePreview(content) {
   return String(content || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function hasPendingApproval(detail = state.currentSession) {
+  return Boolean(detail?.approvals?.some((approval) => approval.status === "pending"));
+}
+
+function formatValueWithUnit(value, unit) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return `${escapeHtml(value)}${unit ? escapeHtml(unit) : ""}`;
+}
+
+function formatRiskLevel(value) {
+  const labels = {
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险",
+    critical: "高危",
+  };
+  return labels[value] || value || "-";
+}
+
+function formatExecutionMode(value) {
+  const labels = {
+    sync: "同步",
+    async: "异步",
+  };
+  return labels[value] || value || "-";
+}
+
+function formatApprovalStatus(value) {
+  const labels = {
+    pending: "待确认",
+    approved: "已批准",
+    rejected: "已拒绝",
+    expired: "已过期",
+  };
+  return labels[value] || value || "-";
+}
+
+function formatOperationStatus(value) {
+  const labels = {
+    started: "执行中",
+    succeeded: "已成功",
+    failed: "已失败",
+    timeout: "已超时",
+    unknown: "待核查",
+    task_created: "任务已创建",
+  };
+  return labels[value] || value || "-";
+}
+
+function renderApprovalTarget(target) {
+  const name = target.name || target.id || "-";
+  const qualifiers = target.qualifiers || {};
+  const qualifierText = Object.entries(qualifiers)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("，");
+  return `
+    <li>
+      <strong>${escapeHtml(name)}</strong>
+      ${qualifierText ? `<span>${escapeHtml(qualifierText)}</span>` : ""}
+    </li>
+  `;
+}
+
+function renderApprovalParameter(parameter) {
+  const label = parameter.label || parameter.key || "-";
+  const target = formatValueWithUnit(parameter.value, parameter.unit);
+  const hasCurrent = parameter.current_value !== null && parameter.current_value !== undefined;
+  const value = hasCurrent
+    ? `${formatValueWithUnit(parameter.current_value, parameter.current_unit || parameter.unit)} → ${target}`
+    : target;
+  return `
+    <li>
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+    </li>
+  `;
+}
+
+function approvalPreview(approval) {
+  return approval?.proposal?.summary || approval?.action || "等待人工确认";
+}
+
+function renderApprovalCard(approval) {
+  const proposal = approval.proposal || {};
+  const targets = proposal.targets || [];
+  const parameters = proposal.parameters || [];
+  const riskNotes = proposal.risk_notes || [];
+  const isPending = approval.status === "pending";
+  const deciding = isPending && state.decidingApprovalIds.has(approval.approval_id);
+
+  return `
+    <article class="approval-card ${escapeHtml(approval.status)}" data-approval-id="${escapeHtml(approval.approval_id)}">
+      <div class="approval-header">
+        <div>
+          <p class="eyebrow">操作确认</p>
+          <h3>${escapeHtml(proposal.summary || approval.action || "待确认操作")}</h3>
+        </div>
+        <div class="approval-badges">
+          <span class="status-pill approval-status">${escapeHtml(formatApprovalStatus(approval.status))}</span>
+          <span class="status-pill approval-risk">${escapeHtml(formatRiskLevel(proposal.risk_level))}</span>
+        </div>
+      </div>
+
+      <div class="approval-grid">
+        <div>
+          <span>执行方式</span>
+          <strong>${escapeHtml(formatExecutionMode(proposal.execution_mode))}</strong>
+        </div>
+        <div>
+          <span>所需角色</span>
+          <strong>${escapeHtml(proposal.required_role || "user")}</strong>
+        </div>
+        <div>
+          <span>过期时间</span>
+          <strong>${formatTime(approval.expires_at)}</strong>
+        </div>
+      </div>
+
+      <div class="approval-section">
+        <span>目标资源</span>
+        <ul class="approval-list">
+          ${targets.length ? targets.map(renderApprovalTarget).join("") : "<li><strong>-</strong></li>"}
+        </ul>
+      </div>
+
+      <div class="approval-section">
+        <span>变更参数</span>
+        <ul class="approval-param-list">
+          ${parameters.length ? parameters.map(renderApprovalParameter).join("") : "<li><span>-</span><strong>-</strong></li>"}
+        </ul>
+      </div>
+
+      ${
+        riskNotes.length
+          ? `<div class="approval-section"><span>风险提示</span><ul class="approval-list">${riskNotes
+              .map((note) => `<li>${escapeHtml(note)}</li>`)
+              .join("")}</ul></div>`
+          : ""
+      }
+
+      ${
+        approval.resume_failed
+          ? `<div class="approval-section approval-warning"><span>恢复状态</span><strong>${escapeHtml(
+              approval.resume_error || "审批恢复失败，请查看操作结果。",
+            )}</strong></div>`
+          : ""
+      }
+
+      ${
+        isPending
+          ? `<div class="approval-actions">
+              <button
+                class="primary-button"
+                type="button"
+                data-approval-decision="approved"
+                data-approval-id="${escapeHtml(approval.approval_id)}"
+                ${deciding ? "disabled" : ""}
+              >${deciding ? "处理中..." : "批准"}</button>
+              <button
+                class="danger-button"
+                type="button"
+                data-approval-decision="rejected"
+                data-approval-id="${escapeHtml(approval.approval_id)}"
+                ${deciding ? "disabled" : ""}
+              >拒绝</button>
+            </div>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderSessionApprovals(detail) {
+  return (detail.approvals || []).map(renderApprovalCard).join("");
+}
+
+function renderOperationChange(change) {
+  return `
+    <li>
+      <span>${escapeHtml(change.label || change.field || "-")}</span>
+      <strong>${formatValueWithUnit(change.before, change.unit)} → ${formatValueWithUnit(
+        change.after,
+        change.unit,
+      )}</strong>
+    </li>
+  `;
+}
+
+function renderOperationCard(operation) {
+  const result = operation.result || {};
+  const changes = result.changes || [];
+  const summary = result.summary || operation.action || "操作结果";
+  const status = result.status || operation.status;
+
+  return `
+    <article class="operation-card ${escapeHtml(status)}" data-operation-id="${escapeHtml(operation.operation_id)}">
+      <div class="approval-header">
+        <div>
+          <p class="eyebrow">执行结果</p>
+          <h3>${escapeHtml(summary)}</h3>
+        </div>
+        <span class="status-pill operation-status">${escapeHtml(formatOperationStatus(status))}</span>
+      </div>
+
+      <div class="approval-grid">
+        <div>
+          <span>执行方式</span>
+          <strong>${escapeHtml(formatExecutionMode(operation.execution_mode))}</strong>
+        </div>
+        <div>
+          <span>动作</span>
+          <strong>${escapeHtml(operation.action || "-")}</strong>
+        </div>
+        <div>
+          <span>完成时间</span>
+          <strong>${formatTime(operation.completed_at || operation.started_at)}</strong>
+        </div>
+      </div>
+
+      ${
+        changes.length
+          ? `<div class="approval-section"><span>变更明细</span><ul class="approval-param-list">${changes
+              .map(renderOperationChange)
+              .join("")}</ul></div>`
+          : ""
+      }
+
+      ${
+        result.error
+          ? `<div class="approval-section approval-warning"><span>错误信息</span><strong>${escapeHtml(
+              result.error.message || result.error.error_type,
+            )}</strong></div>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderSessionOperations(detail) {
+  return (detail.operations || []).map(renderOperationCard).join("");
 }
 
 function formatApiDetail(detail) {
@@ -302,12 +547,7 @@ function renderCurrentSession() {
   elements.sessionSubtitle.textContent = "当前页面只显示当前登录用户自己的会话。";
   elements.sessionStatus.textContent = detail.meta.status;
 
-  if (!detail.messages.length) {
-    elements.messages.innerHTML = `<div class="empty-state">当前会话还没有消息，开始提问吧。</div>`;
-    return;
-  }
-
-  elements.messages.innerHTML = detail.messages
+  const messageHtml = (detail.messages || [])
     .map(
       (message) => `
         <article class="message ${message.role} ${message.pending ? "pending" : ""} ${message.error ? "error" : ""}">
@@ -320,6 +560,15 @@ function renderCurrentSession() {
       `,
     )
     .join("");
+  const approvalHtml = renderSessionApprovals(detail);
+  const operationHtml = renderSessionOperations(detail);
+
+  if (!messageHtml && !approvalHtml && !operationHtml) {
+    elements.messages.innerHTML = `<div class="empty-state">当前会话还没有消息，开始提问吧。</div>`;
+    return;
+  }
+
+  elements.messages.innerHTML = `${messageHtml}${approvalHtml}${operationHtml}`;
 
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
@@ -345,13 +594,15 @@ function getMessageAuthorLabel(message) {
 
 function setComposerState() {
   const noSession = !state.currentSessionId;
-  const disableActions = noSession || state.bootstrapping;
+  const pendingApproval = hasPendingApproval();
+  const decidingApproval = state.decidingApprovalIds.size > 0;
+  const disableActions = noSession || state.bootstrapping || pendingApproval || decidingApproval;
 
   elements.messageInput.disabled = disableActions;
   elements.sendButton.disabled = disableActions || state.sending;
-  elements.sendButton.textContent = state.sending ? "发送中..." : "发送";
+  elements.sendButton.textContent = state.sending ? "发送中..." : pendingApproval ? "待确认" : "发送";
   elements.newSessionButton.disabled = state.bootstrapping || !state.auth;
-  elements.deleteButton.disabled = noSession || state.bootstrapping;
+  elements.deleteButton.disabled = noSession || state.bootstrapping || pendingApproval || decidingApproval;
 }
 
 function upsertSessionItem(meta, preview) {
@@ -376,6 +627,20 @@ function upsertSessionItem(meta, preview) {
 
 function removeSessionItem(sessionId) {
   state.sessions = state.sessions.filter((item) => item.session_id !== sessionId);
+}
+
+function upsertApproval(approvals, approval) {
+  if (!approval) {
+    return approvals || [];
+  }
+  const current = approvals || [];
+  const index = current.findIndex((item) => item.approval_id === approval.approval_id);
+  if (index === -1) {
+    return [...current, approval];
+  }
+  const next = [...current];
+  next[index] = approval;
+  return next;
 }
 
 function appendOptimisticMessages(content) {
@@ -422,6 +687,11 @@ function appendOptimisticMessages(content) {
 
 function applyMessageResponse(payload, optimisticRefs) {
   if (!state.currentSession) {
+    return;
+  }
+
+  if (!payload.assistant_message) {
+    applyPausedApprovalResponse(payload, optimisticRefs, state.currentSessionId);
     return;
   }
 
@@ -523,6 +793,68 @@ function applyStreamSystemMessage(message, sessionId) {
   return true;
 }
 
+function applyStreamApprovalRequired(approval, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId || !approval) {
+    return false;
+  }
+
+  state.currentSession = {
+    ...state.currentSession,
+    approvals: upsertApproval(state.currentSession.approvals, approval),
+  };
+  upsertSessionItem(state.currentSession.meta, approvalPreview(approval));
+  renderSessions();
+  renderCurrentSession();
+  setComposerState();
+  return true;
+}
+
+function applyPausedApprovalResponse(payload, optimisticRefs, sessionId) {
+  if (!state.currentSession || state.currentSessionId !== sessionId) {
+    return false;
+  }
+
+  const nextMessages = [];
+  let replacedUser = false;
+
+  for (const message of state.currentSession.messages || []) {
+    if (optimisticRefs && message.message_id === optimisticRefs.optimisticUserId) {
+      if (payload.user_message) {
+        nextMessages.push(payload.user_message);
+        replacedUser = true;
+      }
+      continue;
+    }
+    if (optimisticRefs && message.message_id === optimisticRefs.optimisticAssistantId) {
+      continue;
+    }
+    nextMessages.push(message);
+  }
+
+  if (
+    payload.user_message &&
+    !replacedUser &&
+    !nextMessages.some((message) => message.message_id === payload.user_message.message_id)
+  ) {
+    nextMessages.push(payload.user_message);
+  }
+
+  const nextMeta = payload.session || state.currentSession.meta;
+  const nextApprovals = upsertApproval(state.currentSession.approvals, payload.approval);
+  state.currentSession = {
+    ...state.currentSession,
+    meta: nextMeta,
+    messages: nextMessages,
+    approvals: nextApprovals,
+  };
+
+  upsertSessionItem(nextMeta, approvalPreview(payload.approval));
+  renderSessions();
+  renderCurrentSession();
+  setComposerState();
+  return true;
+}
+
 function applyStreamError(message, optimisticRefs, sessionId) {
   if (!state.currentSession || state.currentSessionId !== sessionId || !optimisticRefs) {
     return false;
@@ -615,6 +947,15 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
       return;
     }
 
+    if (eventName === "approval.required") {
+      applyStreamApprovalRequired(payload.approval, sessionId);
+      return;
+    }
+
+    if (eventName === "run.paused") {
+      return;
+    }
+
     if (eventName === "error") {
       const message = formatApiDetail(payload.detail) || "流式响应失败";
       const stage = payload.stage ? ` (${payload.stage})` : "";
@@ -631,6 +972,10 @@ async function streamMessageResponse(sessionId, content, optimisticRefs) {
 
     if (eventName === "done") {
       completed = true;
+      if (payload.paused || payload.approval) {
+        applyPausedApprovalResponse(payload, optimisticRefs, sessionId);
+        return;
+      }
       if (optimisticRefs && state.currentSessionId === sessionId) {
         applyMessageResponse(payload, optimisticRefs);
       } else if (payload.session && payload.assistant_message) {
@@ -768,6 +1113,45 @@ async function handleSessionAction(action, sessionId) {
   }
 }
 
+async function handleApprovalDecision(approvalId, decision) {
+  const sessionId = state.currentSessionId;
+  if (!sessionId || !approvalId || !decision) {
+    return;
+  }
+  if (state.decidingApprovalIds.has(approvalId)) {
+    return;
+  }
+
+  state.decidingApprovalIds.add(approvalId);
+  renderCurrentSession();
+  setComposerState();
+  clearFlash();
+
+  try {
+    await api(`/api/v1/sessions/${sessionId}/approvals/${approvalId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    });
+    if (state.currentSessionId === sessionId) {
+      await reconcileCurrentSession();
+    } else {
+      await fetchSessions();
+    }
+    showFlash(decision === "approved" ? "操作已批准，执行结果已更新。" : "操作已拒绝。");
+  } catch (error) {
+    showFlash(error.message || "审批处理失败", "error");
+    if (state.currentSessionId === sessionId) {
+      await reconcileCurrentSession().catch(() => {});
+    } else {
+      await fetchSessions().catch(() => {});
+    }
+  } finally {
+    state.decidingApprovalIds.delete(approvalId);
+    renderCurrentSession();
+    setComposerState();
+  }
+}
+
 async function sendMessage(event) {
   event.preventDefault();
 
@@ -893,6 +1277,14 @@ elements.deleteButton.addEventListener("click", async () => {
     return;
   }
   await handleDelete(state.currentSessionId);
+});
+
+elements.messages.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-approval-decision]");
+  if (!button) {
+    return;
+  }
+  await handleApprovalDecision(button.dataset.approvalId, button.dataset.approvalDecision);
 });
 
 elements.composer.addEventListener("submit", sendMessage);

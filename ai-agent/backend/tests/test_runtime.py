@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,9 +12,14 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dbass_ai_agent.agent.runtime import DeepAgentRuntime  # noqa: E402
+from dbass_ai_agent.agent.runtime import (  # noqa: E402
+    AgentApprovalRequest,
+    AgentRunOutput,
+    DeepAgentRuntime,
+)
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
-from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta  # noqa: E402
+from dbass_ai_agent.operations.models import OperationRecord, OperationResult, OperationTarget  # noqa: E402
+from dbass_ai_agent.sessions.models import ApprovalRecord, ChatMessage, SessionMeta  # noqa: E402
 
 
 class DeepAgentRuntimeDbaasTests(unittest.TestCase):
@@ -65,6 +71,48 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         self.assertEqual(events[-1].content, "已通过 DBAAS 工具完成查询")
         self.assertEqual(calls, [(session.thread_id, user_message.content)])
 
+    def test_resume_nested_approval_returns_operation_result_message(self) -> None:
+        runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
+        runtime.artifacts = SimpleNamespace(agent=FakeNestedApprovalAgent())
+
+        def normalize_run_output(_result):
+            return AgentRunOutput(
+                approval_request=AgentApprovalRequest(
+                    action_request={"name": "update_service_storage_tool", "args": {}},
+                    review_config={"allowed_decisions": ["approve", "reject"]},
+                    tool_call_id="call_nested",
+                )
+            )
+
+        runtime._normalize_run_output = normalize_run_output
+        operation = _operation_record()
+
+        reply = runtime.resume_approval(
+            identity=_identity(),
+            session=_session_meta(),
+            approval=_approval_record(),
+            decision="approved",
+            operation_service=FakeOperationService(operation),
+            task_service=object(),
+        )
+
+        self.assertEqual(reply.warning, "approval_nested_interrupt")
+        self.assertIn("已更新 mysql-xf2/mysql 的资源规格。", reply.content)
+        self.assertIn("后续还有新的写操作需要单独确认", reply.content)
+
+
+class FakeNestedApprovalAgent:
+    def invoke(self, payload, *, config):
+        return {"payload": payload, "config": config}
+
+
+class FakeOperationService:
+    def __init__(self, operation: OperationRecord) -> None:
+        self.operation = operation
+
+    def find_by_approval(self, session: SessionMeta, approval_id: str) -> OperationRecord:
+        return self.operation
+
 
 def _session_meta() -> SessionMeta:
     now = datetime.now(UTC)
@@ -90,6 +138,55 @@ def _user_message(content: str) -> ChatMessage:
 
 def _identity() -> Identity:
     return Identity(user_id="admin", role="admin", user=None)
+
+
+def _approval_record() -> ApprovalRecord:
+    now = datetime.now(UTC)
+    return ApprovalRecord(
+        approval_id="appr_test",
+        status="approved",
+        action="service.resource.update",
+        session_id="sess_test",
+        thread_id="thread_test",
+        run_id="run_approval",
+        request_message_id="msg_request",
+        created_at=now,
+        decided_at=now,
+        decided_by="admin",
+    )
+
+
+def _operation_record() -> OperationRecord:
+    now = datetime.now(UTC)
+    target = OperationTarget(
+        kind="service",
+        id="mysql-xf2",
+        name="mysql-xf2",
+        qualifiers={"child_service_type": "mysql"},
+    )
+    return OperationRecord(
+        operation_id="op_test",
+        approval_id="appr_test",
+        session_id="sess_test",
+        thread_id="thread_test",
+        run_id="run_operation",
+        tool_call_id="call_test",
+        action="service.resource.update",
+        execution_mode="sync",
+        status="succeeded",
+        result=OperationResult(
+            operation_id="op_test",
+            approval_id="appr_test",
+            action="service.resource.update",
+            targets=[target],
+            execution_mode="sync",
+            status="succeeded",
+            summary="已更新 mysql-xf2/mysql 的资源规格。",
+        ),
+        created_at=now,
+        started_at=now,
+        completed_at=now,
+    )
 
 
 if __name__ == "__main__":
