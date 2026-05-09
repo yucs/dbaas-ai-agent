@@ -608,12 +608,27 @@ Command(
         "decisions": [
             {
                 "type": "reject",
-                "message": "用户拒绝执行该操作。"
+                "message": "用户在审批卡中拒绝该操作；该操作未执行 DBAAS 变更。不要描述为系统拒绝。"
             }
         ]
     }
 )
 ```
+
+用户主动点击拒绝时，后端仍应使用 `Command(resume=...)` 恢复同一个
+DeepAgent thread，保证 checkpoint 和后续上下文一致。
+
+但写入 Session、返回给前端展示的 assistant 消息不应采用模型自由生成文案，
+而应使用固定文案：
+
+```text
+用户已拒绝该操作，未执行 DBAAS 变更。
+```
+
+这样可以避免模型把用户审批拒绝误写成“系统拒绝”“后台拒绝”或“权限拒绝”。
+该固定文案规则只适用于用户主动拒绝审批。
+审批超时自动取消仍使用超时取消文案；
+批准后的成功、失败、超时或异步任务创建结果仍以 `OperationResult` 为准。
 
 ### 5.5 审批超时
 
@@ -702,6 +717,8 @@ TTL 第一版建议：
 - 关键参数
 - 风险等级
 - 风险说明
+- 申请时间，即 `ApprovalRecord.created_at`
+- 处理时间，即 `ApprovalRecord.decided_at` 或 `expired_at`，待确认时显示为空或 `-`
 - 过期时间或倒计时
 - 批准按钮
 - 拒绝按钮
@@ -1558,7 +1575,7 @@ expired
 含义：
 
 - `approval`：审批最新状态
-- `assistant_message`：resume 后生成并写入 `messages.json` 的助手消息；如果拒绝后没有助手消息，可为 `null`
+- `assistant_message`：resume 后写入 `messages.json` 的助手消息；用户主动拒绝审批时使用固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`
 - `operation`：本次审批触发的最新 operation；拒绝或超时时可为 `null`
 - `task`：异步任务创建成功时返回当前 task latest view；同步操作或拒绝时为 `null`
 - `next_approval`：本次 resume 继续执行后，如果再次命中写 tool interrupt，则返回新创建的待确认审批；否则为 `null`
@@ -1682,14 +1699,25 @@ operations.json  -> 已执行或尝试执行的操作结果
 页面时间线由前端或后端按需动态 merge。
 `tasks` 不直接放在 Session detail 中，统一通过任务接口获取。
 
-确认卡锚点规则：
+时间线排序规则：
 
-- 主锚点：`request_message_id`
-- 辅助分组：`run_id`
-- 兜底排序：`created_at`
+- `messages` 使用 `message.created_at`
+- `approvals` 使用 `approval.created_at`
+- `operations` 优先使用 `completed_at`，其次 `started_at`，最后 `created_at`
+- 相同时间下建议按 `message -> approval -> operation` 的优先级展示
 
-前端优先把 approval card 插到 `message_id == request_message_id` 的用户消息后面。
-如果找不到该消息，再按 `created_at` 插入时间线对应位置或放到末尾。
+`request_message_id` 和 `run_id` 是关联字段，用于把确认卡和触发它的用户消息、
+同一轮 DeepAgent run 关联起来。
+第一版页面可以直接按上述时间字段升序 merge。
+如果后续需要更强的视觉分组，可以在不改变事实源的前提下，
+把 approval card 贴近 `message_id == request_message_id` 的用户消息展示。
+
+审批卡时间展示规则：
+
+- 展示 `申请时间`：`approval.created_at`
+- 展示 `处理时间`：`approval.decided_at || approval.expired_at`
+- 展示 `过期时间`：`approval.expires_at`
+- `pending` 状态下处理时间显示为空或 `-`
 
 刷新恢复规则：
 
@@ -2207,6 +2235,7 @@ GET /api/v1/sessions/{session_id}/tasks
 - API/ApprovalRecord 使用 `approved/rejected`，DeepAgent resume 使用 `approve/reject`
 - 用户请求扩容时，前端收到审批请求
 - 用户拒绝时，不调用 DBAAS 写接口
+- 用户主动拒绝审批时，Session 展示固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`，不展示模型自由生成的“系统拒绝”类文案
 - 用户批准时，工具执行且返回结果
 - 同一恢复链路内再次触发写 tool 时，返回新的 `next_approval`，不返回 `502`
 - 连续写操作必须逐个审批，不允许一次批准自动放行后续写 tool
@@ -2239,6 +2268,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - approval 超时清理暂停点后，Session 可以继续使用
 - 刷新页面后能根据 `request_message_id` 恢复 pending approval 确认卡
 - 确认卡的确认/拒绝按钮按 `session_id + approval_id` 提交
+- 审批卡展示申请时间、处理时间和过期时间
+- 会话页面按消息、审批卡和操作结果的时间顺序展示，不把所有审批卡统一追加到消息末尾
 - 审批卡能在已知当前值时展示类似 `8GB -> 15GB` 的变化，不编造未知当前值
 - 第一批不要求实现 task SSE、任务下拉框或完整任务面板
 
