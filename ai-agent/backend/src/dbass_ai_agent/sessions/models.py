@@ -66,6 +66,7 @@ class ApprovalRecord(BaseModel):
     resume_failed: bool = False
     resume_error: str | None = None
     resume_last_attempt_at: datetime | None = None
+    task_creation_notice_emitted: bool = False
 
 
 class SessionDetail(BaseModel):

@@ -34,6 +34,7 @@ class ApprovalInterrupt:
 class ApprovalDecisionResult:
     approval: ApprovalRecord
     assistant_message: ChatMessage | None
+    system_message: ChatMessage | None
     operations: list[OperationRecord]
     tasks: list[TaskRecord]
     reply: AgentReply | None
@@ -156,9 +157,17 @@ class ApprovalService:
                         operation_service=operation_service,
                         task_service=task_service,
                     )
+                result_approval, system_message = self._emit_task_creation_notice_if_needed(
+                    identity,
+                    session,
+                    approval,
+                    decision=decision,
+                    tasks=tasks,
+                )
                 return ApprovalDecisionResult(
-                    approval=approval,
+                    approval=result_approval,
                     assistant_message=None,
+                    system_message=system_message,
                     operations=operations,
                     tasks=tasks,
                     reply=None,
@@ -349,6 +358,13 @@ class ApprovalService:
             )
         operations = operation_service.find_all_by_approval(session, approval.approval_id)
         tasks = self._find_tasks_for_operations(session, task_service, operations)
+        result_approval, system_message = self._emit_task_creation_notice_if_needed(
+            identity,
+            session,
+            cleared,
+            decision=decision,
+            tasks=tasks,
+        )
         next_approval = None
         if reply.approval_request is not None:
             next_approval = self.create_approval(
@@ -359,8 +375,9 @@ class ApprovalService:
                 interrupt=approval_interrupt_from_runtime(reply.approval_request),
             )
         return ApprovalDecisionResult(
-            approval=cleared,
+            approval=result_approval,
             assistant_message=assistant_message,
+            system_message=system_message,
             operations=operations,
             tasks=tasks,
             reply=reply,
@@ -377,6 +394,27 @@ class ApprovalService:
         )
         self.repository.append_approval(session.user_id, session.session_id, expired)
         return expired
+
+    def _emit_task_creation_notice_if_needed(
+        self,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        *,
+        decision: ApiDecision,
+        tasks: list[TaskRecord],
+    ) -> tuple[ApprovalRecord, ChatMessage | None]:
+        if decision != "approved" or not tasks or approval.task_creation_notice_emitted:
+            return approval, None
+
+        system_message = self.session_service.append_system_message(
+            identity,
+            session.session_id,
+            _build_task_creation_notice(tasks),
+        )
+        marked = approval.model_copy(update={"task_creation_notice_emitted": True})
+        self.repository.append_approval(session.user_id, session.session_id, marked)
+        return marked, system_message
 
     def _find_approval(self, session: SessionMeta, approval_id: str) -> ApprovalRecord:
         for approval in self.repository.load_approvals(session.user_id, session.session_id):
@@ -465,3 +503,17 @@ def _decision_assistant_content(
     if decision == "rejected" and reject_message is None:
         return USER_REJECTED_APPROVAL_MESSAGE
     return content.strip()
+
+
+def _build_task_creation_notice(tasks: list[TaskRecord]) -> str:
+    sorted_tasks = sorted(tasks, key=lambda task: task.created_at)
+    if len(sorted_tasks) == 1:
+        task = sorted_tasks[0]
+        return (
+            f"本次审批确认已创建异步任务 {task.task_id}，"
+            "系统会在任务结束后继续提醒最终执行结果。"
+        )
+    return (
+        f"本次审批确认已创建 {len(sorted_tasks)} 个异步任务，"
+        "系统会在任务结束后继续提醒最终执行结果。"
+    )

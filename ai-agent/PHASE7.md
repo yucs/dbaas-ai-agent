@@ -649,7 +649,8 @@ approve 当前 approval -> resume 后再次触发新 interrupt -> 创建 next_ap
   "expired_at": null,
   "resume_failed": false,
   "resume_error": null,
-  "resume_last_attempt_at": null
+  "resume_last_attempt_at": null,
+  "task_creation_notice_emitted": false
 }
 ```
 
@@ -965,6 +966,9 @@ approval decision 恢复执行时也需要占用同一个 Session 的 `session_r
 
 异步 DBAAS task 不需要持有 `session_run_lock`。
 task 创建成功后，即使 DBAAS 任务仍在运行，也不阻止用户在同一 Session 继续发起其他无冲突请求。
+task 刷新本身不推进 DeepAgent thread，不需要占用 DeepAgent run/resume 锁；
+创建成功提醒和终态提醒写入时可以使用短互斥和本地去重字段保护，
+这不表示 DBAAS task 执行期间占用会话运行锁。
 
 部署假设：
 
@@ -1267,9 +1271,10 @@ DBAAS 的 `task_id` 可以是全局唯一标识，
 task_refresh_interval_seconds = 10 或 30
 ```
 
-SSE 订阅期间的 refresh loop 可以使用单进程内 asyncio task。
-每个 Session 同一时间最多启动一个 refresh loop，
-避免同一个页面多次订阅或多标签页导致重复刷新。
+第一版不要求实现全局 task watcher 或跨连接的单例 refresh loop。
+如果同一 Session 存在多个 SSE 连接，各连接可以各自做轻量 refresh；
+重复写提醒依赖 `task_creation_notice_emitted` / `terminal_notice_emitted`
+等本地状态字段去重。
 
 DBAAS 查询失败时：
 
@@ -1277,6 +1282,26 @@ DBAAS 查询失败时：
 - 标记 `refresh_failed`
 - 记录 `last_error`
 - 下次 lazy refresh 或 SSE refresh loop 继续刷新
+
+异步任务提醒分为两类，且都以 approval 为主维度：
+
+- 创建成功提醒：审批通过并创建异步 task 后，后端按 `approval_id`
+  写入一条 `system` 消息；
+  单任务示例：`本次审批确认已创建异步任务 task-0001，系统会在任务结束后继续提醒最终执行结果。`
+  批量示例：`本次审批确认已创建 2 个异步任务，系统会在任务结束后继续提醒最终执行结果。`
+- 终态结果提醒：同一个 approval 下所有异步 task 都进入终态后，
+  后端再按该 `approval_id` 写入一条 `system` 消息，总结成功、失败、取消数量。
+
+创建成功提醒边界：
+
+- 提醒文案由后端代码生成，不调用 DeepAgent
+- 提醒写入 `messages.json`，role 使用 `system`
+- `ApprovalRecord.task_creation_notice_emitted` 用于去重；
+  同一 approval 重复提交相同 decision 或页面刷新时不重复写入
+- 审批 decision 响应可以返回 `system_message`，前端收到后可直接插入会话时间线
+- 该提醒不替代 task card，也不替代后续终态结果提醒
+- 异步任务提醒和当前 Session 范围由后端代码保证；
+  系统提示词不再维护异步任务专用规则，避免职责重复
 
 任务刷新以更新任务状态为主。
 当当前 Session 的任务 SSE 观察到异步任务从非终态进入终态时，
@@ -1363,6 +1388,34 @@ data: {
 - 不替代 `tasks.json`
 - SSE 断线或页面刷新后，通过 `GET /sessions/{session_id}/tasks` 补齐状态
 
+审批 decision 响应中的创建成功系统提醒示例：
+
+```json
+{
+  "approval": {
+    "approval_id": "appr_xxx",
+    "status": "approved",
+    "task_creation_notice_emitted": true
+  },
+  "system_message": {
+    "message_id": "msg_xxx",
+    "role": "system",
+    "content": "本次审批确认已创建 2 个异步任务，系统会在任务结束后继续提醒最终执行结果。",
+    "created_at": "2026-05-06T10:01:00Z"
+  },
+  "tasks": [
+    {
+      "task_id": "task-0001",
+      "status": "running"
+    },
+    {
+      "task_id": "task-0002",
+      "status": "running"
+    }
+  ]
+}
+```
+
 系统终态提醒去重：
 
 - `tasks.json` 中每个 task 记录 `terminal_notice_emitted`
@@ -1398,29 +1451,25 @@ task_b -> failed
 系统提醒文案示例：
 
 ```text
-本次审批确认关联的异步任务已结束：task_a 已成功。
+本次审批确认关联的异步任务 task_a 已成功。
 
-本次审批确认关联的 2 个异步任务已全部结束：1 个成功，1 个失败。
-如需进一步分析失败原因或处理建议，可以继续在本会话中提问。
+本次审批确认关联的异步任务已全部结束：1 个成功，1 个失败。如需进一步分析失败原因或处理建议，可以继续在本会话中提问。
 ```
 
 系统提醒文案规则：
 
-- 全部成功：只说明本次审批确认关联的异步任务已全部成功，不额外引导用户继续提问
+- 全部成功：只说明本次审批确认关联的异步任务已结束以及成功数量，不额外引导用户继续提问
 - 存在 `failed` 或 `canceled`：说明成功、失败、取消数量，并追加：
   `如需进一步分析失败原因或处理建议，可以继续在本会话中提问。`
 - 存在 `refresh_failed` 时不写终态提醒，因为 `refresh_failed` 不是任务终态；
   任务面板展示刷新失败，并等待后续 lazy refresh 或 SSE refresh
 - 系统提醒不主动触发 AI 分析，只给用户一个可选入口
 
-异步任务创建后的 AI 回复规则：
+异步任务创建后的提醒职责：
 
-- 当写工具返回 `OperationResult.status=task_created` 或 task_id 后，
-  AI 只说明任务已创建、task_id、当前状态，以及系统会在任务结束后提醒用户
-- AI 不要主动询问“是否需要继续查询任务状态”“是否需要跟踪任务”
-  或“是否需要分析结果和建议”
-- 用户如果需要中途查询进度、结束后分析失败原因或获取处理建议，
-  会主动在当前 Session 中继续提问
+- 创建成功提醒由审批 decision 后端逻辑写入 `system_message`
+- 终态结果提醒由任务 SSE 后端逻辑写入 `system_message`
+- 系统提示词不再维护异步任务专用回复规则
 
 前端打开或刷新 Session 页面时：
 
@@ -1583,9 +1632,11 @@ append 约束：
 
 - 只有对象可见状态或可见内容变化时才 append
 - 状态未变化且展示内容未变化时，不追加新行
-- `approvals.json` 的状态、决策人、决策时间、过期时间、resume 错误等变化需要 append
+- `approvals.json` 的状态、决策人、决策时间、过期时间、resume 错误、
+  `task_creation_notice_emitted` 等变化需要 append
 - `operations.json` 的状态、result、错误、开始/完成时间等变化需要 append
-- `tasks.json` 只有 `status`、`source_status`、`message`、`reason`、`result`、`last_error` 等可见字段变化时才 append
+- `tasks.json` 只有 `status`、`source_status`、`message`、`reason`、`result`、
+  `last_error`、`terminal_notice_emitted` 等可见字段变化时才 append
 - `last_checked_at` 单独变化不触发 append，避免轮询刷新导致文件快速膨胀
 - 如果 DBAAS 查询失败但 `last_error` 内容没有变化，也不重复 append
 
@@ -1724,6 +1775,7 @@ DBAAS 是任务状态事实源，本地记录保存 last known status。
   "reason": null,
   "result": null,
   "last_error": null,
+  "terminal_notice_emitted": false,
   "created_at": "2026-05-06T10:01:00Z",
   "updated_at": "2026-05-06T10:01:00Z",
   "last_checked_at": "2026-05-06T10:01:00Z"
@@ -1898,6 +1950,7 @@ expired
 {
   "approval": {},
   "assistant_message": {},
+  "system_message": null,
   "operations": [],
   "tasks": [],
   "next_approval": null,
@@ -1909,6 +1962,8 @@ expired
 
 - `approval`：审批最新状态
 - `assistant_message`：resume 后写入 `messages.json` 的助手消息；用户主动拒绝审批时使用固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`
+- `system_message`：本次 approval 创建异步 task 时由后端写入的创建成功系统提醒；
+  非异步 task 场景、重复提交相同 decision 或未创建新提醒时为 `null`
 - `operations`：本次 approval resume 触发的所有 operation；单操作时返回一项
 - `tasks`：本次 approval resume 创建或关联的所有 task；同步操作或拒绝时为空数组
 - `next_approval`：本次 resume 继续执行后，如果再次命中写 tool interrupt，则返回新创建的待确认审批；否则为 `null`
@@ -1919,6 +1974,8 @@ expired
 - 单操作场景也通过 `operations[]` / `tasks[]` 返回，数组长度通常为 1 或 0
 - 批量场景同样通过 `operations[]` / `tasks[]` 返回，数组长度可以大于 1
 - 不再返回单数字段 `operation` / `task`，避免前端维护两套读取逻辑
+- 异步 task 创建成功时可以返回 `system_message`，用于前端直接插入会话时间线；
+  `ApprovalRecord.task_creation_notice_emitted=true` 后重复请求不再重复写入或返回
 
 真实大模型联调发现，`Command(resume=approve)` 后模型有概率在自然语言总结里继续使用
 “等待人工审批”“审批通过后执行”这类话术，即使接口数据已经是
@@ -1928,17 +1985,18 @@ expired
 不一定稳定区分“写工具执行前的确认卡”和“审批恢复后已经返回的
 `OperationResult`”。
 
-本阶段先通过系统提示词约束该类表达：
+本阶段通过通用写工具结果表达规则约束该类表达，
+但异步任务创建成功提醒和终态结果提醒不依赖系统提示词，
+由后端确定性写入 `system_message`：
 
 - 收到写工具返回的 `OperationResult` 后，必须认为当前 tool 已经过人工批准并恢复执行
 - `status=succeeded` 表示同步写操作已完成，不得再说等待审批
 - `status=task_created` 表示异步任务已创建并开始追踪，不得再说等待审批
 - 只有再次触发新的 `next_approval` / pending approval 时，才可以说后续操作等待确认
 
-P7A 先不做后端固定成功文案兜底。
 除用户主动拒绝审批使用固定文案外，批准后的助手消息仍由模型基于
 `OperationResult` 生成；前端展示的权威执行状态以 `operations[]` 和 `tasks[]`
-为准。
+为准，异步任务提醒以 `system_message` 为准。
 
 审批恢复后的再次 interrupt 语义：
 
@@ -2468,7 +2526,7 @@ POST /services/{name}/image-upgrade
 
 用途：
 
-- 查询异步任务状态
+- 查询当前 Session 已记录的单个异步任务状态
 
 参数：
 
@@ -2492,6 +2550,41 @@ GET /tasks/{task_id}
 - reason
 - result
 - 是否已更新本地 `tasks.json`
+
+范围约束：
+
+- 只遍历当前 Session 的 `tasks.json`
+- 即使 DBAAS `task_id` 是全局唯一，也不能查询其他 Session 的 task
+- 找不到时返回 `task_not_in_current_session`
+
+### 11.4.1 list_current_session_tasks_tool
+
+用途：
+
+- 列出当前 Session 已记录的 DBAAS 异步任务
+- 支持用户询问“当前会话有哪些任务”“刚才的任务怎么样了”等自然语言场景
+
+参数：
+
+```json
+{
+  "status": "running"
+}
+```
+
+`status` 可选；不传时返回当前 Session 的全部 latest tasks。
+
+返回：
+
+- 当前 Session ID
+- task 数量
+- task latest view 列表
+
+范围约束：
+
+- 只读取并 lazy refresh 当前 Session 的任务
+- 不提供用户级任务列表或跨 Session 任务中心
+- 不能通过该工具看到其他 Session 创建的任务
 
 ### 11.5 change_service_lifecycle_tool
 
@@ -2571,21 +2664,26 @@ critical
 - 生产环境停止操作要求二次确认
 - 大规格缩容要求先查询监控和健康状态
 
-## 13. Prompt 约束
+## 13. Prompt 与后端职责
 
-系统提示词需要补充第七阶段操作规则：
+系统提示词只保留通用操作规则：
 
 - 操作类请求必须先确认目标服务、子服务类型和变更参数
 - 不得编造操作结果
 - 不得绕过 DBAAS 写工具执行变更
 - 写操作必须等待系统人工确认流程
 - 同步操作完成后说明关键 `changes[]`
-- 异步操作创建后说明 task_id 和当前状态，不承诺最终成功
-- 查询任务状态必须调用任务查询工具
 - 高风险操作必须明确影响范围和风险点
 - 审批恢复后，如果写工具返回 `OperationResult.status=succeeded`，必须说明操作已执行成功，不得再说等待人工审批
 - 审批恢复后，如果写工具返回 `OperationResult.status=task_created`，必须说明异步任务已创建并开始追踪，不得再说审批通过后才执行
 - 只有当前响应确实产生新的 pending approval 时，才可以说后续操作等待确认
+
+异步任务专用提醒不放在系统提示词中维护：
+
+- task 创建成功提醒由审批 decision 后端逻辑写入 `system_message`
+- task 终态结果提醒由当前 Session task SSE 后端逻辑写入 `system_message`
+- 当前 Session 任务范围由 `get_dbaas_task_tool` / `list_current_session_tasks_tool`
+  的代码实现保证
 
 需要避免在 prompt 中硬塞完整接口 schema。
 工具描述和结构化返回应承担主要约束。
@@ -2745,6 +2843,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - 当前 Session 打开时，可通过任务 SSE 收到 `task_status_changed`
 - 收到 `task_status_changed` 后，前端更新 task card，并在任务终态时刷新当前 Session
 - `task_status_changed` 不通过 `/messages/stream` 推送
+- 审批通过并创建异步 task 后，后端按 `approval_id` 写入一次创建成功系统提醒，
+  并通过 `ApprovalRecord.task_creation_notice_emitted` 去重
 - 页面刷新后，`GET /sessions/{session_id}/tasks` 能恢复非终态任务提醒或 task card
 - 页面刷新后，任务下拉框或任务面板能恢复当前 Session 的任务列表和最新状态
 - 页面刷新后，前端重新订阅当前 Session 的 task SSE
@@ -2767,9 +2867,10 @@ GET /api/v1/sessions/{session_id}/tasks
 2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.json`
 3. 实现 `GET /api/v1/sessions/{session_id}/tasks/events`，推送 `task_status_changed`
 4. 前端会话页增加当前 Session 任务下拉框或任务面板
-5. 实现 approval 维度的系统终态提醒和 `task_terminal_notice_emitted` 事件
-6. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
-7. 补归档/删除保护、刷新失败语义和回归测试
+5. 实现 approval 维度的异步 task 创建成功系统提醒和 `task_creation_notice_emitted` 去重
+6. 实现 approval 维度的系统终态提醒和 `task_terminal_notice_emitted` 事件
+7. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
+8. 补归档/删除保护、刷新失败语义和回归测试
 
 ### 15.3 P7C：生命周期操作与高风险策略
 
@@ -2877,6 +2978,7 @@ Agent 提出操作
 -> DBAAS 写工具执行
 -> OperationResult 屏蔽同步/异步差异
 -> Session 记录操作和任务事实
+-> 后端 system message 提醒异步 task 创建和终态结果
 ```
 
 这样可以在不重复自造运行时的前提下，

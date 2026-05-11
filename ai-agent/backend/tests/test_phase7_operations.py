@@ -227,6 +227,77 @@ class BatchResumeRuntime:
         )
 
 
+class AsyncTaskResumeRuntime:
+    def resume_approval(
+        self,
+        *,
+        identity,
+        session,
+        approval,
+        decision,
+        operation_service,
+        task_service,
+        reject_message=None,
+    ):
+        created_task_ids: list[str] = []
+        for index, tool_call in enumerate(approval.interrupted_tool_calls, start=1):
+            args = tool_call.tool_args
+            child_service_type = args.get("child_service_type", "mysql")
+            target = OperationTarget(
+                kind="service",
+                id=args.get("service_name", "mysql-xf2"),
+                name=args.get("service_name", "mysql-xf2"),
+                qualifiers={"child_service_type": child_service_type},
+            )
+            operation = operation_service.start_operation(
+                session,
+                approval=approval,
+                run_id="run_phase7_async_resume",
+                action="service.image.upgrade",
+                execution_mode="async",
+                tool_name=tool_call.tool_name,
+                tool_args=args,
+                targets=[target],
+            )
+            task_id = f"task-async-{index:03d}"
+            task = task_service.create_task_record(
+                session,
+                task_id=task_id,
+                operation_id=operation.operation_id,
+                action="service.image.upgrade",
+                targets=[target],
+                dbaas_type="service.image.upgrade",
+                source_status="RUNNING",
+                message="image upgrade task created",
+            )
+            operation_service.complete_operation(
+                session,
+                operation,
+                status="task_created",
+                result=OperationResult(
+                    operation_id=operation.operation_id,
+                    approval_id=operation.approval_id,
+                    action=operation.action,
+                    targets=[target],
+                    execution_mode="async",
+                    status="task_created",
+                    summary=f"已创建 {target.id}/{child_service_type} 镜像升级任务 {task_id}。",
+                    task=OperationTaskRef(
+                        task_id=task.task_id,
+                        type=task.dbaas_type,
+                        status=task.status,
+                    ),
+                    details={"task": task.model_dump(mode="json")},
+                ),
+            )
+            created_task_ids.append(task_id)
+        return AgentReply(
+            run_id="run_phase7_async_resume",
+            content=f"已创建异步任务：{', '.join(created_task_ids)}。需要查询执行结果吗？",
+            mode="deepagent",
+        )
+
+
 class Phase7ApprovalApiTests(unittest.TestCase):
     def test_send_message_creates_pending_approval_and_blocks_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -490,6 +561,77 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                 {"call_phase7_batch_001", "call_phase7_batch_002"},
             )
             self.assertEqual(payload["tasks"], [])
+
+    def test_async_approval_decision_emits_task_creation_system_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 async notice")
+            approval = _create_async_approval(identity, detail, service, count=1)
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: AsyncTaskResumeRuntime()
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["approval"]["status"], "approved")
+            self.assertTrue(payload["approval"]["task_creation_notice_emitted"])
+            self.assertEqual(payload["system_message"]["role"], "system")
+            self.assertEqual(
+                payload["system_message"]["content"],
+                "本次审批确认已创建异步任务 task-async-001，系统会在任务结束后继续提醒最终执行结果。",
+            )
+            self.assertEqual(len(payload["tasks"]), 1)
+            self.assertEqual(payload["tasks"][0]["status"], "running")
+            messages = service.get_session(identity, detail.meta.session_id).messages
+            self.assertEqual([message.role for message in messages], ["assistant", "system"])
+            self.assertEqual(messages[-1].content, payload["system_message"]["content"])
+
+    def test_batch_async_approval_emits_one_creation_notice_and_dedupes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 batch async notice")
+            approval = _create_async_approval(identity, detail, service, count=2)
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: AsyncTaskResumeRuntime()
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+                repeated = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(len(payload["tasks"]), 2)
+            self.assertEqual(payload["system_message"]["role"], "system")
+            self.assertEqual(
+                payload["system_message"]["content"],
+                "本次审批确认已创建 2 个异步任务，系统会在任务结束后继续提醒最终执行结果。",
+            )
+            self.assertEqual(repeated.status_code, 200)
+            self.assertIsNone(repeated.json()["system_message"])
+            messages = service.get_session(identity, detail.meta.session_id).messages
+            self.assertEqual(
+                [message.content for message in messages if message.role == "system"],
+                ["本次审批确认已创建 2 个异步任务，系统会在任务结束后继续提醒最终执行结果。"],
+            )
 
 
 class TaskLazyRefreshTests(unittest.TestCase):
@@ -891,6 +1033,44 @@ def _running_task(session_id: str) -> TaskRecord:
         created_at=now,
         updated_at=now,
         last_checked_at=now,
+    )
+
+
+def _create_async_approval(identity: Identity, detail, service: SessionService, *, count: int):
+    child_service_types = ["mysql", "proxy", "keeper", "clickhouse"]
+    action_requests = []
+    review_configs = []
+    tool_call_ids = []
+    for index in range(count):
+        child_service_type = child_service_types[index]
+        action_requests.append(
+            {
+                "name": "create_service_image_upgrade_task_tool",
+                "args": {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": child_service_type,
+                    "image_type": child_service_type,
+                    "image_tag": "8.0.38",
+                },
+            }
+        )
+        review_configs.append(
+            {
+                "action_name": "create_service_image_upgrade_task_tool",
+                "allowed_decisions": ["approve", "reject"],
+            }
+        )
+        tool_call_ids.append(f"call_phase7_async_{index + 1:03d}")
+    return ApprovalService(service.repository, service).create_approval(
+        identity,
+        detail.meta,
+        run_id="run_phase7_async_approval",
+        request_message_id="msg_request",
+        interrupt=ApprovalInterrupt(
+            action_requests=action_requests,
+            review_configs=review_configs,
+            tool_call_ids=tool_call_ids,
+        ),
     )
 
 

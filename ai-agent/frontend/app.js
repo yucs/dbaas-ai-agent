@@ -1541,6 +1541,9 @@ async function handleApprovalDecision(approvalId, decision) {
       method: "POST",
       body: JSON.stringify({ decision }),
     });
+    if (state.currentSessionId === sessionId && payload.system_message) {
+      applyStreamSystemMessage(payload.system_message, sessionId);
+    }
     if (state.currentSessionId === sessionId) {
       await reconcileCurrentSession();
     } else {
