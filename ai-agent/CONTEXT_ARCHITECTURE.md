@@ -44,7 +44,7 @@ User
   -> SummarizationMiddleware（必要时压缩）
   -> SSE compression_started/compression_completed/token/done events
   -> SessionService.append_assistant_message(...)
-  -> messages.json
+  -> messages.jsonl
 ```
 
 相关代码：
@@ -158,7 +158,7 @@ DeepAgents 自己会在 `create_deep_agent()` 内部创建 `SummarizationMiddlew
 
 压缩发生后：
 
-- `messages.json` 不会被改写
+- `messages.jsonl` 不会被改写
 - 页面历史消息不会消失
 - `meta.json` 不会新增摘要字段
 - `session_id` 不会变化
@@ -168,8 +168,8 @@ Session 目录当前仍然只保留：
 
 - `index.json`
 - `meta.json`
-- `messages.json`
-- `approvals.json`
+- `messages.jsonl`
+- `approvals.jsonl`
 
 所以压缩影响的是模型上下文，不是产品层记录。
 
@@ -207,7 +207,7 @@ data: {"run_id":"...","mode":"deepagent","message":"上下文已自动压缩，�
 
 这些事件只用于页面提示：
 
-- 不写入 `messages.json`
+- 不写入 `messages.jsonl`
 - 不展示摘要正文
 - 不作为 `session_events` 持久化
 - 不改变当前 `session_id` 或 `thread_id`

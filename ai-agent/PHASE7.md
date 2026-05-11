@@ -1070,7 +1070,7 @@ get_dbaas_task_tool 未配置，使用 dbaas_request_timeout_seconds
 
 超时后处理：
 
-1. 写入 `operations.json`
+1. 写入 `operations.jsonl`
 2. 设置 `result.error.error_type=dbaas_timeout`
 3. 设置 `result.details.reconcile_required=true`
 4. 提示用户当前状态未知
@@ -1086,7 +1086,7 @@ P7A 不做自动 reconcile。
 
 ### 6.2 ai-agent 重启恢复语义
 
-同步写工具真正调用 DBAAS 前，应先写入一条 `operations.json` 记录：
+同步写工具真正调用 DBAAS 前，应先写入一条 `operations.jsonl` 记录：
 
 ```json
 {
@@ -1150,7 +1150,7 @@ result.error.error_type = operation_interrupted
 5. 用户批准后执行写工具
 6. 写工具调用 DBAAS 创建任务
 7. DBAAS 返回 `taskId`
-8. 写工具保存当前 Session 的 `tasks.json` 记录
+8. 写工具保存当前 Session 的 `tasks.jsonl` 记录
 9. 返回 `execution_mode=async` 的 `OperationResult`
 10. Agent 告知用户任务已创建、task_id、当前状态和后续查询方式
 
@@ -1159,13 +1159,13 @@ result.error.error_type = operation_interrupted
 P7A 的异步边界只到“创建 task 成功并保存 task 引用”：
 
 ```text
-P7A 做：创建 task、写 tasks.json、返回 task_id
+P7A 做：创建 task、写 tasks.jsonl、返回 task_id
 P7B 做：GET /api/v1/sessions/{session_id}/tasks lazy refresh、task SSE、任务下拉框/任务面板
 ```
 
 如果 P7A 和 P7B 不连续上线，不建议单独开放会长期运行的异步写操作。
 原因是 P7A 如果只创建 task 而没有任何 task lazy refresh，
-`tasks.json` 中的任务可能长期停留在 `running`，从而持续阻止 Session 归档或删除。
+`tasks.jsonl` 中的任务可能长期停留在 `running`，从而持续阻止 Session 归档或删除。
 
 因此实现节奏建议：
 
@@ -1197,17 +1197,17 @@ operation_conflict_key =
 
 ai-agent 重启恢复语义：
 
-- 如果 `task_id` 已经返回并写入 `tasks.json`，重启后从 `tasks.json` 恢复任务引用，继续通过 `GET /tasks/{task_id}` 查询状态
+- 如果 `task_id` 已经返回并写入 `tasks.jsonl`，重启后从 `tasks.jsonl` 恢复任务引用，继续通过 `GET /tasks/{task_id}` 查询状态
 - 如果 ai-agent 在提交异步任务请求过程中重启，且本地尚未写入 `task_id`，则将 operation 标记为 `unknown/reconcile_required`
 - 对于本地没有 `task_id` 的 `unknown` operation，不自动重试创建任务请求，避免重复创建任务
 
 也就是说，`operation.status=task_created` 表示异步任务提交成功；
 任务本身是否完成，以 DBAAS `GET /tasks/{task_id}` 返回为准。
-本地 `tasks.json` 保存任务引用、上下文和 last known status，
+本地 `tasks.jsonl` 保存任务引用、上下文和 last known status，
 用于当前 Session 展示和 DBAAS 不可用时的兜底展示。
 
-异步任务创建成功后，`operations.json` 中对应 operation 先记录为 `task_created`。
-任务后续的观测状态写入 `tasks.json`，`tasks.json` 是任务状态的事实源。
+异步任务创建成功后，`operations.jsonl` 中对应 operation 先记录为 `task_created`。
+任务后续的观测状态写入 `tasks.jsonl`，`tasks.jsonl` 是任务状态的事实源。
 
 当 task 进入终态时，后端应把对应 `OperationRecord.status` 同步更新为最终状态：
 
@@ -1217,7 +1217,7 @@ task failed    -> operation failed
 task canceled  -> operation canceled
 ```
 
-这样可以让 `operations.json` 在任务完成后也具备最终结果视图。
+这样可以让 `operations.jsonl` 在任务完成后也具备最终结果视图。
 `refresh_failed` 只是刷新失败，不代表 DBAAS 任务失败；
 此时不应把 operation 改成 `failed`，只更新 task 的 `last_error` 和
 `last_checked_at`。
@@ -1245,14 +1245,14 @@ GET /api/v1/users/{user_id}/tasks
 ```
 
 DBAAS 的 `task_id` 可以是全局唯一标识，
-但 ai-agent 只通过当前 Session 下的 `tasks.json` 记录该任务和会话的关系。
+但 ai-agent 只通过当前 Session 下的 `tasks.jsonl` 记录该任务和会话的关系。
 因此任务查询、任务刷新和任务 SSE 都必须带 `session_id`。
 
 刷新触发点：
 
 ```text
 1. 异步任务创建成功
-   -> 写当前 Session 的 tasks.json
+   -> 写当前 Session 的 tasks.jsonl
 
 2. 打开或刷新 Session 任务面板
    -> GET /api/v1/sessions/{session_id}/tasks
@@ -1295,7 +1295,7 @@ DBAAS 查询失败时：
 创建成功提醒边界：
 
 - 提醒文案由后端代码生成，不调用 DeepAgent
-- 提醒写入 `messages.json`，role 使用 `system`
+- 提醒写入 `messages.jsonl`，role 使用 `system`
 - `ApprovalRecord.task_creation_notice_emitted` 用于去重；
   同一 approval 重复提交相同 decision 或页面刷新时不重复写入
 - 审批 decision 响应可以返回 `system_message`，前端收到后可直接插入会话时间线
@@ -1317,7 +1317,7 @@ DBAAS 查询失败时：
 只有该组所有异步 task 都进入 `succeeded/failed/canceled` 后，
 后端才写入一条系统终态提醒：
 
-- 系统提醒写入 `messages.json`，role 使用 `system`
+- 系统提醒写入 `messages.jsonl`，role 使用 `system`
 - 提醒文案由代码根据 task latest view 生成，不调用 DeepAgent
 - 不写 `assistant` 消息，也不写 `ai-agent` 消息
 - 不调用任何 DBAAS 写工具，不创建审批卡
@@ -1383,9 +1383,9 @@ data: {
 - 只推当前 Session 的任务状态变化
 - 不跨 Session
 - 只在某个通知组全部异步 task 进入终态后写入一次系统终态提醒
-- 系统终态提醒写入 `messages.json`，role 为 `system`
+- 系统终态提醒写入 `messages.jsonl`，role 为 `system`
 - 不写入 `/messages/stream`
-- 不替代 `tasks.json`
+- 不替代 `tasks.jsonl`
 - SSE 断线或页面刷新后，通过 `GET /sessions/{session_id}/tasks` 补齐状态
 
 审批 decision 响应中的创建成功系统提醒示例：
@@ -1418,7 +1418,7 @@ data: {
 
 系统终态提醒去重：
 
-- `tasks.json` 中每个 task 记录 `terminal_notice_emitted`
+- `tasks.jsonl` 中每个 task 记录 `terminal_notice_emitted`
 - 该字段表示“该 task 已经被纳入某次通知组终态系统提醒”，
   不是表示单个 task 单独提醒过
 - 只有同一通知组内所有 task 都是 `terminal` 且仍存在 `terminal_notice_emitted=false`
@@ -1430,7 +1430,7 @@ data: {
 
 如果同一次 approval 同时产生同步 operation 和异步 task：
 
-- 同步 operation 仍按原有逻辑立即写入 `operations.json`
+- 同步 operation 仍按原有逻辑立即写入 `operations.jsonl`
 - 系统终态提醒等待该 approval 下所有异步 task 终态后触发
 - 系统提醒可以引用同 approval 下的同步 operation 结果摘要
 - 不因为同步 operation 已成功而提前写整组终态提醒
@@ -1509,7 +1509,7 @@ CANCELED -> canceled
 
 `task_created` 只作为 `OperationResult.status`，
 表示异步任务创建请求已经成功返回 `task_id`。
-它不作为 `tasks.json.status` 使用。
+它不作为 `tasks.jsonl.status` 使用。
 
 第一版 task 状态按是否终态分为两类。
 
@@ -1561,7 +1561,7 @@ approval -> operations[] -> tasks[] -> task_status_changed
 - 不需要处理“同步 HTTP 超时但 DBAAS 可能已执行”的不确定性
 - 批量审批后每个操作都只负责创建一个 DBAAS task
 - 前端统一展示任务提交、运行中、成功、失败
-- ai-agent 重启后只需要基于 `tasks.json` 恢复任务追踪
+- ai-agent 重启后只需要基于 `tasks.jsonl` 恢复任务追踪
 
 但当前阶段不在 ai-agent 侧把同步 DBAAS 接口包装成本地异步任务。
 否则 ai-agent 需要自建本地任务执行器、重启恢复和后台执行状态管理，
@@ -1596,8 +1596,8 @@ P7A 先依赖已有记录做本地重复执行保护。
 - `thread_id`
 - `run_id`
 - `interrupted_tool_calls[].tool_call_id`
-- `operations.json`
-- `tasks.json`
+- `operations.jsonl`
+- `tasks.jsonl`
 
 工具执行前先查本地操作记录：
 
@@ -1618,9 +1618,9 @@ P7A 先依赖已有记录做本地重复执行保护。
 第七阶段建议在 Session 目录下增加：
 
 ```text
-approvals.json
-operations.json
-tasks.json
+approvals.jsonl
+operations.jsonl
+tasks.jsonl
 ```
 
 P7A/P7B 统一使用 `.json` 文件名，不使用 `.jsonl` 文件名。
@@ -1632,10 +1632,10 @@ append 约束：
 
 - 只有对象可见状态或可见内容变化时才 append
 - 状态未变化且展示内容未变化时，不追加新行
-- `approvals.json` 的状态、决策人、决策时间、过期时间、resume 错误、
+- `approvals.jsonl` 的状态、决策人、决策时间、过期时间、resume 错误、
   `task_creation_notice_emitted` 等变化需要 append
-- `operations.json` 的状态、result、错误、开始/完成时间等变化需要 append
-- `tasks.json` 只有 `status`、`source_status`、`message`、`reason`、`result`、
+- `operations.jsonl` 的状态、result、错误、开始/完成时间等变化需要 append
+- `tasks.jsonl` 只有 `status`、`source_status`、`message`、`reason`、`result`、
   `last_error`、`terminal_notice_emitted` 等可见字段变化时才 append
 - `last_checked_at` 单独变化不触发 append，避免轮询刷新导致文件快速膨胀
 - 如果 DBAAS 查询失败但 `last_error` 内容没有变化，也不重复 append
@@ -1658,9 +1658,9 @@ append 约束：
 读取方式：
 
 ```text
-approvals.json  按 approval_id 折叠，返回最新状态
-operations.json 按 operation_id 折叠，返回最新状态
-tasks.json      按 task_id 折叠，返回最新状态
+approvals.jsonl  按 approval_id 折叠，返回最新状态
+operations.jsonl 按 operation_id 折叠，返回最新状态
+tasks.jsonl      按 task_id 折叠，返回最新状态
 ```
 
 如果同一个 id 有多行记录，后面的记录覆盖前面的记录。
@@ -1676,18 +1676,18 @@ tasks.json      按 task_id 折叠，返回最新状态
 
 锁粒度：
 
-- 同一个 Session 下 `approvals.json`、`operations.json`、`tasks.json` 共用一把 Session 级文件锁
+- 同一个 Session 下 `approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` 共用一把 Session 级文件锁
 - 锁只包住 append 写入
 - 不在锁内执行 DBAAS HTTP 请求
 - 不在锁内执行 DeepAgent 调用
 - 不在锁内等待 SSE 推送
 
-这种格式和当前 `messages.json`、`approvals.json` 的实现方式一致，
+这种格式和当前 `messages.jsonl`、`approvals.jsonl` 的实现方式一致，
 也便于后续迁移到数据库。
 
-### 9.2 operations.json
+### 9.2 operations.jsonl
 
-`operations.json` 保存写操作生命周期。
+`operations.jsonl` 保存写操作生命周期。
 为避免同一份数据在多个字段重复，P7A 只在顶层保存操作元信息和
 便于过滤的 `status`，完整执行结果放入 `result`。
 
@@ -1744,9 +1744,9 @@ tasks.json      按 task_id 折叠，返回最新状态
 ai-agent 重启后发现 `started` 且无终态的 operation 时，
 应标记为 `unknown`，并设置 `result.error.error_type=operation_interrupted`。
 
-### 9.3 tasks.json
+### 9.3 tasks.jsonl
 
-`tasks.json` 保存异步任务引用和最新观测状态。
+`tasks.jsonl` 保存异步任务引用和最新观测状态。
 DBAAS 是任务状态事实源，本地记录保存 last known status。
 
 建议字段：
@@ -1816,7 +1816,7 @@ DELETE /api/v1/sessions/{session_id}
 `restore` 不需要该限制。
 恢复 Session 只会让会话重新可见，不会丢失审批、任务或 DeepAgent thread 上下文。
 
-删除判断应以当前进程 `session_run_lock` 状态、Session 下的 `approvals.json` 和 `tasks.json` 为准。
+删除判断应以当前进程 `session_run_lock` 状态、Session 下的 `approvals.jsonl` 和 `tasks.jsonl` 为准。
 
 ## 10. SSE 与 API 设计
 
@@ -1961,7 +1961,7 @@ expired
 含义：
 
 - `approval`：审批最新状态
-- `assistant_message`：resume 后写入 `messages.json` 的助手消息；用户主动拒绝审批时使用固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`
+- `assistant_message`：resume 后写入 `messages.jsonl` 的助手消息；用户主动拒绝审批时使用固定文案 `用户已拒绝该操作，未执行 DBAAS 变更。`
 - `system_message`：本次 approval 创建异步 task 时由后端写入的创建成功系统提醒；
   非异步 task 场景、重复提交相同 decision 或未创建新提醒时为 `null`
 - `operations`：本次 approval resume 触发的所有 operation；单操作时返回一项
@@ -2004,7 +2004,7 @@ expired
 - 如果当前 approval 是批量审批，一次批准可以放行同一个 interrupt 内的多个 tool call
 - `Command(resume=...)` 恢复后，如果 AI 继续调用新的写 tool，DeepAgent 会再次 interrupt
 - 后端必须先保留当前 approval 的终态，例如 `approved` 或 `rejected`
-- 如果当前 approval 已触发 operation，则所有 operation 结果仍应写入 `operations.json`
+- 如果当前 approval 已触发 operation，则所有 operation 结果仍应写入 `operations.jsonl`
 - 如果恢复链路再次返回 approval request，后端创建新的 `pending approval`，并通过 `next_approval` 返回
 - 同一个 Session 同一时间仍只允许一个 `pending approval`
 - 该响应不应返回 `502`，也不应自动继续执行后续新 interrupt 的写 tool
@@ -2069,7 +2069,7 @@ partial_running 有任务仍在运行，同时已有失败/取消或部分完成
 异步操作优先以 `TaskRecord.status` 参与聚合；
 当 task 进入 `succeeded/failed/canceled` 终态时，
 后端应把对应 `OperationRecord.status` 同步更新为最终状态，
-方便后续只看 `operations.json` 也能知道最终结果。
+方便后续只看 `operations.jsonl` 也能知道最终结果。
 
 前端语义：
 
@@ -2143,7 +2143,7 @@ GET /api/v1/sessions/{session_id}/tasks
 
 ### 10.4 Session 时间线展示
 
-人工确认卡属于 Session 产品层状态，不应写入 `messages.json`。
+人工确认卡属于 Session 产品层状态，不应写入 `messages.jsonl`。
 
 Session 详情加载时，后端应返回：
 
@@ -2156,9 +2156,9 @@ operations
 前端基于这些结构构造时间线：
 
 ```text
-messages.json    -> 用户/助手自然语言消息
-approvals.json   -> 待确认/已确认/已拒绝/已过期的确认卡
-operations.json  -> 已执行或尝试执行的操作结果
+messages.jsonl    -> 用户/助手自然语言消息
+approvals.jsonl   -> 待确认/已确认/已拒绝/已过期的确认卡
+operations.jsonl  -> 已执行或尝试执行的操作结果
 ```
 
 第七阶段不持久化独立 timeline。
@@ -2207,7 +2207,7 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 任务提醒展示规则：
 
 - Session 中存在非终态任务时，页面应展示运行中任务提醒或 task card
-- 任务提醒从 `tasks.json` 派生，不写入 `messages.json`
+- 任务提醒从 `tasks.jsonl` 派生，不写入 `messages.jsonl`
 - 任务提醒不是 `system` role message，也不是 assistant message
 - 页面刷新后，任务提醒由 `GET /api/v1/sessions/{session_id}/tasks` 恢复
 - 当前页面收到 `task_status_changed` 后，局部更新对应 task card
@@ -2549,11 +2549,11 @@ GET /tasks/{task_id}
 - message
 - reason
 - result
-- 是否已更新本地 `tasks.json`
+- 是否已更新本地 `tasks.jsonl`
 
 范围约束：
 
-- 只遍历当前 Session 的 `tasks.json`
+- 只遍历当前 Session 的 `tasks.jsonl`
 - 即使 DBAAS `task_id` 是全局唯一，也不能查询其他 Session 的 task
 - 找不到时返回 `task_not_in_current_session`
 
@@ -2747,8 +2747,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - 接入 DeepAgent `interrupt_on`
 - 实现 approval 记录创建、查询和决策接口
 - 实现 `Command(resume=...)` 恢复执行
-- 实现基础 `operations.json`
-- 实现基于 `operations.json` / `tasks.json` 的本地重复执行保护
+- 实现基础 `operations.jsonl`
+- 实现基于 `operations.jsonl` / `tasks.jsonl` 的本地重复执行保护
 - 同一个 Session 同一时间只允许一个 `session_run_lock` 持有者
 - 同一个 Session 同一时间只允许一个 `pending approval`
 - Session 有 `pending approval` 时不允许继续发新消息
@@ -2781,14 +2781,14 @@ GET /api/v1/sessions/{session_id}/tasks
 - ai-agent 重启后，`started` operation 不会自动重放写接口
 - ai-agent 重启后，`started` operation 会标记为 `unknown/reconcile_required`
 - 异步升级能返回 task_id
-- 异步升级创建 task 后写入当前 Session 的 `tasks.json`
+- 异步升级创建 task 后写入当前 Session 的 `tasks.jsonl`
 - 批量异步操作创建多个 task 时，`tasks[]` 返回完整列表，并逐项展示任务状态
 - task 进入终态时，对应 operation 最终状态同步更新为 `succeeded/failed/canceled`
 - 第一批上线后，异步 task 可以通过 `GET /api/v1/sessions/{session_id}/tasks` lazy refresh 到最终状态
-- `tasks.json` 中保存稳定的 `operation_conflict_key`
-- 同一 Session 下 `approvals.json`、`operations.json`、`tasks.json` 共用一把 Session 级文件锁
+- `tasks.jsonl` 中保存稳定的 `operation_conflict_key`
+- 同一 Session 下 `approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` 共用一把 Session 级文件锁
 - Session 级文件锁只包住 append 写入，不包住 DBAAS HTTP、DeepAgent 调用或 SSE 推送
-- `approvals.json`、`operations.json`、`tasks.json` 每次 append 都写完整最新对象，不写局部 patch
+- `approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` 每次 append 都写完整最新对象，不写局部 patch
 - 重复提交审批不会重复执行同一操作
 - 同一 Session 的 `session_run_lock` 已被占用时，新的发消息请求返回 `409 Conflict`
 - Session 已有待确认操作时，发新消息返回 `409 Conflict`，前端提示先处理当前审批
@@ -2818,7 +2818,7 @@ GET /api/v1/sessions/{session_id}/tasks
 - 实现当前 Session task SSE 订阅期间的 refresh loop
 - 实现 `get_dbaas_task_tool`
 - 实现 `list_current_session_tasks_tool`
-- 实现 `tasks.json`
+- 实现 `tasks.jsonl`
 - 实现 Session 下任务列表接口
 - Agent 能回答“刚才那个任务怎么样了”
 - 前端能展示当前 Session 的运行中任务
@@ -2864,7 +2864,7 @@ GET /api/v1/sessions/{session_id}/tasks
 建议开发顺序：
 
 1. 补齐 `TaskService` 和 `GET /api/v1/sessions/{session_id}/tasks` lazy refresh
-2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.json`
+2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.jsonl`
 3. 实现 `GET /api/v1/sessions/{session_id}/tasks/events`，推送 `task_status_changed`
 4. 前端会话页增加当前 Session 任务下拉框或任务面板
 5. 实现 approval 维度的异步 task 创建成功系统提醒和 `task_creation_notice_emitted` 去重

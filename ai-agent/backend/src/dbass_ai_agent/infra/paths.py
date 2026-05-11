@@ -27,10 +27,10 @@ def build_session_paths(data_root: Path, user_id: str, session_id: str) -> Sessi
         index_path=sessions_root / "index.json",
         session_root=session_root,
         meta_path=session_root / "meta.json",
-        messages_path=session_root / "messages.json",
-        approvals_path=session_root / "approvals.json",
-        operations_path=session_root / "operations.json",
-        tasks_path=session_root / "tasks.json",
+        messages_path=session_root / "messages.jsonl",
+        approvals_path=session_root / "approvals.jsonl",
+        operations_path=session_root / "operations.jsonl",
+        tasks_path=session_root / "tasks.jsonl",
     )
 
 

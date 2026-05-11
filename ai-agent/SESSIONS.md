@@ -60,7 +60,7 @@ DeepAgent 原生支持：
 在此基础上，DBAAS Agent 会增加一些 AI 运行时相关扩展，例如：
 
 - `thread_id`
-- `approvals.json`
+- `approvals.jsonl`
 
 ## 1.2 为什么仍然保留 Session 层
 
@@ -136,8 +136,8 @@ ai-agent/
           index.json
           <session_id>/
             meta.json
-            messages.json
-            approvals.json
+            messages.jsonl
+            approvals.jsonl
 ```
 
 ## 4. 目录结构说明
@@ -224,11 +224,11 @@ ai-agent/
 }
 ```
 
-### 5.2 `messages.json`
+### 5.2 `messages.jsonl`
 
 保存当前 Session 的原始消息记录。
 
-文件名统一为 `messages.json`，内容仍按逐行 JSON 记录，便于顺序追加写入。
+文件名统一为 `messages.jsonl`，内容仍按逐行 JSON 记录，便于顺序追加写入。
 
 建议每条消息至少包含：
 
@@ -244,11 +244,11 @@ ai-agent/
 {"message_id":"msg_002","role":"assistant","content":"我先帮你查询 mysql-xf2 的状态。","created_at":"2026-04-22T12:00:02Z"}
 ```
 
-### 5.3 `approvals.json`
+### 5.3 `approvals.jsonl`
 
 保存当前 Session 的审批记录。
 
-文件名统一为 `approvals.json`，内容仍按逐行 JSON 记录追加写入。
+文件名统一为 `approvals.jsonl`，内容仍按逐行 JSON 记录追加写入。
 也就是说，它不是 JSON array，而是一个 append-only log。
 
 第一阶段将审批和消息分开存储，更利于后续：
@@ -320,8 +320,8 @@ ai-agent/
 
 1. 用户点击某个 `session_id`
 2. 后端读取 `meta.json`
-3. 后端读取 `messages.json`
-4. 后端读取 `approvals.json`
+3. 后端读取 `messages.jsonl`
+4. 后端读取 `approvals.jsonl`
 5. 将该 Session 内容返回给前端
 6. 前端将其加载到当前窗口
 
@@ -335,10 +335,10 @@ ai-agent/
 建议流程：
 
 1. 前端向当前 `session_id` 发送用户消息
-2. 后端将消息追加到 `messages.json`
+2. 后端将消息追加到 `messages.jsonl`
 3. Agent 优先在当前活动 `thread_id` 上继续执行
 4. 返回本轮 assistant 消息结果
-5. 将 assistant 消息继续追加到 `messages.json`
+5. 将 assistant 消息继续追加到 `messages.jsonl`
 6. 更新 `meta.json.updated_at`
 7. 更新 `index.json` 中该条目的 `updated_at`、`last_message_at` 和 `preview`
 
@@ -361,8 +361,8 @@ ai-agent/
 - 生成新的 `session_id`
 - 创建对应目录
 - 写入 `meta.json`
-- 创建空的 `messages.json`
-- 创建空的 `approvals.json`
+- 创建空的 `messages.jsonl`
+- 创建空的 `approvals.jsonl`
 - 在 `index.json` 中追加一条记录
 
 ### 8.2 归档 Session
@@ -475,7 +475,7 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 后续如果需要增强，可以继续扩展：
 
 - 增加 `runs.json` 保存执行记录
-- 增加 `tasks.json` 保存异步任务追踪
+- 增加 `tasks.jsonl` 保存异步任务追踪
 - 增加文件锁避免并发写冲突
 - 增加回收站机制，而不是直接删除
 - 将当前目录模型平滑迁移到数据库
@@ -487,8 +487,8 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 ```text
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
-data/users/<user_id>/sessions/<session_id>/messages.json
-data/users/<user_id>/sessions/<session_id>/approvals.json
+data/users/<user_id>/sessions/<session_id>/messages.jsonl
+data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
 这套结构已经可以很好支撑：
