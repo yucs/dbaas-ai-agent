@@ -1280,25 +1280,24 @@ DBAAS 查询失败时：
 
 任务刷新以更新任务状态为主。
 当当前 Session 的任务 SSE 观察到异步任务从非终态进入终态时，
-不立即按单个 task 触发 AI 回访，而是先找到该 task 所属的操作组。
-操作组优先使用 `approval_id`：
+不立即按单个 task 写提醒，而是先找到该 task 所属的通知组。
+通知组优先使用 `approval_id`：
 
-- 有 `approval_id`：以一次人工确认按钮对应的 approval 为回访维度
+- 有 `approval_id`：以一次人工确认按钮对应的 approval 为提醒维度
 - 无 `approval_id`：fallback 到 `operation_id`
 - 仍无法关联 operation 时：fallback 到单个 `task_id`
 
-同一操作组内只要仍存在非终态异步 task，就只更新任务状态和任务面板，
-不触发 AI 回访。
+同一通知组内只要仍存在非终态异步 task，就只更新任务状态和任务面板，
+不写终态提醒。
 只有该组所有异步 task 都进入 `succeeded/failed/canceled` 后，
-ai-agent 才自动触发一次轻量 AI 回访：
+后端才写入一条系统终态提醒：
 
-- 先写入一条 `ai-agent` 消息，说明检测到任务已结束
-- 再用同一个 `thread_id` 调用 DeepAgent 主动查询任务执行结果
-- DeepAgent 输出作为普通 `assistant` 消息写入当前 Session
-- 自动回访只允许查询和建议，不允许发起新的 DBAAS 写操作
-- 如果自动回访过程中模型触发写 tool interrupt，不创建审批卡，直接中止该次自动回访
-- 自动回访中使用 `get_dbaas_task_tool` 查询指定 task 时，应强制向 DBAAS 刷新一次；
-  普通 `GET /tasks` lazy refresh 仍不反复查询终态任务
+- 系统提醒写入 `messages.json`，role 使用 `system`
+- 提醒文案由代码根据 task latest view 生成，不调用 DeepAgent
+- 不写 `assistant` 消息，也不写 `ai-agent` 消息
+- 不调用任何 DBAAS 写工具，不创建审批卡
+- 用户需要进一步分析或建议时，可以继续自然语言询问 AI；
+  只有用户主动询问时，AI 才调用任务查询工具分析原因或建议
 
 前端任务面板或用户自然语言查询仍读取本地最新状态，
 必要时重新调用 `GET /api/v1/sessions/{session_id}/tasks` 触发 lazy refresh。
@@ -1306,7 +1305,7 @@ ai-agent 才自动触发一次轻量 AI 回访：
 如果当前 Session 页面正在打开，P7B 可以通过当前 Session 的任务 SSE 推送状态变化。
 这是独立 HTTP SSE endpoint，不复用 `/messages/stream`。
 `/messages/stream` 只负责当前 AI run 和审批事件，
-`tasks/events` 负责当前 Session 的异步任务状态变化和任务自动回访事件。
+`tasks/events` 负责当前 Session 的异步任务状态变化和任务终态提醒事件。
 
 SSE endpoint：
 
@@ -1319,9 +1318,7 @@ SSE 事件名使用当前项目已有风格：
 
 ```text
 task_status_changed
-task_followup_started
-task_followup_completed
-task_followup_failed
+task_terminal_notice_emitted
 ```
 
 事件示例：
@@ -1342,58 +1339,88 @@ data: {
 }
 ```
 
+```text
+event: task_terminal_notice_emitted
+data: {
+  "session_id": "sess_xxx",
+  "group_key": "approval:appr_xxx",
+  "system_message": {
+    "message_id": "msg_xxx",
+    "role": "system",
+    "content": "本次审批确认关联的 2 个异步任务已全部结束：1 个成功，1 个失败。",
+    "created_at": "2026-05-06T10:08:30Z"
+  }
+}
+```
+
 任务 SSE 边界：
 
 - 只推当前 Session 的任务状态变化
 - 不跨 Session
-- 只在某个操作组全部异步 task 进入终态后触发一次 AI 自动回访
-- AI 自动回访会写入 `ai-agent` 消息和普通 `assistant` 总结消息
+- 只在某个通知组全部异步 task 进入终态后写入一次系统终态提醒
+- 系统终态提醒写入 `messages.json`，role 为 `system`
 - 不写入 `/messages/stream`
 - 不替代 `tasks.json`
 - SSE 断线或页面刷新后，通过 `GET /sessions/{session_id}/tasks` 补齐状态
 
-AI 自动回访去重：
+系统终态提醒去重：
 
-- `tasks.json` 中每个 task 记录 `agent_followup_triggered`
-- 该字段表示“该 task 已经被纳入某次操作组自动回访”，
-  不是表示单个 task 单独生成过总结
-- 只有同一操作组内所有 task 都是 `terminal` 且仍存在 `agent_followup_triggered=false`
-  的 task 时，才可以进入自动回访
-- 触发前先把该操作组内所有 terminal task 标记为 `agent_followup_triggered=true`
+- `tasks.json` 中每个 task 记录 `terminal_notice_emitted`
+- 该字段表示“该 task 已经被纳入某次通知组终态系统提醒”，
+  不是表示单个 task 单独提醒过
+- 只有同一通知组内所有 task 都是 `terminal` 且仍存在 `terminal_notice_emitted=false`
+  的 task 时，才可以写系统终态提醒
+- 写入系统提醒后，把该通知组内所有 terminal task 标记为 `terminal_notice_emitted=true`
 - 页面刷新、SSE 重连或重复 lazy refresh 不会重复触发
 - 批处理场景下，不以单个 task 完成时间为准；
-  等同一个 `approval_id` 关联的所有异步 task 都结束后，合并成一次 DeepAgent 回访
+  等同一个 `approval_id` 关联的所有异步 task 都结束后，合并成一条系统提醒
 
 如果同一次 approval 同时产生同步 operation 和异步 task：
 
 - 同步 operation 仍按原有逻辑立即写入 `operations.json`
-- 自动回访等待该 approval 下所有异步 task 终态后触发
-- 自动回访 prompt 可以携带同 approval 下的同步 operation 结果作为上下文
-- 不因为同步 operation 已成功而提前触发整组回访
+- 系统终态提醒等待该 approval 下所有异步 task 终态后触发
+- 系统提醒可以引用同 approval 下的同步 operation 结果摘要
+- 不因为同步 operation 已成功而提前写整组终态提醒
 
-自动回访触发示例：
+系统终态提醒触发示例：
 
 ```text
 approval appr_001 一次批准创建 task_a、task_b
 
 task_a -> succeeded
-  -> 只更新 task card，不触发 AI 回访，因为 task_b 仍 running
+  -> 只更新 task card，不写系统提醒，因为 task_b 仍 running
 
 task_b -> failed
   -> appr_001 下所有 async task 已终态
-  -> 写入一条 ai-agent 消息
-  -> 调用一次 DeepAgent 查询 task_a/task_b 结果并总结建议
+  -> 写入一条 system 消息，总结 task_a/task_b 的终态结果
 ```
 
-自动回访提示词原则：
+系统提醒文案示例：
 
 ```text
-这是 AI Agent 自动触发的异步任务终态回访，不是用户新请求。
-请先使用 DBAAS 任务查询工具查询这些 task 的执行结果；
-必要时查询目标资源当前状态。
-只允许查询和总结，不要调用任何写工具。
-如果需要后续变更，只能给出建议，等待用户再次发起并走人工审批。
+本次审批确认关联的异步任务已结束：task_a 已成功。
+
+本次审批确认关联的 2 个异步任务已全部结束：1 个成功，1 个失败。
+如需进一步分析失败原因或处理建议，可以继续在本会话中提问。
 ```
+
+系统提醒文案规则：
+
+- 全部成功：只说明本次审批确认关联的异步任务已全部成功，不额外引导用户继续提问
+- 存在 `failed` 或 `canceled`：说明成功、失败、取消数量，并追加：
+  `如需进一步分析失败原因或处理建议，可以继续在本会话中提问。`
+- 存在 `refresh_failed` 时不写终态提醒，因为 `refresh_failed` 不是任务终态；
+  任务面板展示刷新失败，并等待后续 lazy refresh 或 SSE refresh
+- 系统提醒不主动触发 AI 分析，只给用户一个可选入口
+
+异步任务创建后的 AI 回复规则：
+
+- 当写工具返回 `OperationResult.status=task_created` 或 task_id 后，
+  AI 只说明任务已创建、task_id、当前状态，以及系统会在任务结束后提醒用户
+- AI 不要主动询问“是否需要继续查询任务状态”“是否需要跟踪任务”
+  或“是否需要分析结果和建议”
+- 用户如果需要中途查询进度、结束后分析失败原因或获取处理建议，
+  会主动在当前 Session 中继续提问
 
 前端打开或刷新 Session 页面时：
 
@@ -1405,7 +1432,7 @@ task_b -> failed
    lazy refresh 当前 Session 的非终态任务，并恢复任务卡状态
 
 3. GET /api/v1/sessions/{session_id}/tasks/events
-   建立 task SSE，等待后续 task_status_changed
+   建立 task SSE，等待后续 task_status_changed 和 task_terminal_notice_emitted
 ```
 
 前端收到 `task_status_changed` 后：
@@ -1413,9 +1440,8 @@ task_b -> failed
 - 优先用事件 payload 局部更新 task card
 - 如果本地找不到 task 或 payload 不完整，则调用 `GET /api/v1/sessions/{session_id}/tasks`
 - 任务进入终态时展示 toast，并刷新当前 Session，使 operation card 同步为终态
-- 收到 `task_followup_started` 时展示新增的 `ai-agent` 消息
-- 收到 `task_followup_completed` 或 `task_followup_failed` 时刷新当前 Session，
-  以展示自动回访结果或失败提示
+- 收到 `task_terminal_notice_emitted` 时展示新增的 `system` 消息；
+  如果事件中未携带完整 system message，则刷新当前 Session
 
 前端切换 Session 或关闭页面时，应关闭旧的 task SSE 连接。
 浏览器刷新、SSE 断线或重连不会影响任务状态恢复，
@@ -2129,13 +2155,15 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 - 当前页面收到 `task_status_changed` 后，局部更新对应 task card
 - 任务进入终态时，可以展示 toast 或状态变化提示
 - 当前 Session 的任务 SSE 观察到非终态到终态的转换后，
-  如果该任务所属操作组的所有异步 task 都已终态，
-  ai-agent 会自动写入一条 `ai-agent` 提示消息，并触发一次 AI 查询总结
+  如果该任务所属通知组的所有异步 task 都已终态，
+  后端会写入一条 `system` 终态提醒消息
 - 批量审批产生多个异步任务时，等待同一个 `approval_id` 下所有异步任务结束后，
-  只追加一次 AI 回访总结
+  只追加一次系统终态提醒
 
 因此，会话中看到的“任务处理中”属于产品层状态，
 不是对话历史的一部分。
+会话中看到的“异步任务已全部结束”属于系统状态提醒，
+不是用户和 AI 助手的一轮对话。
 
 会话页可以提供当前 Session 的任务下拉框或任务面板。
 推荐放在会话顶部或右侧区域，而不是混入聊天消息。
@@ -2207,17 +2235,15 @@ GET /api/v1/sessions/{session_id}/tasks/events
 如果后续单个 Session 下任务数量过多，再增加 `limit`、`status` 或单任务详情接口。
 
 `tasks/events` 是当前 Session 的任务事件流，
-用于接收任务状态变化和任务自动回访事件。
+用于接收任务状态变化和任务终态提醒事件。
 第一版事件包括：
 
 ```text
 task_status_changed
-task_followup_started
-task_followup_completed
-task_followup_failed
+task_terminal_notice_emitted
 ```
 
-任务状态变化和任务自动回访事件不通过 `/messages/stream` 推送。
+任务状态变化和任务终态提醒事件不通过 `/messages/stream` 推送。
 `/messages/stream` 只负责用户主动发起的当前 AI run、token、审批和压缩事件。
 
 P7B 先不新增前端可见的单任务详情接口或手动 refresh 接口：
@@ -2331,8 +2357,8 @@ result 简要信息
 它通过 `GET /api/v1/sessions/{session_id}/tasks` 初始化和刷新，
 通过 `task_status_changed` 局部更新任务卡。
 任务成功或失败后保留在任务面板中供用户查看结果，
-并在其所属操作组全部异步 task 结束后，由 task SSE 触发一次 AI 自动回访。
-自动回访会写入一条 `ai-agent` 提示消息和一条普通 `assistant` 总结消息。
+并在其所属通知组全部异步 task 结束后，由 task SSE 触发一次系统终态提醒。
+系统终态提醒会写入一条 `system` 消息。
 
 完整结构只用于审计、排障或管理员调试页面。
 普通前端不应强依赖：
@@ -2724,11 +2750,12 @@ GET /api/v1/sessions/{session_id}/tasks
 - 页面刷新后，前端重新订阅当前 Session 的 task SSE
 - 切换 Session 后，前端关闭旧 Session 的 task SSE，并只展示新 Session 的任务
 - 不提供跨 Session 任务中心、用户级任务列表或全局 `/tasks` 接口
-- 操作组内所有异步任务成功、失败或取消后，当前 task SSE 会触发一次 AI 自动回访并写入 assistant 总结
+- 通知组内所有异步任务成功、失败或取消后，当前 task SSE 会触发一次系统终态提醒
 - 批量异步任务按同一个 `approval_id` 聚合，不按单个 task 完成时间分别触发
-- 批量审批创建两个异步 task 且先后完成时，只在最后一个 task 终态后触发一次 AI 自动回访
-- 同一 approval 下同步 operation 与异步 task 混合时，自动回访等待异步 task 全部终态后触发，
-  并可在总结中引用同步 operation 结果
+- 批量审批创建两个异步 task 且先后完成时，只在最后一个 task 终态后写入一次系统提醒
+- 同一 approval 下同步 operation 与异步 task 混合时，系统提醒等待异步 task 全部终态后写入，
+  并可引用同步 operation 结果摘要
+- 系统终态提醒不调用 DeepAgent，不写 assistant 消息，不创建审批卡
 - 自然语言查询任务进度会调用任务工具
 - 自然语言查询“有哪些任务在跑”只回答当前 Session 内任务
 - 任务成功或失败后，任务接口和任务面板能反映最新状态
@@ -2740,7 +2767,7 @@ GET /api/v1/sessions/{session_id}/tasks
 2. 异步写工具创建 DBAAS task 后写入当前 Session 的 `tasks.json`
 3. 实现 `GET /api/v1/sessions/{session_id}/tasks/events`，推送 `task_status_changed`
 4. 前端会话页增加当前 Session 任务下拉框或任务面板
-5. 实现 approval 维度的 AI 自动回访和 `task_followup_*` 事件
+5. 实现 approval 维度的系统终态提醒和 `task_terminal_notice_emitted` 事件
 6. 增加 `get_dbaas_task_tool` 和 `list_current_session_tasks_tool`，支持自然语言查询当前 Session 任务
 7. 补归档/删除保护、刷新失败语义和回归测试
 
