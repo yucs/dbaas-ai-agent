@@ -2,15 +2,8 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
-
-
-@dataclass(frozen=True, slots=True)
-class HeldSessionLock:
-    key: str
-    lock: threading.Lock
 
 
 class SessionLockManager:
