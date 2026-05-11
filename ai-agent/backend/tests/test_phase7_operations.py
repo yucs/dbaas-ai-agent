@@ -227,19 +227,6 @@ class BatchResumeRuntime:
         )
 
 
-class FollowupRuntime:
-    def __init__(self) -> None:
-        self.prompts: list[str] = []
-
-    def generate_followup(self, *, identity, session, prompt):
-        self.prompts.append(prompt)
-        return AgentReply(
-            run_id="run_phase7_followup",
-            content="任务执行结果已查询，当前状态正常。",
-            mode="deepagent",
-        )
-
-
 class Phase7ApprovalApiTests(unittest.TestCase):
     def test_send_message_creates_pending_approval_and_blocks_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -537,7 +524,6 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 _dbaas_config(tmpdir),
                 write_client=FakeTaskClient(),
             )
-            runtime = FollowupRuntime()
             service.repository.append_task(
                 detail.meta.user_id,
                 detail.meta.session_id,
@@ -548,7 +534,6 @@ class TaskLazyRefreshTests(unittest.TestCase):
             app.dependency_overrides[get_current_identity] = lambda: identity
             app.dependency_overrides[get_session_service] = lambda: service
             app.dependency_overrides[get_task_service] = lambda: task_service
-            app.dependency_overrides[get_agent_runtime] = lambda: runtime
             app.dependency_overrides[get_app_settings] = lambda: Settings(
                 dbaas_task_refresh_interval_seconds=1,
             )
@@ -571,7 +556,6 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 _dbaas_config(tmpdir),
                 write_client=FakeTaskClient(),
             )
-            runtime = FollowupRuntime()
             service.repository.append_task(
                 detail.meta.user_id,
                 detail.meta.session_id,
@@ -582,7 +566,6 @@ class TaskLazyRefreshTests(unittest.TestCase):
             app.dependency_overrides[get_current_identity] = lambda: identity
             app.dependency_overrides[get_session_service] = lambda: service
             app.dependency_overrides[get_task_service] = lambda: task_service
-            app.dependency_overrides[get_agent_runtime] = lambda: runtime
             app.dependency_overrides[get_app_settings] = lambda: Settings(
                 dbaas_task_refresh_interval_seconds=1,
             )
@@ -598,19 +581,22 @@ class TaskLazyRefreshTests(unittest.TestCase):
             events = _parse_sse_events(body)
             self.assertEqual(
                 [event_name for event_name, _payload in events],
-                ["task_status_changed", "task_followup_started", "task_followup_completed"],
+                ["task_status_changed", "task_terminal_notice_emitted"],
             )
             payload = events[0][1]
             self.assertEqual(payload["session_id"], detail.meta.session_id)
             self.assertEqual(payload["task"]["task_id"], "task-001")
             self.assertEqual(payload["task"]["previous_status"], "running")
             self.assertEqual(payload["task"]["status"], "succeeded")
-            self.assertIn("task-001", runtime.prompts[0])
+            notice = events[1][1]
+            self.assertEqual(notice["session_id"], detail.meta.session_id)
+            self.assertEqual(notice["tasks"][0]["task_id"], "task-001")
+            self.assertTrue(notice["tasks"][0]["terminal_notice_emitted"])
+            self.assertEqual(notice["system_message"]["role"], "system")
             messages = service.get_session(identity, detail.meta.session_id).messages
-            self.assertEqual([message.role for message in messages], ["ai-agent", "assistant"])
-            self.assertEqual(messages[0].content, "AI Agent 检测到异步任务 task-001 已成功。")
-            self.assertEqual(messages[1].content, "任务执行结果已查询，当前状态正常。")
-            self.assertTrue(task_service.list_tasks(detail.meta)[0].agent_followup_triggered)
+            self.assertEqual([message.role for message in messages], ["system"])
+            self.assertEqual(messages[0].content, "当前异步操作关联的异步任务 task-001 已成功。")
+            self.assertTrue(task_service.list_tasks(detail.meta)[0].terminal_notice_emitted)
 
             with TestClient(app) as client:
                 with client.stream(
@@ -621,30 +607,96 @@ class TaskLazyRefreshTests(unittest.TestCase):
                     second_body = "".join(response.iter_text())
 
             self.assertEqual(_parse_sse_events(second_body), [])
-            self.assertEqual(len(runtime.prompts), 1)
 
-    def test_task_events_groups_batch_terminal_followup(self) -> None:
+    def test_task_events_groups_batch_terminal_notice_by_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user=None)
             service = _session_service(tmpdir)
-            detail = service.create_session(identity, title="task batch followup")
-            task_service = TaskService(
-                service.repository,
-                _dbaas_config(tmpdir),
-                write_client=FakeTaskClient(),
+            detail = service.create_session(identity, title="task batch notice")
+            approval = ApprovalService(service.repository, service).create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_batch_task_approval",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_requests=[
+                        {
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "image_type": "mysql",
+                                "image_tag": "8.0.38",
+                            },
+                        },
+                        {
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "proxy",
+                                "image_type": "proxy",
+                                "image_tag": "8.0.38",
+                            },
+                        },
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "create_service_image_upgrade_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                        {
+                            "action_name": "create_service_image_upgrade_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_task_001", "call_phase7_task_002"],
+                ),
             )
-            runtime = FollowupRuntime()
-            first = _running_task(detail.meta.session_id)
+            operation_service = OperationService(service.repository)
+            first_target = OperationTarget(
+                kind="service",
+                id="mysql-xf2",
+                name="mysql-xf2",
+                qualifiers={"child_service_type": "mysql"},
+            )
             second_target = OperationTarget(
                 kind="service",
                 id="mysql-xf2",
                 name="mysql-xf2",
                 qualifiers={"child_service_type": "proxy"},
             )
+            first_operation = operation_service.start_operation(
+                detail.meta,
+                approval=approval,
+                run_id="run_phase7_batch_task_resume",
+                action="service.image.upgrade",
+                execution_mode="async",
+                tool_name="create_service_image_upgrade_task_tool",
+                tool_args=approval.interrupted_tool_calls[0].tool_args,
+                targets=[first_target],
+            )
+            second_operation = operation_service.start_operation(
+                detail.meta,
+                approval=approval,
+                run_id="run_phase7_batch_task_resume",
+                action="service.image.upgrade",
+                execution_mode="async",
+                tool_name="create_service_image_upgrade_task_tool",
+                tool_args=approval.interrupted_tool_calls[1].tool_args,
+                targets=[second_target],
+            )
+            task_service = TaskService(
+                service.repository,
+                _dbaas_config(tmpdir),
+                write_client=StaggeredTaskClient(),
+            )
+            first = _running_task(detail.meta.session_id).model_copy(
+                update={"operation_id": first_operation.operation_id}
+            )
             second = _running_task(detail.meta.session_id).model_copy(
                 update={
                     "task_id": "task-002",
-                    "operation_id": "op-002",
+                    "operation_id": second_operation.operation_id,
                     "operation_conflict_key": "service.image.upgrade|service:mysql-xf2:child_service_type=proxy",
                     "targets": [second_target],
                 }
@@ -656,7 +708,6 @@ class TaskLazyRefreshTests(unittest.TestCase):
             app.dependency_overrides[get_current_identity] = lambda: identity
             app.dependency_overrides[get_session_service] = lambda: service
             app.dependency_overrides[get_task_service] = lambda: task_service
-            app.dependency_overrides[get_agent_runtime] = lambda: runtime
             app.dependency_overrides[get_app_settings] = lambda: Settings(
                 dbaas_task_refresh_interval_seconds=1,
             )
@@ -675,16 +726,21 @@ class TaskLazyRefreshTests(unittest.TestCase):
                 [
                     "task_status_changed",
                     "task_status_changed",
-                    "task_followup_started",
-                    "task_followup_completed",
+                    "task_terminal_notice_emitted",
                 ],
             )
-            self.assertEqual(len(runtime.prompts), 1)
-            self.assertIn("task-001", runtime.prompts[0])
-            self.assertIn("task-002", runtime.prompts[0])
+            self.assertEqual(events[-1][1]["group_key"], f"approval:{approval.approval_id}")
+            self.assertEqual(
+                {task["task_id"] for task in events[-1][1]["tasks"]},
+                {"task-001", "task-002"},
+            )
             messages = service.get_session(identity, detail.meta.session_id).messages
-            self.assertEqual(messages[0].content, "AI Agent 检测到 2 个异步任务已结束。")
-            self.assertEqual([task.agent_followup_triggered for task in task_service.list_tasks(detail.meta)], [True, True])
+            self.assertEqual(messages[0].role, "system")
+            self.assertEqual(messages[0].content, "本次审批确认关联的异步任务已全部结束：2 个成功。")
+            self.assertEqual(
+                [task.terminal_notice_emitted for task in task_service.list_tasks(detail.meta)],
+                [True, True],
+            )
 
     def test_lazy_refresh_updates_non_terminal_task_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -781,6 +837,28 @@ class FakeTaskClient:
             "createdAt": "2026-05-08T00:00:00Z",
             "updatedAt": "2026-05-08T00:00:02Z",
         }
+
+
+class StaggeredTaskClient:
+    def __init__(self) -> None:
+        self.calls: dict[str, int] = {}
+
+    def get_task(self, identity, task_id, *, timeout_seconds=None):
+        self.calls[task_id] = self.calls.get(task_id, 0) + 1
+        if task_id == "task-002" and self.calls[task_id] == 1:
+            return {
+                "taskId": task_id,
+                "type": "service.image.upgrade",
+                "status": "RUNNING",
+                "message": "running",
+                "reason": None,
+                "resourceType": "service",
+                "resourceName": "mysql-xf2",
+                "result": None,
+                "createdAt": "2026-05-08T00:00:00Z",
+                "updatedAt": "2026-05-08T00:00:00Z",
+            }
+        return FakeTaskClient().get_task(identity, task_id, timeout_seconds=timeout_seconds)
 
 
 class UnexpectedTaskClient:

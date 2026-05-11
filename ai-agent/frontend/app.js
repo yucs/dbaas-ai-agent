@@ -892,6 +892,14 @@ function hasRunningTask() {
   return Boolean((state.currentTasks || []).some((task) => !isTerminalTaskStatus(task.status)));
 }
 
+function hasTaskEventWork() {
+  return Boolean(
+    (state.currentTasks || []).some(
+      (task) => !isTerminalTaskStatus(task.status) || !task.terminal_notice_emitted,
+    ),
+  );
+}
+
 function appendOptimisticMessages(content) {
   if (!state.currentSession) {
     return null;
@@ -1281,7 +1289,7 @@ async function fetchSessionTasks(sessionId = state.currentSessionId) {
 
 function syncTaskEventSubscription() {
   const sessionId = state.currentSessionId;
-  if (!sessionId || !hasRunningTask()) {
+  if (!sessionId || !hasTaskEventWork()) {
     stopTaskEvents();
     return;
   }
@@ -1317,9 +1325,19 @@ async function subscribeTaskEvents(sessionId) {
         return;
       }
 
-      if (eventName === "task_followup_started") {
-        if (payload.ai_agent_message) {
-          applyStreamAiAgentMessage(payload.ai_agent_message, null, sessionId);
+      if (eventName === "task_terminal_notice_emitted") {
+        if (payload.tasks) {
+          state.currentTasks = sortTasks(
+            (payload.tasks || []).reduce(
+              (tasks, task) => upsertTask(tasks, task),
+              state.currentTasks || [],
+            ),
+          );
+          renderTaskPanel();
+          setComposerState();
+        }
+        if (payload.system_message) {
+          applyStreamSystemMessage(payload.system_message, sessionId);
         } else {
           reconcileCurrentSession().catch((error) => {
             if (state.currentSessionId === sessionId) {
@@ -1328,14 +1346,6 @@ async function subscribeTaskEvents(sessionId) {
           });
         }
         return;
-      }
-
-      if (eventName === "task_followup_completed" || eventName === "task_followup_failed") {
-        reconcileCurrentSession().catch((error) => {
-          if (state.currentSessionId === sessionId) {
-            showFlash(error.message || "会话刷新失败", "error");
-          }
-        });
       }
     });
   } catch (error) {
@@ -1346,7 +1356,7 @@ async function subscribeTaskEvents(sessionId) {
     if (state.taskEventsController === controller) {
       state.taskEventsController = null;
       state.taskEventsSessionId = null;
-      if (state.currentSessionId === sessionId && hasRunningTask()) {
+      if (state.currentSessionId === sessionId && hasTaskEventWork()) {
         window.setTimeout(() => syncTaskEventSubscription(), 3000);
       }
     }

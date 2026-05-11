@@ -99,17 +99,17 @@ class TaskService:
         self.repository.append_task(session.user_id, session.session_id, task)
         return task
 
-    def mark_agent_followup_triggered(
+    def mark_terminal_notice_emitted(
         self,
         session: SessionMeta,
         tasks: list[TaskRecord],
     ) -> list[TaskRecord]:
         marked: list[TaskRecord] = []
         for task in tasks:
-            if task.agent_followup_triggered:
+            if task.terminal_notice_emitted:
                 marked.append(task)
                 continue
-            updated = task.model_copy(update={"agent_followup_triggered": True})
+            updated = task.model_copy(update={"terminal_notice_emitted": True})
             self.repository.append_task(session.user_id, session.session_id, updated)
             marked.append(updated)
         return marked
