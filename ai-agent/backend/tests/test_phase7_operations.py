@@ -38,8 +38,10 @@ from dbass_ai_agent.operations.task_service import TaskService  # noqa: E402
 from dbass_ai_agent.sessions.approval_store import ApprovalStore  # noqa: E402
 from dbass_ai_agent.sessions.index_store import IndexStore  # noqa: E402
 from dbass_ai_agent.sessions.message_store import MessageStore  # noqa: E402
+from dbass_ai_agent.sessions.operation_store import OperationStore  # noqa: E402
 from dbass_ai_agent.sessions.repository import SessionRepository  # noqa: E402
 from dbass_ai_agent.sessions.service import SessionService  # noqa: E402
+from dbass_ai_agent.sessions.task_store import TaskStore  # noqa: E402
 from dbass_ai_agent.sessions.thread_binding import ThreadBinding  # noqa: E402
 
 
@@ -1097,6 +1099,8 @@ def _session_service(tmpdir: str) -> SessionService:
             index_store=IndexStore(),
             message_store=MessageStore(),
             approval_store=ApprovalStore(),
+            operation_store=OperationStore(),
+            task_store=TaskStore(),
         ),
         thread_binding=ThreadBinding(),
     )

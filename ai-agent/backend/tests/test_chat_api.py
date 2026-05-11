@@ -29,8 +29,10 @@ from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.sessions.approval_store import ApprovalStore
 from dbass_ai_agent.sessions.index_store import IndexStore
 from dbass_ai_agent.sessions.message_store import MessageStore
+from dbass_ai_agent.sessions.operation_store import OperationStore
 from dbass_ai_agent.sessions.repository import SessionRepository
 from dbass_ai_agent.sessions.service import SessionService
+from dbass_ai_agent.sessions.task_store import TaskStore
 from dbass_ai_agent.sessions.thread_binding import ThreadBinding
 
 
@@ -124,6 +126,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )
@@ -178,6 +182,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )
@@ -217,6 +223,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )
@@ -253,6 +261,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )
@@ -288,6 +298,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )
@@ -383,6 +395,8 @@ class SendMessageApiTests(unittest.TestCase):
                     index_store=IndexStore(),
                     message_store=MessageStore(),
                     approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
                 ),
                 thread_binding=ThreadBinding(),
             )

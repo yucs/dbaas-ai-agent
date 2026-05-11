@@ -30,15 +30,15 @@ class SessionRepository:
         index_store: IndexStore,
         message_store: MessageStore,
         approval_store: ApprovalStore,
-        operation_store: OperationStore | None = None,
-        task_store: TaskStore | None = None,
+        operation_store: OperationStore,
+        task_store: TaskStore,
     ) -> None:
         self.data_root = data_root
         self.index_store = index_store
         self.message_store = message_store
         self.approval_store = approval_store
-        self.operation_store = operation_store or OperationStore()
-        self.task_store = task_store or TaskStore()
+        self.operation_store = operation_store
+        self.task_store = task_store
 
     def list_index(self, user_id: str) -> list[SessionIndexItem]:
         sessions_root = build_user_sessions_root(self.data_root, user_id)
