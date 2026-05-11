@@ -312,7 +312,7 @@ RELOAD=true ./start.sh
 
 ```text
 mock-server/
-  AGENT.md
+  AGENTS.md
   README.md
   app/
     api/

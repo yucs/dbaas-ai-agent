@@ -36,7 +36,7 @@
 
 ```text
 mock-server/
-  AGENT.md
+  AGENTS.md
   app/
     api/
     schemas/
