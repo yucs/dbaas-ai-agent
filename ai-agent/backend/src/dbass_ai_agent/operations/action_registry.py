@@ -16,7 +16,7 @@ class ActionConfig:
     risk_level: RiskLevel
     required_role: RequiredRole
     timeout_seconds: int | None = None
-    approval_ttl_seconds: int = 30 * 60
+    approval_ttl_seconds: int = 5 * 60
     risk_notes: tuple[str, ...] = ()
 
 
@@ -46,7 +46,6 @@ WRITE_ACTIONS: dict[str, ActionConfig] = {
         risk_level="high",
         required_role="user",
         timeout_seconds=30,
-        approval_ttl_seconds=15 * 60,
         risk_notes=("会创建镜像升级任务，任务完成前服务可能处于变更中。",),
     ),
 }

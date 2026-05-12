@@ -26,7 +26,17 @@ def get_approvals(
     session_id: str,
     identity: Identity = Depends(get_current_identity),
     approval_service: ApprovalService = Depends(get_approval_service),
+    agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    operation_service: OperationService = Depends(get_operation_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> ApprovalsResponse:
+    approval_service.expire_pending_approvals(
+        identity,
+        session_id,
+        agent_runtime=agent_runtime,
+        operation_service=operation_service,
+        task_service=task_service,
+    )
     return ApprovalsResponse(items=approval_service.get_approvals(identity, session_id))
 
 

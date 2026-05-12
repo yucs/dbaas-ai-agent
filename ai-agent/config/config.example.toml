@@ -63,6 +63,11 @@ summary_max_tokens = 2048
 base_url = "http://127.0.0.1:9000"
 # 调用 DBAAS HTTP 接口的超时时间，单位秒。
 request_timeout_seconds = 10
+# 审批卡是否尝试查询当前服务快照，用于展示 current_value/current_unit。
+# 默认开启；如果服务详情接口较慢，可关闭以避免拖慢审批卡生成。
+approval_current_value_enabled = true
+# 审批卡当前值查询超时时间，单位秒；仅在 approval_current_value_enabled = true 时生效。
+approval_current_value_timeout_seconds = 5
 
 [dbaas_workspace]
 # DBAAS 工作目录；用于保存快照和临时文件。

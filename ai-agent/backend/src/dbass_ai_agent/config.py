@@ -48,6 +48,8 @@ class Settings:
     real_llm_tests_enabled: bool = False
     dbaas_server_base_url: str = "http://127.0.0.1:9000"
     dbaas_request_timeout_seconds: int = 5
+    dbaas_approval_current_value_enabled: bool = True
+    dbaas_approval_current_value_timeout_seconds: int = 5
     dbaas_workspace_dir: Path = APP_ROOT / "data" / "runtime" / "dbaas_workspace"
     dbaas_sync_interval_seconds: int = 5
     dbaas_ttl_seconds: int = 30
@@ -140,6 +142,16 @@ class Settings:
             dbaas_request_timeout_seconds=_get_positive_int(
                 dbaas_server,
                 "request_timeout_seconds",
+                5,
+            ),
+            dbaas_approval_current_value_enabled=_get_bool(
+                dbaas_server,
+                "approval_current_value_enabled",
+                True,
+            ),
+            dbaas_approval_current_value_timeout_seconds=_get_positive_int(
+                dbaas_server,
+                "approval_current_value_timeout_seconds",
                 5,
             ),
             dbaas_workspace_dir=_resolve_path(

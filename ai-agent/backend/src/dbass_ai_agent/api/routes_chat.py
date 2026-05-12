@@ -14,6 +14,8 @@ from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.logging import log_context
 from dbass_ai_agent.operations.approval_service import ApprovalService, approval_interrupt_from_runtime
+from dbass_ai_agent.operations.operation_service import OperationService
+from dbass_ai_agent.operations.task_service import TaskService
 from dbass_ai_agent.sessions.service import SessionService
 from dbass_ai_agent.sessions.run_lock import session_locks
 
@@ -22,7 +24,9 @@ from .deps import (
     get_app_settings,
     get_approval_service,
     get_current_identity,
+    get_operation_service,
     get_session_service,
+    get_task_service,
 )
 from .schemas import SendMessageRequest, SendMessageResponse
 
@@ -40,10 +44,18 @@ def send_message(
     session_service: SessionService = Depends(get_session_service),
     approval_service: ApprovalService = Depends(get_approval_service),
     agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    operation_service: OperationService = Depends(get_operation_service),
+    task_service: TaskService = Depends(get_task_service),
     settings: Settings = Depends(get_app_settings),
 ) -> SendMessageResponse:
     content = _validate_message_content(payload.content, settings)
-    approval_service.expire_pending_approvals(identity, session_id)
+    approval_service.expire_pending_approvals(
+        identity,
+        session_id,
+        agent_runtime=agent_runtime,
+        operation_service=operation_service,
+        task_service=task_service,
+    )
     _assert_no_pending_approval(identity, session_id, approval_service)
     request_id = getattr(request.state, "request_id", "-")
     with session_locks.acquire_run_lock(session_id) as acquired:
@@ -139,10 +151,18 @@ def stream_message(
     session_service: SessionService = Depends(get_session_service),
     approval_service: ApprovalService = Depends(get_approval_service),
     agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    operation_service: OperationService = Depends(get_operation_service),
+    task_service: TaskService = Depends(get_task_service),
     settings: Settings = Depends(get_app_settings),
 ) -> StreamingResponse:
     content = _validate_message_content(payload.content, settings)
-    approval_service.expire_pending_approvals(identity, session_id)
+    approval_service.expire_pending_approvals(
+        identity,
+        session_id,
+        agent_runtime=agent_runtime,
+        operation_service=operation_service,
+        task_service=task_service,
+    )
     _assert_no_pending_approval(identity, session_id, approval_service)
     run_lock_context = session_locks.acquire_run_lock(session_id)
     acquired = run_lock_context.__enter__()
@@ -438,7 +458,16 @@ def _assert_no_pending_approval(
     session_id: str,
     approval_service: ApprovalService,
 ) -> None:
-    if any(approval.status == "pending" for approval in approval_service.get_approvals(identity, session_id)):
+    detail = approval_service.session_service.get_session(identity, session_id)
+    if approval_service.has_failed_expired_resume(detail.meta):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "expired_approval_resume_failed",
+                "detail": "当前 Session 的过期审批暂停点尚未清理完成，请稍后重试。",
+            },
+        )
+    if any(approval.status == "pending" for approval in detail.approvals):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

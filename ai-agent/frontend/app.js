@@ -68,8 +68,20 @@ function truncatePreview(content) {
   return String(content || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
+function isApprovalExpiredLocally(approval) {
+  if (!approval || approval.status !== "pending" || !approval.expires_at) {
+    return false;
+  }
+  const expiresAt = new Date(approval.expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function isActionableApproval(approval) {
+  return approval?.status === "pending" && !isApprovalExpiredLocally(approval);
+}
+
 function hasPendingApproval(detail = state.currentSession) {
-  return Boolean(detail?.approvals?.some((approval) => approval.status === "pending"));
+  return Boolean(detail?.approvals?.some(isActionableApproval));
 }
 
 function formatValueWithUnit(value, unit) {
@@ -215,19 +227,21 @@ function getApprovalHandledAt(approval) {
 function renderApprovalCard(approval) {
   const proposal = approval.proposal || {};
   const items = proposal.items || [];
-  const isPending = approval.status === "pending";
-  const deciding = isPending && state.decidingApprovalIds.has(approval.approval_id);
+  const localExpired = isApprovalExpiredLocally(approval);
+  const isActionable = isActionableApproval(approval);
+  const deciding = isActionable && state.decidingApprovalIds.has(approval.approval_id);
   const isBatch = items.length > 1;
+  const displayStatus = localExpired ? "expired" : approval.status;
 
   return `
-    <article class="approval-card ${escapeHtml(approval.status)}" data-approval-id="${escapeHtml(approval.approval_id)}">
+    <article class="approval-card ${escapeHtml(displayStatus)}" data-approval-id="${escapeHtml(approval.approval_id)}">
       <div class="approval-header">
         <div>
           <p class="eyebrow">操作确认</p>
           <h3>${escapeHtml(proposal.summary || approval.action || "待确认操作")}</h3>
         </div>
         <div class="approval-badges">
-          <span class="status-pill approval-status">${escapeHtml(formatApprovalStatus(approval.status))}</span>
+          <span class="status-pill approval-status">${escapeHtml(formatApprovalStatus(displayStatus))}</span>
           <span class="status-pill approval-risk">${escapeHtml(formatRiskLevel(proposal.risk_level))}</span>
         </div>
       </div>
@@ -258,6 +272,12 @@ function renderApprovalCard(approval) {
       ${items.length ? items.map((item, index) => renderApprovalItem(item, index, items.length)).join("") : ""}
 
       ${
+        localExpired
+          ? `<div class="approval-section approval-warning"><span>审批状态</span><strong>审批已超过过期时间，请刷新同步最新状态。</strong></div>`
+          : ""
+      }
+
+      ${
         approval.resume_failed
           ? `<div class="approval-section approval-warning"><span>恢复状态</span><strong>${escapeHtml(
               approval.resume_error || "审批恢复失败，请查看操作结果。",
@@ -266,7 +286,7 @@ function renderApprovalCard(approval) {
       }
 
       ${
-        isPending
+        isActionable
           ? `<div class="approval-actions">
               <button
                 class="primary-button"
@@ -1525,6 +1545,12 @@ async function handleSessionAction(action, sessionId) {
 async function handleApprovalDecision(approvalId, decision) {
   const sessionId = state.currentSessionId;
   if (!sessionId || !approvalId || !decision) {
+    return;
+  }
+  const approval = state.currentSession?.approvals?.find((item) => item.approval_id === approvalId);
+  if (isApprovalExpiredLocally(approval)) {
+    showFlash("审批已超过过期时间，正在同步最新状态。", "error");
+    await reconcileCurrentSession().catch(() => {});
     return;
   }
   if (state.decidingApprovalIds.has(approvalId)) {

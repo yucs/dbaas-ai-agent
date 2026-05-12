@@ -69,10 +69,12 @@ DEFAULT_COMPRESSION_PROMPT = """你是 DBAAS 智能助手的会话压缩器。
   "approved_actions": [],
   "rejected_actions": [],
   "pending_items": [],
-  "constraints": []
+  "constraints": [],
+  "operation_facts": []
 }
 
 不要补充不存在的信息。
 不要把历史状态写成当前实时状态。
+必须保留已出现的 approval_id、operation_id、task_id、审批状态、执行结果、非终态任务和待核查/超时状态。
 不要输出 JSON 之外的任何文字。
 """

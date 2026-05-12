@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal
@@ -7,12 +8,14 @@ from typing import Any, Literal
 from fastapi import HTTPException, status
 
 from dbass_ai_agent.agent.runtime import AgentReply
+from dbass_ai_agent.dbaas.write_client import DbaasWriteClientError
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.clock import utc_now
 from dbass_ai_agent.infra.ids import new_approval_id
 from dbass_ai_agent.operations.action_registry import require_action_config
-from dbass_ai_agent.operations.models import InterruptedToolCall, OperationRecord, TaskRecord
+from dbass_ai_agent.operations.models import InterruptedToolCall, OperationRecord, OperationTarget, TaskRecord
 from dbass_ai_agent.operations.proposal_builder import build_batch_operation_proposal
+from dbass_ai_agent.operations.task_service import TaskConflictError, build_operation_conflict_key
 from dbass_ai_agent.sessions.models import ApprovalRecord, ChatMessage, SessionMeta
 from dbass_ai_agent.sessions.repository import SessionRepository
 from dbass_ai_agent.sessions.run_lock import session_locks
@@ -21,6 +24,7 @@ from dbass_ai_agent.sessions.service import SessionService
 
 ApiDecision = Literal["approved", "rejected"]
 USER_REJECTED_APPROVAL_MESSAGE = "用户已拒绝该操作，未执行 DBAAS 变更。"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,9 +51,13 @@ class ApprovalService:
         self,
         repository: SessionRepository,
         session_service: SessionService,
+        current_value_client: Any | None = None,
+        current_value_timeout_seconds: int | None = None,
     ) -> None:
         self.repository = repository
         self.session_service = session_service
+        self.current_value_client = current_value_client
+        self.current_value_timeout_seconds = current_value_timeout_seconds
 
     def get_approvals(self, identity: Identity, session_id: str) -> list[ApprovalRecord]:
         detail = self.session_service.get_session(identity, session_id)
@@ -97,7 +105,10 @@ class ApprovalService:
                     tool_args=tool_args,
                 )
             )
-        proposal = build_batch_operation_proposal(tool_calls)
+        proposal = build_batch_operation_proposal(
+            tool_calls,
+            current_services=self._load_current_services(identity, tool_calls),
+        )
         self._assert_decision_role(identity, proposal.required_role)
         now = utc_now()
         approval = ApprovalRecord(
@@ -113,7 +124,7 @@ class ApprovalService:
             allowed_decisions=["approve", "reject"],
             decided_by=None,
             created_at=now,
-            expires_at=now + timedelta(seconds=ttl_seconds or 30 * 60),
+            expires_at=now + timedelta(seconds=ttl_seconds or 5 * 60),
             decided_at=None,
             expired_at=None,
             resume_failed=False,
@@ -141,6 +152,18 @@ class ApprovalService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审批记录不存在。")
         required_role = approval.proposal.required_role if approval.proposal else "user"
         self._assert_decision_role(identity, required_role)
+
+        if approval.status == "expired":
+            if approval.resume_failed:
+                approval = self._resume_expired_cleanup_with_lock(
+                    identity,
+                    session,
+                    approval,
+                    agent_runtime=agent_runtime,
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
+            self._raise_approval_expired(approval)
 
         terminal = {"approved", "rejected", "expired"}
         if approval.status in terminal:
@@ -182,17 +205,6 @@ class ApprovalService:
                 },
             )
 
-        if self._is_expired(approval):
-            expired = self._mark_expired(session, approval)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error_type": "approval_expired",
-                    "detail": "审批已超时，操作已取消。",
-                    "approval": expired.model_dump(mode="json"),
-                },
-            )
-
         with session_locks.acquire_run_lock(session.session_id) as acquired:
             if not acquired:
                 raise HTTPException(
@@ -203,6 +215,17 @@ class ApprovalService:
                     },
                 )
             latest = self._find_approval(session, approval_id)
+            if latest.status == "expired":
+                if latest.resume_failed:
+                    latest = self._resume_expired_cleanup(
+                        identity,
+                        session,
+                        latest,
+                        agent_runtime=agent_runtime,
+                        operation_service=operation_service,
+                        task_service=task_service,
+                    )
+                self._raise_approval_expired(latest)
             if latest.status != "pending":
                 return self.decide(
                     identity,
@@ -213,6 +236,18 @@ class ApprovalService:
                     operation_service=operation_service,
                     task_service=task_service,
                 )
+            if self._is_expired(latest):
+                expired = self._expire_and_resume(
+                    identity,
+                    session,
+                    latest,
+                    agent_runtime=agent_runtime,
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
+                self._raise_approval_expired(expired)
+            if decision == "approved":
+                self._assert_no_task_conflicts(session, latest, task_service)
             decided = latest.model_copy(
                 update={
                     "status": decision,
@@ -246,25 +281,45 @@ class ApprovalService:
         detail = self.session_service.get_session(identity, session_id)
         expired: list[ApprovalRecord] = []
         for approval in detail.approvals:
-            if approval.status != "pending" or not self._is_expired(approval):
-                continue
-            marked = self._mark_expired(detail.meta, approval)
-            expired.append(marked)
-            if agent_runtime and operation_service and task_service:
-                try:
-                    self._resume_decided(
+            if approval.status == "pending" and self._is_expired(approval):
+                if agent_runtime and operation_service and task_service:
+                    marked = self._expire_and_resume(
                         identity,
                         detail.meta,
-                        marked,
-                        "rejected",
+                        approval,
                         agent_runtime=agent_runtime,
                         operation_service=operation_service,
                         task_service=task_service,
-                        reject_message="审批超时，操作已自动取消，未执行 DBAAS 变更。",
                     )
-                except Exception:
-                    continue
+                else:
+                    marked = self._mark_expired(detail.meta, approval)
+                    logger.info(
+                        "approval expired approval_id=%s session_id=%s",
+                        marked.approval_id,
+                        detail.meta.session_id,
+                    )
+                expired.append(marked)
+                continue
+            if approval.status == "expired" and approval.resume_failed:
+                marked = approval
+            else:
+                continue
+            if agent_runtime and operation_service and task_service:
+                self._resume_expired_cleanup(
+                    identity,
+                    detail.meta,
+                    marked,
+                    agent_runtime=agent_runtime,
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
         return expired
+
+    def has_failed_expired_resume(self, session: SessionMeta) -> bool:
+        return any(
+            approval.status == "expired" and approval.resume_failed
+            for approval in self.repository.load_approvals(session.user_id, session.session_id)
+        )
 
     def has_pending_approval(self, session: SessionMeta) -> bool:
         return any(
@@ -313,6 +368,8 @@ class ApprovalService:
         operation_service: Any,
         task_service: Any,
         reject_message: str | None = None,
+        persist_assistant_message: bool = True,
+        allow_next_approval: bool = True,
     ) -> ApprovalDecisionResult:
         try:
             reply = agent_runtime.resume_approval(
@@ -350,7 +407,7 @@ class ApprovalService:
             reject_message=reject_message,
         )
         assistant_message = None
-        if assistant_content:
+        if assistant_content and persist_assistant_message:
             assistant_message = self.session_service.append_assistant_message(
                 identity,
                 session.session_id,
@@ -366,7 +423,7 @@ class ApprovalService:
             tasks=tasks,
         )
         next_approval = None
-        if reply.approval_request is not None:
+        if reply.approval_request is not None and allow_next_approval:
             next_approval = self.create_approval(
                 identity,
                 session,
@@ -385,6 +442,99 @@ class ApprovalService:
             paused=next_approval is not None,
         )
 
+    def _resume_expired_cleanup_with_lock(
+        self,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        *,
+        agent_runtime: Any,
+        operation_service: Any,
+        task_service: Any,
+    ) -> ApprovalRecord:
+        with session_locks.acquire_run_lock(session.session_id) as acquired:
+            if not acquired:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error_type": "session_run_locked",
+                        "detail": "当前 Session 正在执行 AI 请求，请稍后重试恢复审批。",
+                    },
+                )
+            latest = self._find_approval(session, approval.approval_id)
+            if latest.status != "expired" or not latest.resume_failed:
+                return latest
+            return self._resume_expired_cleanup(
+                identity,
+                session,
+                latest,
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+            )
+
+    def _resume_expired_cleanup(
+        self,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        *,
+        agent_runtime: Any,
+        operation_service: Any,
+        task_service: Any,
+    ) -> ApprovalRecord:
+        try:
+            result = self._resume_decided(
+                identity,
+                session,
+                approval,
+                "rejected",
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+                reject_message="审批超时，操作已自动取消，未执行 DBAAS 变更。",
+                persist_assistant_message=False,
+                allow_next_approval=False,
+            )
+        except Exception:
+            logger.exception(
+                "expired approval resume failed approval_id=%s session_id=%s",
+                approval.approval_id,
+                session.session_id,
+            )
+            return self._find_approval(session, approval.approval_id)
+        logger.info(
+            "expired approval resume cleared approval_id=%s session_id=%s",
+            approval.approval_id,
+            session.session_id,
+        )
+        return result.approval
+
+    def _expire_and_resume(
+        self,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        *,
+        agent_runtime: Any,
+        operation_service: Any,
+        task_service: Any,
+    ) -> ApprovalRecord:
+        marked = self._mark_expired(session, approval)
+        logger.info(
+            "approval expired approval_id=%s session_id=%s",
+            marked.approval_id,
+            session.session_id,
+        )
+        return self._resume_expired_cleanup(
+            identity,
+            session,
+            marked,
+            agent_runtime=agent_runtime,
+            operation_service=operation_service,
+            task_service=task_service,
+        )
+
     def _mark_expired(self, session: SessionMeta, approval: ApprovalRecord) -> ApprovalRecord:
         expired = approval.model_copy(
             update={
@@ -394,6 +544,17 @@ class ApprovalService:
         )
         self.repository.append_approval(session.user_id, session.session_id, expired)
         return expired
+
+    @staticmethod
+    def _raise_approval_expired(approval: ApprovalRecord) -> None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "approval_expired",
+                "detail": "审批已超时，操作已取消。",
+                "approval": approval.model_dump(mode="json"),
+            },
+        )
 
     def _emit_task_creation_notice_if_needed(
         self,
@@ -443,6 +604,58 @@ class ApprovalService:
     @staticmethod
     def _is_expired(approval: ApprovalRecord) -> bool:
         return approval.expires_at is not None and approval.expires_at <= utc_now()
+
+    def _load_current_services(
+        self,
+        identity: Identity,
+        tool_calls: list[tuple[str, dict[str, Any]]],
+    ) -> dict[str, dict[str, Any]]:
+        if self.current_value_client is None:
+            return {}
+        service_names = {
+            str(tool_args.get("service_name") or "")
+            for _tool_name, tool_args in tool_calls
+            if tool_args.get("service_name")
+        }
+        snapshots: dict[str, dict[str, Any]] = {}
+        for service_name in sorted(service_names):
+            try:
+                snapshot = self.current_value_client.get_service(
+                    identity,
+                    service_name,
+                    timeout_seconds=self.current_value_timeout_seconds,
+                )
+            except DbaasWriteClientError:
+                continue
+            if isinstance(snapshot, dict):
+                snapshots[service_name] = snapshot
+        return snapshots
+
+    def _assert_no_task_conflicts(
+        self,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        task_service: Any,
+    ) -> None:
+        for tool_call in approval.interrupted_tool_calls:
+            config = require_action_config(tool_call.tool_name)
+            if config.execution_mode != "async":
+                continue
+            target = _service_target(tool_call.tool_args)
+            try:
+                task_service.ensure_no_conflicting_task(
+                    session,
+                    build_operation_conflict_key(config.action, [target]),
+                )
+            except TaskConflictError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error_type": "task_conflict",
+                        "detail": "当前 Session 已存在同类未结束任务，未创建新的 DBAAS 任务。",
+                        "existing_task": exc.task.model_dump(mode="json"),
+                    },
+                ) from exc
 
     @staticmethod
     def _find_tasks_for_operations(
@@ -516,4 +729,18 @@ def _build_task_creation_notice(tasks: list[TaskRecord]) -> str:
     return (
         f"本次审批确认已创建 {len(sorted_tasks)} 个异步任务，"
         "系统会在任务结束后继续提醒最终执行结果。"
+    )
+
+
+def _service_target(tool_args: dict[str, Any]) -> OperationTarget:
+    service_name = str(tool_args.get("service_name") or "")
+    child_service_type = str(tool_args.get("child_service_type") or "")
+    qualifiers: dict[str, Any] = {}
+    if child_service_type:
+        qualifiers["child_service_type"] = child_service_type
+    return OperationTarget(
+        kind="service",
+        id=service_name,
+        name=service_name or None,
+        qualifiers=qualifiers,
     )

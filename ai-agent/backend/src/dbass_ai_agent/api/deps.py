@@ -8,6 +8,7 @@ from dbass_ai_agent.agent.factory import AgentFactoryError
 from dbass_ai_agent.agent.runtime import DeepAgentRuntime
 from dbass_ai_agent.config import Settings, get_settings
 from dbass_ai_agent.dbaas.config import dbaas_config_from_settings
+from dbass_ai_agent.dbaas.write_client import DbaasWriteClient
 from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.identity.resolver import resolve_identity
 from dbass_ai_agent.operations.approval_service import ApprovalService
@@ -67,9 +68,14 @@ def get_task_service(
 def get_approval_service(
     session_service: SessionService = Depends(get_session_service),
 ) -> ApprovalService:
+    settings = get_settings()
+    dbaas_config = dbaas_config_from_settings(settings)
+    current_value_client = DbaasWriteClient(dbaas_config) if settings.dbaas_approval_current_value_enabled else None
     return ApprovalService(
         repository=session_service.repository,
         session_service=session_service,
+        current_value_client=current_value_client,
+        current_value_timeout_seconds=settings.dbaas_approval_current_value_timeout_seconds,
     )
 
 

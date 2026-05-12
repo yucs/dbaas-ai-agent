@@ -162,8 +162,13 @@ class SessionService:
         content: str,
         *,
         dedupe_recent_seconds: int | None = None,
+        restore_archived: bool = True,
     ) -> ChatMessage | None:
-        meta = self.ensure_active_session(identity, session_id)
+        meta = (
+            self.ensure_active_session(identity, session_id)
+            if restore_archived
+            else self.get_session(identity, session_id).meta
+        )
         now = utc_now()
         if dedupe_recent_seconds and self._has_recent_system_message(
             meta.user_id,

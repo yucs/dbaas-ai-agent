@@ -28,12 +28,28 @@ _ROLE_ORDER: dict[RequiredRole, int] = {
 }
 
 
-def build_operation_proposal(tool_name: str, tool_args: dict[str, Any]) -> OperationProposal:
-    return build_batch_operation_proposal([(tool_name, tool_args)])
+def build_operation_proposal(
+    tool_name: str,
+    tool_args: dict[str, Any],
+    *,
+    current_services: dict[str, dict[str, Any]] | None = None,
+) -> OperationProposal:
+    return build_batch_operation_proposal([(tool_name, tool_args)], current_services=current_services)
 
 
-def build_batch_operation_proposal(tool_calls: list[tuple[str, dict[str, Any]]]) -> OperationProposal:
-    items = [build_operation_proposal_item(tool_name, tool_args) for tool_name, tool_args in tool_calls]
+def build_batch_operation_proposal(
+    tool_calls: list[tuple[str, dict[str, Any]]],
+    *,
+    current_services: dict[str, dict[str, Any]] | None = None,
+) -> OperationProposal:
+    items = [
+        build_operation_proposal_item(
+            tool_name,
+            tool_args,
+            current_service=(current_services or {}).get(str(tool_args.get("service_name") or "")),
+        )
+        for tool_name, tool_args in tool_calls
+    ]
     if not items:
         raise ValueError("operation proposal must contain at least one item")
     return OperationProposal(
@@ -45,7 +61,12 @@ def build_batch_operation_proposal(tool_calls: list[tuple[str, dict[str, Any]]])
     )
 
 
-def build_operation_proposal_item(tool_name: str, tool_args: dict[str, Any]) -> OperationProposalItem:
+def build_operation_proposal_item(
+    tool_name: str,
+    tool_args: dict[str, Any],
+    *,
+    current_service: dict[str, Any] | None = None,
+) -> OperationProposalItem:
     config = require_action_config(tool_name)
     target = _service_target(tool_args)
     return OperationProposalItem(
@@ -55,7 +76,7 @@ def build_operation_proposal_item(tool_name: str, tool_args: dict[str, Any]) -> 
         risk_level=config.risk_level,
         required_role=config.required_role,
         execution_mode=config.execution_mode,
-        parameters=_parameters(config.action, tool_args),
+        parameters=_parameters(config.action, tool_args, current_service=current_service),
         risk_notes=list(config.risk_notes),
     )
 
@@ -122,16 +143,54 @@ def _summary(action: str, tool_args: dict[str, Any]) -> str:
     return f"执行 {action}"
 
 
-def _parameters(action: str, tool_args: dict[str, Any]) -> list[OperationParameter]:
+def _parameters(
+    action: str,
+    tool_args: dict[str, Any],
+    *,
+    current_service: dict[str, Any] | None,
+) -> list[OperationParameter]:
     parameters: list[OperationParameter] = []
+    child = _find_child(current_service or {}, str(tool_args.get("child_service_type") or ""))
     if action == "service.resource.update":
-        _append_if_present(parameters, tool_args, "cpu", "CPU", "C")
-        _append_if_present(parameters, tool_args, "memory", "内存", "GB")
-        _append_if_present(parameters, tool_args, "platform_auto", "平台自动分配", None)
+        _append_if_present(parameters, tool_args, "cpu", "CPU", "C", _first_unit_value(child, "cpu"), "C")
+        _append_if_present(parameters, tool_args, "memory", "内存", "GB", _first_unit_value(child, "memory"), "GB")
+        _append_if_present(
+            parameters,
+            tool_args,
+            "platform_auto",
+            "平台自动分配",
+            None,
+            child.get("platformAuto") if child else None,
+            None,
+        )
     elif action == "service.storage.update":
-        _append_if_present(parameters, tool_args, "data_volume_size", "data 卷", "GB")
-        _append_if_present(parameters, tool_args, "log_volume_size", "log 卷", "GB")
-        _append_if_present(parameters, tool_args, "platform_auto", "平台自动分配", None)
+        _append_if_present(
+            parameters,
+            tool_args,
+            "data_volume_size",
+            "data 卷",
+            "GB",
+            _first_storage_size(child, "data"),
+            "GB",
+        )
+        _append_if_present(
+            parameters,
+            tool_args,
+            "log_volume_size",
+            "log 卷",
+            "GB",
+            _first_storage_size(child, "log"),
+            "GB",
+        )
+        _append_if_present(
+            parameters,
+            tool_args,
+            "platform_auto",
+            "平台自动分配",
+            None,
+            child.get("platformAuto") if child else None,
+            None,
+        )
     elif action == "service.image.upgrade":
         _append_if_present(parameters, tool_args, "image", "镜像", None)
         _append_if_present(parameters, tool_args, "version", "版本", None)
@@ -145,6 +204,8 @@ def _append_if_present(
     key: str,
     label: str,
     unit: str | None,
+    current_value: Any | None = None,
+    current_unit: str | None = None,
 ) -> None:
     if key not in tool_args or tool_args[key] is None:
         return
@@ -154,5 +215,40 @@ def _append_if_present(
             label=label,
             value=tool_args[key],
             unit=unit,
+            current_value=current_value,
+            current_unit=current_unit,
         )
     )
+
+
+def _find_child(service_detail: dict[str, Any], child_service_type: str) -> dict[str, Any]:
+    for child in service_detail.get("services", []):
+        if not isinstance(child, dict):
+            continue
+        if child.get("type") == child_service_type or child.get("name") == child_service_type:
+            return child
+    return {}
+
+
+def _first_unit_value(child: dict[str, Any], field: str) -> Any:
+    units = child.get("units")
+    if not isinstance(units, list) or not units:
+        return None
+    first = units[0]
+    return first.get(field) if isinstance(first, dict) else None
+
+
+def _first_storage_size(child: dict[str, Any], storage_type: str) -> Any:
+    units = child.get("units")
+    if not isinstance(units, list) or not units:
+        return None
+    first = units[0]
+    if not isinstance(first, dict):
+        return None
+    storage = first.get("storage")
+    if not isinstance(storage, dict):
+        return None
+    volume = storage.get(storage_type)
+    if not isinstance(volume, dict):
+        return None
+    return volume.get("size")

@@ -16,6 +16,24 @@ from dbass_ai_agent.config import Settings
 
 
 class SettingsFromFileTests(unittest.TestCase):
+    def test_approval_current_value_defaults_to_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            config_path.write_text(
+                textwrap.dedent(
+                    """
+                    [dbaas_server]
+                    base_url = "http://127.0.0.1:9000"
+                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+
+            settings = Settings.from_file(config_path)
+
+            self.assertTrue(settings.dbaas_approval_current_value_enabled)
+            self.assertEqual(settings.dbaas_approval_current_value_timeout_seconds, 5)
+
     def test_from_file_reads_toml_and_resolves_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_root = Path(tmpdir)
@@ -59,6 +77,8 @@ class SettingsFromFileTests(unittest.TestCase):
                     [dbaas_server]
                     base_url = "http://127.0.0.1:9000"
                     request_timeout_seconds = 7
+                    approval_current_value_enabled = false
+                    approval_current_value_timeout_seconds = 3
 
                     [dbaas_workspace]
                     dir = "./var/dbaas"
@@ -105,6 +125,8 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.summary_max_tokens, 1024)
             self.assertEqual(settings.dbaas_server_base_url, "http://127.0.0.1:9000")
             self.assertEqual(settings.dbaas_request_timeout_seconds, 7)
+            self.assertFalse(settings.dbaas_approval_current_value_enabled)
+            self.assertEqual(settings.dbaas_approval_current_value_timeout_seconds, 3)
             self.assertEqual(settings.dbaas_sync_interval_seconds, 5)
             self.assertEqual(settings.dbaas_ttl_seconds, 30)
             self.assertEqual(settings.dbaas_task_refresh_interval_seconds, 11)

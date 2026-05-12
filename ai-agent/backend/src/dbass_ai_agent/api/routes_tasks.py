@@ -191,6 +191,7 @@ async def _emit_pending_terminal_notices(
                 identity,
                 session.session_id,
                 _build_terminal_notice(subject, marked_tasks),
+                restore_archived=False,
             )
             yield (
                 "task_terminal_notice_emitted",

@@ -725,17 +725,22 @@ Command(resume) decision type: approve / reject
 1. 根据 `session_id` 加载当前用户可访问的 Session
 2. 在该 Session 的审批记录中查找 `approval_id`
 3. 校验当前用户满足审批操作者规则
-4. 检查审批是否已过期，过期则标记为 `expired` 并拒绝本次决策
-5. 校验审批状态仍为 `pending`
-6. 更新审批记录为 `approved` 或 `rejected`
-7. 使用 approval 记录中的 `thread_id` 恢复同一个 DeepAgent thread
-8. 将恢复后的运行事件继续写入当前 run/session 事件流
+4. 获取当前 Session 的 `session_run_lock`
+5. 重新读取最新 approval
+6. 检查审批是否已过期，过期则标记为 `expired`，使用 rejected resume 清理暂停点，
+   并返回 `409 approval_expired`
+7. 校验审批状态仍为 `pending`
+8. 更新审批记录为 `approved` 或 `rejected`
+9. 使用 approval 记录中的 `thread_id` 恢复同一个 DeepAgent thread
+10. 将恢复后的运行事件继续写入当前 run/session 事件流
 
 同一 Session 内重复点击确认/拒绝的语义：
 
 - 只有 `pending` approval 可以进入第一次决策
 - 第一次从 `pending` 更新为 `approved` 或 `rejected` 后，才允许执行 `Command(resume=...)`
-- 已经是 `approved/rejected/expired` 的 approval，后续提交不再执行 `Command(resume=...)`
+- 已经是 `approved/rejected` 的 approval，后续提交不再重复执行 `Command(resume=...)`
+- 已经是 `expired` 的 approval，后续提交不允许批准；仅当 `resume_failed=true` 时，
+  允许用 rejected resume 重试清理 DeepAgent 暂停点
 - 如果重复提交的 decision 与当前终态一致，直接返回当前 approval 状态
 - 如果重复提交的 decision 与当前终态冲突，返回 `409 Conflict`
 - 冲突错误建议使用 `error_type=decision_conflict`
@@ -849,8 +854,7 @@ Command(
 TTL 第一版建议：
 
 ```text
-普通写操作：30 分钟或 1 小时
-高风险操作：15 分钟
+所有写操作：5 分钟
 ```
 
 具体值后续配置化。
@@ -867,6 +871,9 @@ TTL 第一版建议：
 
 如果检查发现 approval 过期，就标记 `expired` 并 resume reject。
 这样可以避免用户忘记处理确认，导致 Session 长期卡在 `pending approval`。
+`GET /api/v1/sessions/{session_id}` 和
+`GET /api/v1/sessions/{session_id}/approvals` 必须执行该 lazy expiration，
+否则页面刷新后会继续看到已过期的 pending 确认卡和批准按钮。
 
 过期处理中的 DeepAgent resume 是清理暂停点，不是执行 DBAAS 操作。
 建议采用保守顺序：
@@ -880,8 +887,64 @@ TTL 第一版建议：
 
 `resume_failed` 不应把 approval 改回 `pending`，
 也不应调用 DBAAS 写接口。
-如果发新消息前重试 resume 仍失败，返回 `409 Conflict` 或 `503`，
-提示当前 Session 的过期审批暂停点尚未清理完成。
+查询 Session、查询 approvals、发新消息前都应重试清理 `resume_failed=true`
+的 expired approval。查询接口即使清理失败，也应返回 `expired` 状态和
+`resume_failed/resume_error`，让前端不再展示批准按钮；发新消息前重试 resume
+仍失败时，返回 `409 Conflict` 或 `503`，提示当前 Session 的过期审批暂停点尚未清理完成。
+审批 decision 接口如果发现 pending approval 已过期，也必须走同一套过期处理：
+先标记 `expired`，再使用 reject resume 清理暂停点，最后返回 `409 approval_expired`。
+审批 decision 在拿到 Session run lock 并重新读取最新 approval 后，必须再次检查
+`expires_at`，避免审批请求排队等待期间跨过过期时间后仍被批准。
+`expired` 虽然是终态，但 decision 接口遇到 `expired + resume_failed=true` 时，
+仍应允许重试 DeepAgent rejected resume 清理暂停点；无论重试成功或失败，
+最终都返回 `409 approval_expired`，而不是 `decision_conflict`。
+不能只更新审批记录而留下 DeepAgent interrupt。
+前端也应按 `expires_at <= now` 做本地兜底，隐藏或禁用批准/拒绝按钮并提示刷新，
+避免页面长时间停留时继续展示可操作按钮。
+lazy expiration 入口包含查询接口，因此查询 Session 或 approvals 可能产生写副作用：
+更新 approval 状态、重试 DeepAgent reject resume。超时清理属于系统收尾，
+查询触发的清理不应追加 assistant message，也不应因此把 archived Session 自动恢复为 active。
+超时 rejected resume 后即使 DeepAgent 返回新的 approval request，也不应创建新的审批卡。
+
+过期清理后的状态语义：
+
+```text
+pending + expires_at <= now
+  -> 首次发现超时，标记 expired，并尝试 DeepAgent reject resume 清理暂停点
+
+expired + resume_failed=false
+  -> 业务审批已过期，DeepAgent 暂停点也已清理成功；后续 lazy expiration 必须跳过，
+     不再重复调用 resume
+
+expired + resume_failed=true
+  -> 业务审批已过期，但 DeepAgent 暂停点清理失败；后续查询或发消息前继续重试清理
+```
+
+当前第一版不额外实现本地幂等锁，顺序请求下依赖上述状态语义避免重复清理：
+只要 reject resume 成功，最新 approval 就会保留 `expired + resume_failed=false`，
+下一次 lazy expiration 会直接跳过。并发场景下如果两个请求几乎同时发现同一个
+`pending + expired` approval，理论上可能同时尝试 resume 同一个 DeepAgent interrupt。
+该风险暂时接受，原因是超时清理统一使用 rejected resume，不会批准 DBAAS 写操作；
+且预期 DeepAgent/LangGraph 对同一 thread 已完成的 resume 不会产生新的业务写入。
+如果后续日志中出现重复 assistant message、重复 resume error，或重复 resume 影响体验，
+再补 session lock + 重新读取最新 approval 的幂等保护。
+
+锁职责需要区分：
+
+- `session_run_lock` 保护用户主运行链路，例如用户发消息触发 DeepAgent run、
+  用户 approval decision 触发 DeepAgent resume。
+- lazy expiration 的 DeepAgent rejected resume cleanup 属于系统 best-effort 收尾，
+  第一版可以不强制持有 `session_run_lock`。
+- Session 文件锁保护 `approvals.jsonl` / `operations.jsonl` / `tasks.jsonl` append 写入。
+  cleanup 前后的 approval 状态更新必须通过 Session 文件锁写入完整最新记录。
+- 因此，lazy cleanup 的剩余风险是语义层面的重复 cleanup，不是 jsonl 文件写坏；
+  重复 cleanup 风险按 rejected cleanup 场景暂时接受。
+
+归档和删除 Session 的处理略有区别：
+
+- 归档前如果仍存在 `expired + resume_failed=true`，应返回冲突错误，避免把仍有未清理
+  DeepAgent 暂停点的 Session 归档。
+- 删除 Session 可以继续执行，因为删除流程会清理 Session 数据和对应 thread checkpoint。
 
 ### 5.6 前端确认面板
 
@@ -951,6 +1014,9 @@ approval 变为 `approved`、`rejected` 或 `expired` 后，
 
 这样做是为了保护同一个 `thread_id` 的 DeepAgent checkpoint，
 避免两个并发请求同时推进同一个 Session 的运行时状态。
+它不替代 Session 文件锁；文件锁负责保护 `approvals.jsonl`、`operations.jsonl`、
+`tasks.jsonl` 的 append 写入一致性。`messages.jsonl` 由 `session_run_lock`
+或具体调用路径的短互斥/去重策略保护。
 
 处理方式：
 
@@ -963,6 +1029,12 @@ POST /api/v1/sessions/{session_id}/messages/stream
 approval decision 恢复执行时也需要占用同一个 Session 的 `session_run_lock`。
 如果同一个 approval 被重复提交，应优先按 approval 最新状态做幂等返回，
 不能重复执行已批准的写操作。
+approval decision 接口如果发现 pending approval 已过期，真正的
+`expired` 标记与 DeepAgent rejected resume 清理也应在拿到 `session_run_lock`
+并重新读取最新 approval 后执行。
+approval lazy expiration 的 rejected resume cleanup 是系统收尾，不批准 DBAAS 写操作；
+查询、发消息前检查、归档/删除前检查触发该 cleanup 时，第一版不强制持有
+`session_run_lock`，但所有 approval 状态落盘仍必须走 Session 文件锁。
 
 异步 DBAAS task 不需要持有 `session_run_lock`。
 task 创建成功后，即使 DBAAS 任务仍在运行，也不阻止用户在同一 Session 继续发起其他无冲突请求。
@@ -981,19 +1053,27 @@ task 刷新本身不推进 DeepAgent thread，不需要占用 DeepAgent run/resu
 锁顺序：
 
 ```text
+用户主运行链路：
 1. 获取 session_run_lock
 2. 需要写状态时，短暂获取 Session 文件锁并 append
 3. 释放 Session 文件锁
-4. 执行 DeepAgent run/resume 或 DBAAS HTTP
+4. 执行 DeepAgent run/resume，或该 run/resume 链路内触发的 DBAAS 写 HTTP
 5. 需要写结果时，再短暂获取 Session 文件锁并 append
 6. 释放 Session 文件锁
 7. 释放 session_run_lock
+
+lazy expiration cleanup：
+1. 可不强制获取 session_run_lock
+2. 标记 expired / resume_failed / resume_failed cleared 等状态更新必须短暂获取 Session 文件锁并 append
+3. 不在 Session 文件锁内执行 DeepAgent resume
 ```
 
 约束：
 
 - `session_run_lock` 保护同一个 Session 的 DeepAgent run/resume
-- Session 文件锁只保护 append 写入
+- Session 文件锁只保护 `approvals.jsonl` / `operations.jsonl` / `tasks.jsonl`
+  append 写入；这些状态文件的更新都必须走文件锁
+- `messages.jsonl` 不纳入这把文件锁强约束，由 `session_run_lock` 或具体调用路径保护
 - 不在 Session 文件锁内执行 DeepAgent 调用
 - 不在 Session 文件锁内执行 DBAAS HTTP
 - 不在 Session 文件锁内等待 SSE 推送
@@ -1384,6 +1464,9 @@ data: {
 - 不跨 Session
 - 只在某个通知组全部异步 task 进入终态后写入一次系统终态提醒
 - 系统终态提醒写入 `messages.jsonl`，role 为 `system`
+- 如果 Session 已归档，系统终态提醒可以写入 `messages.jsonl`，但不得自动恢复为 active
+- 归档 Session 收到终态提醒后，可以更新 `updated_at`、`last_message_at` 和会话预览，
+  因此归档列表排序可能变化
 - 不写入 `/messages/stream`
 - 不替代 `tasks.jsonl`
 - SSE 断线或页面刷新后，通过 `GET /sessions/{session_id}/tasks` 补齐状态
@@ -1623,7 +1706,7 @@ operations.jsonl
 tasks.jsonl
 ```
 
-P7A/P7B 统一使用 `.json` 文件名，不使用 `.jsonl` 文件名。
+P7A/P7B 统一使用 append-only `.jsonl` 文件名，读取时 fold latest view。
 文件内容采用逐行 JSON，也就是 append-only log。
 每一行都是该对象的一条完整最新记录，不是局部 patch。
 状态变化时 append 一条同 id 的完整对象，读取时以后写入的完整对象为准。
@@ -1796,10 +1879,14 @@ Session 的未结束事项包括：
 归档或删除前应先执行 approval lazy expiration。
 如果 `pending approval` 已过期，先标记为 `expired`，
 并通过 reject resume 清理暂停点，再判断是否仍存在未结束事项。
+普通 `expired` approval 不阻塞归档或删除；但 `expired + resume_failed=true`
+表示 DeepAgent 暂停点尚未清理成功，应阻塞归档。删除仍可继续，因为删除流程会清理
+Session 数据和对应 thread checkpoint。
 
 ```text
 POST /api/v1/sessions/{session_id}/archive
 -> 先执行 approval lazy expiration
+-> 有 expired approval 且 resume_failed=true: 409 Conflict
 -> session_run_lock 已被占用: 409 Conflict
 -> 有 pending approval: 409 Conflict
 -> 有 non-terminal task: 409 Conflict
@@ -2207,8 +2294,8 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 任务提醒展示规则：
 
 - Session 中存在非终态任务时，页面应展示运行中任务提醒或 task card
-- 任务提醒从 `tasks.jsonl` 派生，不写入 `messages.jsonl`
-- 任务提醒不是 `system` role message，也不是 assistant message
+- 运行中的任务提醒从 `tasks.jsonl` 派生，不写入 `messages.jsonl`
+- 任务终态系统提醒写入 `messages.jsonl`，role 为 `system`
 - 页面刷新后，任务提醒由 `GET /api/v1/sessions/{session_id}/tasks` 恢复
 - 当前页面收到 `task_status_changed` 后，局部更新对应 task card
 - 任务进入终态时，可以展示 toast 或状态变化提示
@@ -2364,6 +2451,18 @@ DELETE /api/v1/sessions/{session_id}
   "detail": "当前 Session 存在运行中的 DBAAS 任务，请等待任务结束后再归档或删除。"
 }
 ```
+
+如果归档前过期审批的 DeepAgent 暂停点仍未清理成功，返回：
+
+```json
+{
+  "error_type": "expired_approval_resume_failed",
+  "detail": "当前 Session 的过期审批暂停点尚未清理完成，请稍后重试。"
+}
+```
+
+该错误只阻塞归档。删除 Session 可以继续执行，因为删除流程会清理 Session 数据和
+对应 thread checkpoint。
 
 以上情况都建议使用 `409 Conflict`。
 `restore` 不需要检查未结束事项。
@@ -2728,6 +2827,18 @@ GET /api/v1/sessions/{session_id}/tasks
 该接口需要 lazy refresh 当前 Session 的非终态任务，
 让异步 task 创建后能刷新到 `succeeded/failed/canceled/refresh_failed` 等状态。
 
+第一批补齐项：
+
+- 审批超时 lazy expiration 不只更新审批状态，还需要用 reject resume 清理
+  DeepAgent 暂停点；清理失败时保留 `resume_failed/resume_error`，不得执行 DBAAS 写操作。
+- 审批卡 `parameters[].current_value/current_unit` 默认开启从 DBAAS 当前服务快照短超时尽力补齐；
+  可通过配置关闭以避免服务详情接口慢时拖慢审批卡。查询失败或当前值不可判定时保持为空，
+  前端不得编造 `8GB -> 15GB`。
+- 异步写操作创建前如果当前 Session 已有相同 `operation_conflict_key` 的非终态任务，
+  API 语义为 `409 Conflict`，响应中返回 existing task 的安全信息；不得创建新的 DBAAS task。
+- 压缩提示词必须显式保护操作事实，包括 `approval_id`、`operation_id`、`task_id`、
+  审批状态、执行结果、非终态任务和待核查/超时状态。
+
 第一批不要求实现：
 
 - task SSE
@@ -2754,7 +2865,7 @@ GET /api/v1/sessions/{session_id}/tasks
 - Session 有 `pending approval` 时不允许继续发新消息
 - 审批决策接口必须绑定 `session_id`，只能 resume 当前 approval 所属的 `thread_id`
 - 实现 approval 超时自动取消，超时后通过 reject resume 清理暂停点
-- P7A/P7B 持久化统一使用 `.json` 文件，不使用 `.jsonl`
+- P7A/P7B 持久化统一使用 append-only `.jsonl` 文件，读取时 fold latest view
 - P7A 异步操作只创建 task、写入 task 引用并返回 task_id，不实现 task SSE 和任务面板
 - P7A 基线不实现 task lazy refresh；如果 P7A 单独开放异步写工具，则必须补最小 task lazy refresh，或暂不开放异步写工具
 
@@ -2797,7 +2908,8 @@ GET /api/v1/sessions/{session_id}/tasks
 - Session 有 `pending approval` 时不允许归档或删除
 - Session 的 `session_run_lock` 被占用时不允许归档或删除
 - 归档或删除前会先执行 approval lazy expiration
-- 已过期 approval 不应继续阻塞归档或删除
+- 已过期 approval 不应继续阻塞归档或删除；但 `expired + resume_failed=true` 应阻塞归档，
+  删除可继续清理 Session 和 checkpoint
 - approval lazy expiration 如果 resume reject 失败，应记录 `resume_failed` 并在下次查询或发消息前重试
 - approval 超时后状态变为 `expired`
 - approval 超时后不允许批准
