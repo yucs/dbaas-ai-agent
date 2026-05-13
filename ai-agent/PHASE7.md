@@ -2766,9 +2766,32 @@ restart
 - 权限判断以 DBAAS 控制面返回为准，项目侧也应做基础校验
 - `user_id`、`role` 不能作为 AI tool 参数暴露给模型填写
 - 写工具必须从 request/session identity 获取当前身份
-- `SessionMeta.role/user` 是创建 Session 时的身份快照，只用于展示和审计，不作为写操作实时权限判断依据
+- `SessionMeta.role/user` 是创建 Session 时的身份快照，用于展示、审计和选择角色扩展系统提示词；写操作实时权限判断仍以当前 request identity、工具校验和 DBAAS 控制面为准
 - DBAAS 写接口调用时必须携带当前身份，由 DBAAS 再次校验目标资源是否允许操作
 - 所有写操作必须审批
+
+### 12.1 Session 身份不可变
+
+一个 Session 创建后绑定创建时身份和运行线程：
+
+- `user_id`
+- `role`
+- `user`
+- `thread_id`
+- 角色扩展系统提示词
+
+同一个 Session 生命周期内不得切换身份或角色扩展系统提示词。
+
+后续请求访问该 Session 时，当前请求身份必须与 `SessionMeta` 一致。
+如果 `user_id`、`role` 或普通用户的 `user` 发生变化，
+后端不得继续复用原 Session/thread。
+
+角色变化时，前端应删除旧 Session 或创建新的 Session。
+管理员切换到普通用户、普通用户切换到管理员，都必须使用新的 Session。
+
+管理员是否可以接管普通用户 Session 不在本阶段支持范围内；
+如后续需要代用户操作，应单独设计 `actor/subject` 审计模型，
+不得通过切换当前 Session 身份实现。
 
 风险等级建议：
 
@@ -2796,6 +2819,28 @@ critical
 - 大规格缩容要求先查询监控和健康状态
 
 ## 13. Prompt 与后端职责
+
+系统提示词采用 common + role extend 组合：
+
+```text
+backend/prompts/system.md
++ backend/prompts/user_extend_system_prompt.md
+或
+backend/prompts/system.md
++ backend/prompts/admin_extend_system_prompt.md
+```
+
+后端根据 Session 创建时的 `role` 选择对应角色扩展系统提示词，
+并追加到 common system prompt 末尾。
+
+角色扩展系统提示词只用于告诉模型当前身份下的行为边界、工具选择倾向和回答策略，
+不作为授权依据。
+
+真实权限判断仍由 API 身份校验、DBAAS tool、approval service 和 DBAAS 控制面强制执行。
+
+同一个 Session/thread 生命周期内不得切换角色扩展系统提示词。
+如果当前请求身份与 Session 创建身份不一致，应拒绝继续使用该 Session/thread，
+由前端删除旧 Session 或创建新 Session。
 
 系统提示词只保留通用操作规则：
 
