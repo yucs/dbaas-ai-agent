@@ -9,6 +9,7 @@ from dbass_ai_agent.sessions.models import (
     SessionDetail,
     SessionIndexItem,
     SessionMeta,
+    StaleIdentitySessionIndexItem,
 )
 
 
@@ -18,6 +19,7 @@ class CreateSessionRequest(BaseModel):
 
 class SessionListResponse(BaseModel):
     items: list[SessionIndexItem] = Field(default_factory=list)
+    stale_identity_items: list[StaleIdentitySessionIndexItem] = Field(default_factory=list)
 
 
 class SessionResponse(BaseModel):

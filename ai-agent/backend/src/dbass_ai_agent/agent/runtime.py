@@ -145,7 +145,7 @@ class DeepAgentRuntime:
                     self._operation_context(identity, session, run_id),
                 ):
                     output = self._normalize_run_output(
-                        self._invoke_agent(session.thread_id, question)
+                        self._invoke_agent(session, question)
                     )
             except AgentInvocationError:
                 logger.exception("agent invoke failed")
@@ -206,7 +206,7 @@ class DeepAgentRuntime:
                         )
                     ),
                 ):
-                    result = self.artifacts.agent.invoke(
+                    result = self._agent_for_session(session).invoke(
                         Command(resume=resume_decision),
                         config={"configurable": {"thread_id": session.thread_id}},
                     )
@@ -266,7 +266,7 @@ class DeepAgentRuntime:
 
             started_at = perf_counter()
             try:
-                agent_stream = self._stream_agent_text(session.thread_id, question)
+                agent_stream = self._stream_agent_text(session, question)
                 while True:
                     try:
                         with (
@@ -346,6 +346,9 @@ class DeepAgentRuntime:
             )
         )
 
+    def _agent_for_session(self, session: SessionMeta):
+        return self.artifacts.agents[session.role]
+
     def _drain_compression_events(
         self,
         run_id: str,
@@ -379,18 +382,19 @@ class DeepAgentRuntime:
         await self.artifacts.http_async_client.aclose()
         self.artifacts.connection.close()
 
-    def _invoke_agent(self, thread_id: str, prompt: str) -> AgentRunOutput:
-        result = self.artifacts.agent.invoke(
+    def _invoke_agent(self, session: SessionMeta, prompt: str) -> AgentRunOutput:
+        result = self._agent_for_session(session).invoke(
             {"messages": [{"role": "user", "content": prompt}]},
-            config={"configurable": {"thread_id": thread_id}},
+            config={"configurable": {"thread_id": session.thread_id}},
         )
         return self._normalize_run_output(result)
 
-    def _stream_agent_text(self, thread_id: str, prompt: str) -> Iterator[str | AgentApprovalRequest]:
-        stream = getattr(self.artifacts.agent, "stream", None)
+    def _stream_agent_text(self, session: SessionMeta, prompt: str) -> Iterator[str | AgentApprovalRequest]:
+        agent = self._agent_for_session(session)
+        stream = getattr(agent, "stream", None)
         if not callable(stream):
             logger.debug("agent stream unavailable fallback=invoke")
-            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            output = self._normalize_run_output(self._invoke_agent(session, prompt))
             if output.approval_request:
                 yield output.approval_request
             else:
@@ -398,12 +402,12 @@ class DeepAgentRuntime:
             return
 
         input_payload = {"messages": [{"role": "user", "content": prompt}]}
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": session.thread_id}}
         try:
             events = stream(input_payload, config=config, stream_mode=["messages", "updates"])
         except TypeError:
             logger.debug("agent stream type_error fallback=invoke")
-            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            output = self._normalize_run_output(self._invoke_agent(session, prompt))
             if output.approval_request:
                 yield output.approval_request
             else:
@@ -441,7 +445,7 @@ class DeepAgentRuntime:
             if emitted_chunk:
                 raise
             logger.debug("agent stream event_type_error fallback=invoke")
-            output = self._normalize_run_output(self._invoke_agent(thread_id, prompt))
+            output = self._normalize_run_output(self._invoke_agent(session, prompt))
             if output.approval_request:
                 yield output.approval_request
             else:

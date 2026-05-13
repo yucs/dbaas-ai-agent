@@ -47,6 +47,13 @@ class SessionIndexItem(BaseModel):
     preview: str = ""
 
 
+class StaleIdentitySessionIndexItem(SessionIndexItem):
+    role: Literal["admin", "user"]
+    user: str | None = None
+    cleanup_only: bool = True
+    reason: Literal["session_identity_changed"] = "session_identity_changed"
+
+
 class ApprovalRecord(BaseModel):
     approval_id: str
     status: Literal["pending", "approved", "rejected", "expired"] = "pending"

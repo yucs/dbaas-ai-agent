@@ -27,8 +27,8 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
         calls: list[tuple[str, str]] = []
 
-        def invoke_agent(thread_id: str, prompt: str) -> str:
-            calls.append((thread_id, prompt))
+        def invoke_agent(session: SessionMeta, prompt: str) -> str:
+            calls.append((session.thread_id, prompt))
             return "已查询 dbaas-server 并返回结果"
 
         runtime._invoke_agent = invoke_agent
@@ -49,8 +49,8 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
         runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
         calls: list[tuple[str, str]] = []
 
-        def stream_agent_text(thread_id: str, prompt: str):
-            calls.append((thread_id, prompt))
+        def stream_agent_text(session: SessionMeta, prompt: str):
+            calls.append((session.thread_id, prompt))
             yield "已通过 DBAAS 工具"
             yield "完成查询"
 
@@ -73,7 +73,7 @@ class DeepAgentRuntimeDbaasTests(unittest.TestCase):
 
     def test_resume_nested_approval_returns_next_approval_request(self) -> None:
         runtime = DeepAgentRuntime.__new__(DeepAgentRuntime)
-        runtime.artifacts = SimpleNamespace(agent=FakeNestedApprovalAgent())
+        runtime.artifacts = SimpleNamespace(agents={"admin": FakeNestedApprovalAgent()})
 
         def normalize_run_output(_result):
             return AgentRunOutput(

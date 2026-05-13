@@ -111,12 +111,20 @@ DeepAgent 原生支持：
 - 请求头 `X-User-Id`
 - 登录态 middleware 注入
 
-如需在本地开发阶段区分管理员与普通用户，还可以补充：
+本地开发阶段通过以下请求头区分管理员与普通用户：
 
 - `X-User-Role`
 - `X-User`
 
 正式接入统一登录后，再由鉴权层解析并注入这些信息。
+
+Session 创建后身份不可变：
+
+- 后端在创建 Session 时固化 `user_id`、`role` 和 `user`
+- 后续访问该 Session 时，当前请求身份必须与 `SessionMeta` 一致
+- 如果 `role` 或普通用户 `user` 发生变化，应新建 Session，不复用原 `thread_id`
+- 身份不一致时，Session 详情、消息发送、审批决策和任务查询等接口应拒绝继续使用该 Session
+- 删除接口可以允许当前 `user_id` 清理同一 `user_id` 下旧身份 Session，但不得触发 DeepAgent resume；若旧 Session 存在 pending approval 或非终态 task，应返回冲突错误
 
 ### 3.3 时间格式
 
@@ -152,12 +160,9 @@ GET /api/v1/sessions
 
 用于页面左侧历史会话列表加载。
 
-#### 请求参数
-
-- `status`
-  - 可选
-  - 默认 `active`
-  - 可取值：`active`、`archived`、`all`
+`items` 返回当前身份可继续使用的 Session。
+`stale_identity_items` 返回同一 `user_id` 下旧身份 Session，正常情况下为空数组。
+旧身份 Session 只允许删除清理，不允许打开、继续对话、审批或任务查询。
 
 #### 数据来源
 
@@ -180,7 +185,8 @@ data/users/<user_id>/sessions/index.json
       "last_message_at": "2026-04-22T12:10:00Z",
       "preview": "已查询 mysql-xf2，健康状态为 DEGRADED"
     }
-  ]
+  ],
+  "stale_identity_items": []
 }
 ```
 

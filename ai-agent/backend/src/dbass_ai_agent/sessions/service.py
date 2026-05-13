@@ -9,7 +9,7 @@ from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.clock import utc_now
 from dbass_ai_agent.infra.ids import new_message_id, new_session_thread_ids
 
-from .models import ChatMessage, SessionDetail, SessionIndexItem, SessionMeta
+from .models import ChatMessage, SessionDetail, SessionIndexItem, SessionMeta, StaleIdentitySessionIndexItem
 from .repository import SessionRepository
 from .thread_binding import ThreadBinding
 
@@ -24,7 +24,33 @@ class SessionService:
         self.thread_binding = thread_binding
 
     def list_sessions(self, identity: Identity) -> list[SessionIndexItem]:
-        return self.repository.list_index(identity.user_id)
+        visible: list[SessionIndexItem] = []
+        for item in self.repository.list_index(identity.user_id):
+            try:
+                meta = self.repository.load_meta(identity.user_id, item.session_id)
+            except FileNotFoundError:
+                continue
+            if self._identity_matches(meta, identity):
+                visible.append(item)
+        return visible
+
+    def list_stale_identity_sessions(self, identity: Identity) -> list[StaleIdentitySessionIndexItem]:
+        stale: list[StaleIdentitySessionIndexItem] = []
+        for item in self.repository.list_index(identity.user_id):
+            try:
+                meta = self.repository.load_meta(identity.user_id, item.session_id)
+            except FileNotFoundError:
+                continue
+            if self._identity_matches(meta, identity):
+                continue
+            stale.append(
+                StaleIdentitySessionIndexItem(
+                    **item.model_dump(),
+                    role=meta.role,
+                    user=meta.user,
+                )
+            )
+        return stale
 
     def create_session(
         self,
@@ -61,6 +87,12 @@ class SessionService:
 
     def get_session(self, identity: Identity, session_id: str) -> SessionDetail:
         self._assert_safe_session_id(session_id)
+        detail = self.get_session_for_cleanup(identity, session_id)
+        self._assert_identity(detail.meta, identity)
+        return detail
+
+    def get_session_for_cleanup(self, identity: Identity, session_id: str) -> SessionDetail:
+        self._assert_safe_session_id(session_id)
         try:
             detail = self.repository.load_detail(identity.user_id, session_id)
         except FileNotFoundError as exc:
@@ -70,7 +102,8 @@ class SessionService:
             ) from exc
         if detail.meta.status == "deleted":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session 不存在。")
-        self._assert_identity(detail.meta, identity)
+        if detail.meta.user_id != identity.user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session 不存在。")
         return detail
 
     def archive_session(self, identity: Identity, session_id: str) -> SessionDetail:
@@ -93,6 +126,12 @@ class SessionService:
 
     def delete_session(self, identity: Identity, session_id: str) -> str:
         detail = self.get_session(identity, session_id)
+        self.repository.remove_index_item(detail.meta.user_id, detail.meta.session_id)
+        self.repository.delete_session_directory(detail.meta.user_id, detail.meta.session_id)
+        return detail.meta.session_id
+
+    def delete_session_for_cleanup(self, identity: Identity, session_id: str) -> str:
+        detail = self.get_session_for_cleanup(identity, session_id)
         self.repository.remove_index_item(detail.meta.user_id, detail.meta.session_id)
         self.repository.delete_session_directory(detail.meta.user_id, detail.meta.session_id)
         return detail.meta.session_id
@@ -249,6 +288,22 @@ class SessionService:
     def _assert_identity(meta: SessionMeta, identity: Identity) -> None:
         if meta.user_id != identity.user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session 不存在。")
+        if not SessionService._identity_matches(meta, identity):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_type": "session_identity_changed",
+                    "detail": "当前请求身份与 Session 创建身份不一致，请删除当前 Session 后重新创建。",
+                },
+            )
+
+    @staticmethod
+    def _identity_matches(meta: SessionMeta, identity: Identity) -> bool:
+        if meta.user_id != identity.user_id:
+            return False
+        if meta.role != identity.role:
+            return False
+        return meta.role != "user" or meta.user == identity.user
 
     @staticmethod
     def _assert_safe_session_id(session_id: str) -> None:

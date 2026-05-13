@@ -204,8 +204,15 @@ ai-agent/
 其中：
 
 - `role` 和 `user` 用于保存当前 Session 创建时的身份快照
+- Session 身份不可变，后续请求的 `user_id`、`role` 和普通用户 `user` 必须与该快照一致
+- `role` 用于选择当前 Session 固定使用的角色扩展系统提示词
 - `thread_id` 用于映射 Deep Agent 运行线程
 - `status` 建议支持 `active`、`archived`
+
+如果登录身份或角色发生变化，前端应创建新的 Session。
+旧身份下创建的 Session 不应继续复用原 `thread_id`。
+删除接口可以允许当前 `user_id` 清理同一 `user_id` 下旧身份 Session，
+但不得继续运行该 Session，也不得触发 DeepAgent resume。
 
 示例：
 
@@ -466,7 +473,8 @@ Session 是产品概念，Thread 是 Agent 运行概念。
 
 其中：
 
-- `GET /sessions` 返回当前用户的 `index.json` 视图
+- `GET /sessions` 返回当前身份可继续使用的 Session 列表
+- `GET /sessions` 额外返回 `stale_identity_items`，用于展示同一 `user_id` 下仅可删除清理的旧身份 Session；正常情况下为空数组
 - `GET /sessions/{session_id}` 返回单个 Session 的详情
 - `DELETE /sessions/{session_id}` 直接删除当前 Session 目录
 

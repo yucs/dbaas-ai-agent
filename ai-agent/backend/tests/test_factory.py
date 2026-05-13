@@ -19,13 +19,16 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from dbass_ai_agent.agent.factory import (  # noqa: E402
+    AgentFactoryError,
     _build_logged_summarization_middleware_class,
     _build_chat_model,
+    _create_runtime_agent,
     build_runtime_artifacts,
     build_summarization_middleware_factory,
     patch_deepagents_summarization_factory,
 )
 from dbass_ai_agent.agent.compression_events import capture_compression_notices  # noqa: E402
+from dbass_ai_agent.agent.prompt import load_system_prompt  # noqa: E402
 from dbass_ai_agent.config import Settings  # noqa: E402
 
 
@@ -53,8 +56,8 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 ) as async_client_mock,
                 patch(
                     "dbass_ai_agent.agent.factory.load_system_prompt",
-                    return_value="system prompt",
-                ),
+                    side_effect=lambda _path, role: f"system prompt {role}",
+                ) as load_system_prompt_mock,
                 patch(
                     "dbass_ai_agent.agent.factory._build_chat_model",
                     side_effect=[main_model, summary_model],
@@ -75,7 +78,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             ):
                 artifacts = build_runtime_artifacts(settings)
 
-            self.assertIs(artifacts.agent, create_agent_mock.return_value)
+            self.assertEqual(set(artifacts.agents), {"user", "admin"})
             self.assertIs(artifacts.connection, connect_mock.return_value)
             self.assertIs(artifacts.http_client, client_mock.return_value)
             self.assertIs(artifacts.http_async_client, async_client_mock.return_value)
@@ -85,10 +88,15 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 settings,
                 summary_model=summary_model,
             )
-            patch_summary_factory_mock.assert_called_once_with(summary_factory)
+            self.assertEqual(patch_summary_factory_mock.call_count, 2)
+            patch_summary_factory_mock.assert_called_with(summary_factory)
 
-            create_agent_mock.assert_called_once()
-            kwargs = create_agent_mock.call_args.kwargs
+            self.assertEqual(create_agent_mock.call_count, 2)
+            self.assertEqual(
+                [call.args for call in load_system_prompt_mock.call_args_list],
+                [((settings.system_prompt_path, "user")), ((settings.system_prompt_path, "admin"))],
+            )
+            kwargs = create_agent_mock.call_args_list[0].kwargs
             self.assertEqual(
                 set(kwargs),
                 {"model", "tools", "checkpointer", "system_prompt", "interrupt_on"},
@@ -120,7 +128,45 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 },
             )
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
-            self.assertEqual(kwargs["system_prompt"], "system prompt")
+            self.assertEqual(
+                [call.kwargs["system_prompt"] for call in create_agent_mock.call_args_list],
+                ["system prompt user", "system prompt admin"],
+            )
+
+    def test_load_system_prompt_appends_role_extend_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_dir = Path(tmpdir)
+            system_path = prompt_dir / "system.md"
+            system_path.write_text("common rules", encoding="utf-8")
+            (prompt_dir / "user_extend_system_prompt.md").write_text("user rules", encoding="utf-8")
+            (prompt_dir / "admin_extend_system_prompt.md").write_text("admin rules", encoding="utf-8")
+
+            self.assertEqual(load_system_prompt(system_path, "user"), "common rules\n\nuser rules")
+            self.assertEqual(load_system_prompt(system_path, "admin"), "common rules\n\nadmin rules")
+
+    def test_load_system_prompt_requires_role_extend_prompt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            system_path = Path(tmpdir) / "system.md"
+            system_path.write_text("common rules", encoding="utf-8")
+
+            with self.assertRaises(FileNotFoundError):
+                load_system_prompt(system_path, "user")
+
+    def test_create_runtime_agent_wraps_missing_role_prompt_as_factory_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            system_path = Path(tmpdir) / "system.md"
+            system_path.write_text("common rules", encoding="utf-8")
+            settings = Settings(system_prompt_path=system_path)
+
+            with self.assertRaises(AgentFactoryError):
+                _create_runtime_agent(
+                    settings,
+                    role="user",
+                    create_deep_agent=Mock(),
+                    model=Mock(),
+                    checkpointer=Mock(),
+                    summarization_factory=Mock(),
+                )
 
     def test_build_chat_model_can_disable_thinking_for_provider_specific_compat(self) -> None:
         settings = Settings(

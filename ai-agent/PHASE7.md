@@ -2789,6 +2789,12 @@ restart
 角色变化时，前端应删除旧 Session 或创建新的 Session。
 管理员切换到普通用户、普通用户切换到管理员，都必须使用新的 Session。
 
+身份不一致的 Session 不允许继续对话、审批、任务查询、归档或恢复。
+为了支持角色切换后的本地清理，删除接口可以允许当前 `user_id`
+清理同一 `user_id` 下的旧身份 Session。
+旧身份 Session 删除前仍必须确认没有 pending approval 或非终态 task，
+且不得触发 DeepAgent resume。
+
 管理员是否可以接管普通用户 Session 不在本阶段支持范围内；
 如后续需要代用户操作，应单独设计 `actor/subject` 审计模型，
 不得通过切换当前 Session 身份实现。
@@ -2832,6 +2838,18 @@ backend/prompts/system.md
 
 后端根据 Session 创建时的 `role` 选择对应角色扩展系统提示词，
 并追加到 common system prompt 末尾。
+
+当前阶段采用双 DeepAgent 实例：
+
+- user DeepAgent 绑定 `system.md + user_extend_system_prompt.md`
+- admin DeepAgent 绑定 `system.md + admin_extend_system_prompt.md`
+
+不采用单 DeepAgent + 每次请求注入角色说明的原因：
+
+- 角色扩展提示词应作为创建 Agent 时绑定的系统提示词，而不是重复进入每轮 thread 历史
+- user/admin 行为边界在同一个 Session/thread 生命周期内应保持稳定
+- 双 DeepAgent 能避免长会话中反复出现角色说明，降低摘要和历史上下文噪声
+- 当前只有 `user` 和 `admin` 两类角色，额外 runtime 复杂度和资源成本可控
 
 角色扩展系统提示词只用于告诉模型当前身份下的行为边界、工具选择倾向和回答策略，
 不作为授权依据。

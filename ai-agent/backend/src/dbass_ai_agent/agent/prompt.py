@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dbass_ai_agent.identity.models import UserRole
+
 
 DEFAULT_SYSTEM_PROMPT = """你是 DBAAS 智能助手，面向数据库平台、运维、研发和 SRE 用户，帮助他们查询、分析和操作 DBAAS 资源。
 
@@ -42,8 +44,10 @@ DEFAULT_SYSTEM_PROMPT = """你是 DBAAS 智能助手，面向数据库平台、�
 """
 
 
-def load_system_prompt(path: Path) -> str:
-    return load_prompt(path, DEFAULT_SYSTEM_PROMPT)
+def load_system_prompt(path: Path, role: UserRole) -> str:
+    common = load_prompt(path, DEFAULT_SYSTEM_PROMPT)
+    extend = load_required_prompt(role_extend_system_prompt_path(path, role))
+    return f"{common}\n\n{extend}".strip()
 
 
 def load_compression_prompt(path: Path) -> str:
@@ -54,6 +58,17 @@ def load_prompt(path: Path, default: str) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
     return default
+
+
+def load_required_prompt(path: Path) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"缺少必需提示词文件：{path}")
+    return path.read_text(encoding="utf-8").strip()
+
+
+def role_extend_system_prompt_path(system_prompt_path: Path, role: UserRole) -> Path:
+    filename = "admin_extend_system_prompt.md" if role == "admin" else "user_extend_system_prompt.md"
+    return system_prompt_path.parent / filename
 
 
 DEFAULT_COMPRESSION_PROMPT = """你是 DBAAS 智能助手的会话压缩器。

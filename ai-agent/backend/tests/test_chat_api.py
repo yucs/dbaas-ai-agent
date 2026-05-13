@@ -252,6 +252,143 @@ class SendMessageApiTests(unittest.TestCase):
             self.assertEqual(runtime.calls, [])
             self.assertEqual(service.get_session(identity, session_id).messages, [])
 
+    def test_send_message_rejects_session_role_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            current_identity = {
+                "value": Identity(user_id="alice", role="user", user="alice"),
+            }
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: current_identity["value"]
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "身份变化测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+                same_identity_list = client.get("/api/v1/sessions")
+                self.assertEqual(same_identity_list.status_code, 200)
+                self.assertEqual(len(same_identity_list.json()["items"]), 1)
+                self.assertEqual(same_identity_list.json()["stale_identity_items"], [])
+                current_identity["value"] = Identity(user_id="alice", role="admin", user=None)
+
+                changed_identity_list = client.get("/api/v1/sessions")
+                self.assertEqual(changed_identity_list.status_code, 200)
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages",
+                    json={"content": "现在用管理员身份继续这个会话"},
+                )
+
+            stale_items = changed_identity_list.json()["stale_identity_items"]
+            self.assertEqual(changed_identity_list.json()["items"], [])
+            self.assertEqual(len(stale_items), 1)
+            self.assertEqual(stale_items[0]["session_id"], session_id)
+            self.assertEqual(stale_items[0]["role"], "user")
+            self.assertEqual(stale_items[0]["user"], "alice")
+            self.assertTrue(stale_items[0]["cleanup_only"])
+            self.assertEqual(stale_items[0]["reason"], "session_identity_changed")
+            self.assertEqual(message_response.status_code, 409)
+            self.assertEqual(message_response.json()["detail"]["error_type"], "session_identity_changed")
+            self.assertEqual(runtime.calls, [])
+            original_identity = Identity(user_id="alice", role="user", user="alice")
+            self.assertEqual(service.get_session(original_identity, session_id).messages, [])
+            self.assertEqual(service.list_stale_identity_sessions(current_identity["value"])[0].session_id, session_id)
+            self.assertEqual(len(service.list_sessions(original_identity)), 1)
+
+    def test_send_message_rejects_user_scope_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            current_identity = {
+                "value": Identity(user_id="alice", role="user", user="payment-team"),
+            }
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: current_identity["value"]
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "用户范围变化测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+                current_identity["value"] = Identity(user_id="alice", role="user", user="another-team")
+
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages",
+                    json={"content": "继续这个会话"},
+                )
+
+            self.assertEqual(message_response.status_code, 409)
+            self.assertEqual(message_response.json()["detail"]["error_type"], "session_identity_changed")
+            self.assertEqual(runtime.calls, [])
+
+    def test_delete_session_allows_cleanup_after_role_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            current_identity = {
+                "value": Identity(user_id="alice", role="user", user="alice"),
+            }
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: current_identity["value"]
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = _unexpected_agent_runtime
+            app.dependency_overrides[get_app_settings] = lambda: Settings(
+                checkpoint_db=Path(tmpdir) / "runtime" / "checkpoints.sqlite"
+            )
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "旧身份清理测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+                current_identity["value"] = Identity(user_id="alice", role="admin", user=None)
+
+                delete_response = client.delete(f"/api/v1/sessions/{session_id}")
+
+            self.assertEqual(delete_response.status_code, 200)
+            self.assertEqual(delete_response.json()["session_id"], session_id)
+            original_identity = Identity(user_id="alice", role="user", user="alice")
+            with self.assertRaises(Exception):
+                service.get_session_for_cleanup(original_identity, session_id)
+
     def test_stream_message_rejects_blank_content_before_persisting(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -460,6 +597,10 @@ def _parse_sse_events(body: str) -> list[tuple[str, dict]]:
                 data_lines.append(line.removeprefix("data:").strip())
         events.append((event_name, json.loads("\n".join(data_lines))))
     return events
+
+
+def _unexpected_agent_runtime():
+    raise AssertionError("DeepAgent runtime should not be initialized")
 
 
 if __name__ == "__main__":

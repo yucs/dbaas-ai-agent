@@ -42,7 +42,10 @@ def list_sessions(
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
 ) -> SessionListResponse:
-    return SessionListResponse(items=session_service.list_sessions(identity))
+    return SessionListResponse(
+        items=session_service.list_sessions(identity),
+        stale_identity_items=session_service.list_stale_identity_sessions(identity),
+    )
 
 
 @router.post("", response_model=SessionResponse)
@@ -130,7 +133,7 @@ def delete_session(
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
     approval_service: ApprovalService = Depends(get_approval_service),
-    agent_runtime=Depends(get_agent_runtime),
+    agent_runtime_factory=Depends(get_agent_runtime_factory),
     operation_service: OperationService = Depends(get_operation_service),
     task_service: TaskService = Depends(get_task_service),
     settings=Depends(get_app_settings),
@@ -138,18 +141,22 @@ def delete_session(
     with session_locks.acquire_run_lock(session_id) as acquired:
         if not acquired:
             _raise_session_run_locked()
-        _assert_no_unfinished_items(
-            identity,
-            session_id,
-            session_service,
-            approval_service,
-            task_service,
-            agent_runtime=agent_runtime,
-            operation_service=operation_service,
-            allow_failed_expired_resume=True,
-            run_lock_already_held=True,
-        )
-        detail = session_service.get_session(identity, session_id)
+        detail = session_service.get_session_for_cleanup(identity, session_id)
+        if _session_identity_matches(detail.meta, identity):
+            _assert_no_unfinished_items(
+                identity,
+                session_id,
+                session_service,
+                approval_service,
+                task_service,
+                agent_runtime=agent_runtime_factory(),
+                operation_service=operation_service,
+                allow_failed_expired_resume=True,
+                run_lock_already_held=True,
+            )
+            detail = session_service.get_session_for_cleanup(identity, session_id)
+        else:
+            _assert_no_unfinished_items_for_cleanup(detail, task_service)
         with log_context(
             request_id=getattr(request.state, "request_id", "-"),
             user_id=identity.user_id,
@@ -166,7 +173,7 @@ def delete_session(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=str(exc),
                 ) from exc
-            deleted_session_id = session_service.delete_session(identity, session_id)
+            deleted_session_id = session_service.delete_session_for_cleanup(identity, session_id)
             logger.info("session deleted")
             return DeleteSessionResponse(session_id=deleted_session_id)
 
@@ -218,6 +225,33 @@ def _assert_no_unfinished_items(
                 "detail": "当前 Session 存在运行中的 DBAAS 任务，请等待任务结束后再归档或删除。",
             },
         )
+
+
+def _assert_no_unfinished_items_for_cleanup(detail, task_service: TaskService) -> None:
+    if any(approval.status == "pending" for approval in detail.approvals):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "session_has_pending_approval",
+                "detail": "当前 Session 存在待确认操作，请先使用创建该 Session 的身份处理后再删除。",
+            },
+        )
+    if any(not is_terminal_task_status(task.status) for task in task_service.list_tasks(detail.meta)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_type": "session_has_running_tasks",
+                "detail": "当前 Session 存在运行中的 DBAAS 任务，请等待任务结束后再删除。",
+            },
+        )
+
+
+def _session_identity_matches(meta, identity: Identity) -> bool:
+    if meta.user_id != identity.user_id:
+        return False
+    if meta.role != identity.role:
+        return False
+    return meta.role != "user" or meta.user == identity.user
 
 
 def _raise_session_run_locked() -> None:

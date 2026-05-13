@@ -12,6 +12,7 @@ import httpx
 from dbass_ai_agent.agent.compression_events import CompressionNotice, publish_compression_notice
 from dbass_ai_agent.config import Settings
 from dbass_ai_agent.dbaas.tools import build_dbaas_tools
+from dbass_ai_agent.identity.models import UserRole
 from dbass_ai_agent.operations.action_registry import build_interrupt_on_config
 
 from .prompt import load_compression_prompt, load_system_prompt
@@ -26,7 +27,7 @@ class AgentFactoryError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class RuntimeArtifacts:
-    agent: Any
+    agents: dict[UserRole, Any]
     connection: sqlite3.Connection
     http_client: httpx.Client
     http_async_client: httpx.AsyncClient
@@ -148,16 +149,24 @@ def build_runtime_artifacts(settings: Settings) -> RuntimeArtifacts:
         http_client=resources.http_client,
         http_async_client=resources.http_async_client,
     )
-    agent = _create_runtime_agent(
+    summarization_factory = build_summarization_middleware_factory(
         settings,
-        create_deep_agent=create_deep_agent,
-        model=models.main,
         summary_model=models.summary,
-        checkpointer=resources.checkpointer,
     )
+    agents = {
+        role: _create_runtime_agent(
+            settings,
+            role=role,
+            create_deep_agent=create_deep_agent,
+            model=models.main,
+            checkpointer=resources.checkpointer,
+            summarization_factory=summarization_factory,
+        )
+        for role in ("user", "admin")
+    }
 
     return RuntimeArtifacts(
-        agent=agent,
+        agents=agents,
         connection=resources.connection,
         http_client=resources.http_client,
         http_async_client=resources.http_async_client,
@@ -233,16 +242,16 @@ def _build_runtime_models(
 def _create_runtime_agent(
     settings: Settings,
     *,
+    role: UserRole,
     create_deep_agent: Callable[..., Any],
     model: Any,
-    summary_model: Any,
     checkpointer: Any,
+    summarization_factory: Callable[..., Any],
 ) -> Any:
-    system_prompt = load_system_prompt(settings.system_prompt_path)
-    summarization_factory = build_summarization_middleware_factory(
-        settings,
-        summary_model=summary_model,
-    )
+    try:
+        system_prompt = load_system_prompt(settings.system_prompt_path, role)
+    except FileNotFoundError as exc:
+        raise AgentFactoryError(str(exc)) from exc
     with patch_deepagents_summarization_factory(summarization_factory):
         return create_deep_agent(
             model=model,
