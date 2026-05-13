@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal
@@ -62,6 +63,42 @@ class ApprovalService:
     def get_approvals(self, identity: Identity, session_id: str) -> list[ApprovalRecord]:
         detail = self.session_service.get_session(identity, session_id)
         return detail.approvals
+
+    def needs_expiration_cleanup(self, identity: Identity, session_id: str) -> bool:
+        detail = self.session_service.get_session(identity, session_id)
+        return self._needs_expiration_cleanup(detail.approvals)
+
+    def expire_pending_approvals_for_query(
+        self,
+        identity: Identity,
+        session_id: str,
+        *,
+        agent_runtime_factory: Callable[[], Any],
+        operation_service: Any,
+        task_service: Any,
+    ) -> list[ApprovalRecord]:
+        detail = self.session_service.get_session(identity, session_id)
+        if not self._needs_expiration_cleanup(detail.approvals):
+            return []
+
+        with session_locks.acquire_run_lock(detail.meta.session_id) as acquired:
+            if not acquired:
+                logger.info(
+                    "approval expiration cleanup skipped because session is running session_id=%s",
+                    detail.meta.session_id,
+                )
+                return []
+
+            latest = self.session_service.get_session(identity, session_id)
+            if not self._needs_expiration_cleanup(latest.approvals):
+                return []
+            return self._expire_pending_approvals_unlocked(
+                identity,
+                latest,
+                agent_runtime=agent_runtime_factory(),
+                operation_service=operation_service,
+                task_service=task_service,
+            )
 
     def create_approval(
         self,
@@ -165,44 +202,16 @@ class ApprovalService:
                 )
             self._raise_approval_expired(approval)
 
-        terminal = {"approved", "rejected", "expired"}
-        if approval.status in terminal:
-            if approval.status == decision:
-                operations = operation_service.find_all_by_approval(session, approval.approval_id)
-                tasks = self._find_tasks_for_operations(session, task_service, operations)
-                if approval.resume_failed and not operations:
-                    return self._resume_terminal(
-                        identity,
-                        session,
-                        approval,
-                        decision,
-                        agent_runtime=agent_runtime,
-                        operation_service=operation_service,
-                        task_service=task_service,
-                    )
-                result_approval, system_message = self._emit_task_creation_notice_if_needed(
-                    identity,
-                    session,
-                    approval,
-                    decision=decision,
-                    tasks=tasks,
-                )
-                return ApprovalDecisionResult(
-                    approval=result_approval,
-                    assistant_message=None,
-                    system_message=system_message,
-                    operations=operations,
-                    tasks=tasks,
-                    reply=None,
-                    next_approval=None,
-                    paused=False,
-                )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error_type": "decision_conflict",
-                    "detail": "审批已被其他决策处理，不能提交冲突决策。",
-                },
+        if approval.status in {"approved", "rejected", "expired"}:
+            return self._handle_terminal_decision(
+                identity,
+                session,
+                approval,
+                decision,
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+                retry_resume_with_lock=True,
             )
 
         with session_locks.acquire_run_lock(session.session_id) as acquired:
@@ -227,14 +236,15 @@ class ApprovalService:
                     )
                 self._raise_approval_expired(latest)
             if latest.status != "pending":
-                return self.decide(
+                return self._handle_terminal_decision(
                     identity,
-                    session_id,
-                    approval_id,
+                    session,
+                    latest,
                     decision,
                     agent_runtime=agent_runtime,
                     operation_service=operation_service,
                     task_service=task_service,
+                    retry_resume_with_lock=False,
                 )
             if self._is_expired(latest):
                 expired = self._expire_and_resume(
@@ -277,38 +287,81 @@ class ApprovalService:
         agent_runtime: Any | None = None,
         operation_service: Any | None = None,
         task_service: Any | None = None,
+        run_lock_already_held: bool = False,
     ) -> list[ApprovalRecord]:
+        # Only pass run_lock_already_held=True from a caller that already owns
+        # this Session's non-reentrant run lock.
         detail = self.session_service.get_session(identity, session_id)
+        needs_cleanup = self._needs_expiration_cleanup(detail.approvals)
+        if not needs_cleanup:
+            return []
+
+        if agent_runtime is None or operation_service is None or task_service is None:
+            logger.error(
+                "approval expiration cleanup dependencies missing session_id=%s",
+                detail.meta.session_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error_type": "approval_cleanup_dependencies_missing",
+                    "detail": "审批过期清理缺少 DeepAgent runtime 或操作服务依赖。",
+                },
+            )
+
+        if run_lock_already_held:
+            latest = self.session_service.get_session(identity, session_id)
+            return self._expire_pending_approvals_unlocked(
+                identity,
+                latest,
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+            )
+        with session_locks.acquire_run_lock(detail.meta.session_id) as acquired:
+            if not acquired:
+                logger.info(
+                    "approval expiration cleanup skipped because session is running session_id=%s",
+                    detail.meta.session_id,
+                )
+                return []
+            latest = self.session_service.get_session(identity, session_id)
+            return self._expire_pending_approvals_unlocked(
+                identity,
+                latest,
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+            )
+
+    def _expire_pending_approvals_unlocked(
+        self,
+        identity: Identity,
+        detail,
+        *,
+        agent_runtime: Any,
+        operation_service: Any,
+        task_service: Any,
+    ) -> list[ApprovalRecord]:
         expired: list[ApprovalRecord] = []
         for approval in detail.approvals:
-            if approval.status == "pending" and self._is_expired(approval):
-                if agent_runtime and operation_service and task_service:
-                    marked = self._expire_and_resume(
-                        identity,
-                        detail.meta,
-                        approval,
-                        agent_runtime=agent_runtime,
-                        operation_service=operation_service,
-                        task_service=task_service,
-                    )
-                else:
-                    marked = self._mark_expired(detail.meta, approval)
-                    logger.info(
-                        "approval expired approval_id=%s session_id=%s",
-                        marked.approval_id,
-                        detail.meta.session_id,
-                    )
+            latest = self._find_approval(detail.meta, approval.approval_id)
+            if latest.status == "pending" and self._is_expired(latest):
+                marked = self._expire_and_resume(
+                    identity,
+                    detail.meta,
+                    latest,
+                    agent_runtime=agent_runtime,
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
                 expired.append(marked)
                 continue
-            if approval.status == "expired" and approval.resume_failed:
-                marked = approval
-            else:
-                continue
-            if agent_runtime and operation_service and task_service:
+            if latest.status == "expired" and latest.resume_failed:
                 self._resume_expired_cleanup(
                     identity,
                     detail.meta,
-                    marked,
+                    latest,
                     agent_runtime=agent_runtime,
                     operation_service=operation_service,
                     task_service=task_service,
@@ -325,6 +378,66 @@ class ApprovalService:
         return any(
             approval.status == "pending"
             for approval in self.repository.load_approvals(session.user_id, session.session_id)
+        )
+
+    def _handle_terminal_decision(
+        self,
+        identity: Identity,
+        session: SessionMeta,
+        approval: ApprovalRecord,
+        decision: ApiDecision,
+        *,
+        agent_runtime: Any,
+        operation_service: Any,
+        task_service: Any,
+        retry_resume_with_lock: bool,
+    ) -> ApprovalDecisionResult:
+        if approval.status != decision:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_type": "decision_conflict",
+                    "detail": "审批已被其他决策处理，不能提交冲突决策。",
+                },
+            )
+        operations = operation_service.find_all_by_approval(session, approval.approval_id)
+        tasks = self._find_tasks_for_operations(session, task_service, operations)
+        if approval.resume_failed and not operations:
+            if retry_resume_with_lock:
+                return self._resume_terminal(
+                    identity,
+                    session,
+                    approval,
+                    decision,
+                    agent_runtime=agent_runtime,
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
+            return self._resume_decided(
+                identity,
+                session,
+                approval,
+                decision,
+                agent_runtime=agent_runtime,
+                operation_service=operation_service,
+                task_service=task_service,
+            )
+        result_approval, system_message = self._emit_task_creation_notice_if_needed(
+            identity,
+            session,
+            approval,
+            decision=decision,
+            tasks=tasks,
+        )
+        return ApprovalDecisionResult(
+            approval=result_approval,
+            assistant_message=None,
+            system_message=system_message,
+            operations=operations,
+            tasks=tasks,
+            reply=None,
+            next_approval=None,
+            paused=False,
         )
 
     def _resume_terminal(
@@ -540,6 +653,9 @@ class ApprovalService:
             update={
                 "status": "expired",
                 "expired_at": utc_now(),
+                "resume_failed": True,
+                "resume_error": "审批已过期，等待清理 DeepAgent 暂停点。",
+                "resume_last_attempt_at": None,
             }
         )
         self.repository.append_approval(session.user_id, session.session_id, expired)
@@ -605,6 +721,13 @@ class ApprovalService:
     def _is_expired(approval: ApprovalRecord) -> bool:
         return approval.expires_at is not None and approval.expires_at <= utc_now()
 
+    def _needs_expiration_cleanup(self, approvals: list[ApprovalRecord]) -> bool:
+        return any(
+            (approval.status == "pending" and self._is_expired(approval))
+            or (approval.status == "expired" and approval.resume_failed)
+            for approval in approvals
+        )
+
     def _load_current_services(
         self,
         identity: Identity,
@@ -637,15 +760,27 @@ class ApprovalService:
         approval: ApprovalRecord,
         task_service: Any,
     ) -> None:
+        seen_conflict_keys: set[str] = set()
         for tool_call in approval.interrupted_tool_calls:
             config = require_action_config(tool_call.tool_name)
             if config.execution_mode != "async":
                 continue
             target = _service_target(tool_call.tool_args)
+            conflict_key = build_operation_conflict_key(config.action, [target])
+            if conflict_key in seen_conflict_keys:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error_type": "task_conflict",
+                        "detail": "本次审批包含重复的同类异步任务，未创建新的 DBAAS 任务。",
+                        "operation_conflict_key": conflict_key,
+                    },
+                )
+            seen_conflict_keys.add(conflict_key)
             try:
                 task_service.ensure_no_conflicting_task(
                     session,
-                    build_operation_conflict_key(config.action, [target]),
+                    conflict_key,
                 )
             except TaskConflictError as exc:
                 raise HTTPException(

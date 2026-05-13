@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request, status
@@ -106,6 +107,13 @@ def get_agent_runtime() -> DeepAgentRuntime:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+
+
+def get_agent_runtime_factory(request: Request) -> Callable[[], DeepAgentRuntime]:
+    override = request.app.dependency_overrides.get(get_agent_runtime)
+    if override is not None:
+        return override
+    return get_agent_runtime
 
 
 def get_app_settings() -> Settings:

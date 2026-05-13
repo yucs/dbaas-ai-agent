@@ -10,6 +10,7 @@ from dbass_ai_agent.operations.task_service import TaskService
 
 from .deps import (
     get_agent_runtime,
+    get_agent_runtime_factory,
     get_approval_service,
     get_current_identity,
     get_operation_service,
@@ -26,14 +27,14 @@ def get_approvals(
     session_id: str,
     identity: Identity = Depends(get_current_identity),
     approval_service: ApprovalService = Depends(get_approval_service),
-    agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
+    agent_runtime_factory=Depends(get_agent_runtime_factory),
     operation_service: OperationService = Depends(get_operation_service),
     task_service: TaskService = Depends(get_task_service),
 ) -> ApprovalsResponse:
-    approval_service.expire_pending_approvals(
+    approval_service.expire_pending_approvals_for_query(
         identity,
         session_id,
-        agent_runtime=agent_runtime,
+        agent_runtime_factory=agent_runtime_factory,
         operation_service=operation_service,
         task_service=task_service,
     )

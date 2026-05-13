@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -141,6 +141,10 @@ class FailingExpiringRuntime:
         reject_message=None,
     ):
         raise RuntimeError("checkpoint unavailable")
+
+
+def unexpected_agent_runtime():
+    raise AssertionError("DeepAgent runtime should not be initialized")
 
 
 class ExpiringNextApprovalRuntime(ExpiringRuntime):
@@ -429,6 +433,126 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(blocked.status_code, 409)
             self.assertEqual(blocked.json()["detail"]["error_type"], "session_has_pending_approval")
 
+    def test_send_message_rechecks_pending_approval_after_run_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 locked pending check")
+            app = FastAPI()
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: ApprovalRuntime()
+
+            def create_pending_under_lock(approval_service, identity_arg, session_id_arg, **kwargs):
+                self.assertTrue(kwargs["run_lock_already_held"])
+                self.assertTrue(session_locks.is_run_locked(session_id_arg))
+                session = approval_service.session_service.get_session(identity_arg, session_id_arg).meta
+                approval_service.create_approval(
+                    identity_arg,
+                    session,
+                    run_id="run_phase7_pending_after_lock",
+                    request_message_id="msg_request",
+                    interrupt=ApprovalInterrupt(
+                        action_requests=[
+                            {
+                                "name": "update_service_resource_tool",
+                                "args": {
+                                    "service_name": "mysql-xf2",
+                                    "child_service_type": "mysql",
+                                    "memory": 15,
+                                },
+                            },
+                        ],
+                        review_configs=[
+                            {
+                                "action_name": "update_service_resource_tool",
+                                "allowed_decisions": ["approve", "reject"],
+                            },
+                        ],
+                        tool_call_ids=["call_phase7_pending_after_lock"],
+                    ),
+                )
+                return []
+
+            with patch.object(
+                ApprovalService,
+                "expire_pending_approvals",
+                autospec=True,
+                side_effect=create_pending_under_lock,
+            ):
+                with TestClient(app) as client:
+                    response = client.post(
+                        f"/api/v1/sessions/{detail.meta.session_id}/messages",
+                        json={"content": "继续"},
+                    )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"]["error_type"], "session_has_pending_approval")
+            current = service.get_session(identity, detail.meta.session_id)
+            self.assertEqual(len(current.messages), 0)
+            self.assertEqual(current.approvals[-1].status, "pending")
+
+    def test_stream_message_rechecks_pending_approval_after_run_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 stream locked pending check")
+            app = FastAPI()
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: ApprovalRuntime()
+
+            def create_pending_under_lock(approval_service, identity_arg, session_id_arg, **kwargs):
+                self.assertTrue(kwargs["run_lock_already_held"])
+                self.assertTrue(session_locks.is_run_locked(session_id_arg))
+                session = approval_service.session_service.get_session(identity_arg, session_id_arg).meta
+                approval_service.create_approval(
+                    identity_arg,
+                    session,
+                    run_id="run_phase7_stream_pending_after_lock",
+                    request_message_id="msg_request",
+                    interrupt=ApprovalInterrupt(
+                        action_requests=[
+                            {
+                                "name": "update_service_resource_tool",
+                                "args": {
+                                    "service_name": "mysql-xf2",
+                                    "child_service_type": "mysql",
+                                    "memory": 15,
+                                },
+                            },
+                        ],
+                        review_configs=[
+                            {
+                                "action_name": "update_service_resource_tool",
+                                "allowed_decisions": ["approve", "reject"],
+                            },
+                        ],
+                        tool_call_ids=["call_phase7_stream_pending_after_lock"],
+                    ),
+                )
+                return []
+
+            with patch.object(
+                ApprovalService,
+                "expire_pending_approvals",
+                autospec=True,
+                side_effect=create_pending_under_lock,
+            ):
+                with TestClient(app) as client:
+                    response = client.post(
+                        f"/api/v1/sessions/{detail.meta.session_id}/messages/stream",
+                        json={"content": "继续"},
+                    )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"]["error_type"], "session_has_pending_approval")
+            current = service.get_session(identity, detail.meta.session_id)
+            self.assertEqual(len(current.messages), 0)
+            self.assertEqual(current.approvals[-1].status, "pending")
+
     def test_expired_approval_resumes_reject_and_allows_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -516,6 +640,27 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             messages = service.get_session(identity, detail.meta.session_id).messages
             self.assertEqual(messages, [])
 
+    def test_get_session_without_expired_approval_does_not_initialize_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 get session no expiry")
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = unexpected_agent_runtime
+            app.dependency_overrides[get_operation_service] = lambda: operation_service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with TestClient(app) as client:
+                response = client.get(f"/api/v1/sessions/{detail.meta.session_id}")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["session"]["meta"]["session_id"], detail.meta.session_id)
+
     def test_get_approvals_expires_pending_approval_and_records_resume_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -541,6 +686,130 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(approvals[-1]["status"], "expired")
             self.assertTrue(approvals[-1]["resume_failed"])
             self.assertIn("checkpoint unavailable", approvals[-1]["resume_error"])
+
+    def test_get_approvals_without_expired_approval_does_not_initialize_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 get approvals no expiry")
+            approval = ApprovalService(service.repository, service).create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_no_expiry",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_requests=[
+                        {
+                            "name": "update_service_resource_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "memory": 15,
+                            },
+                        },
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "update_service_resource_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_no_expiry"],
+                ),
+            )
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = unexpected_agent_runtime
+            app.dependency_overrides[get_operation_service] = lambda: operation_service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with TestClient(app) as client:
+                response = client.get(f"/api/v1/sessions/{detail.meta.session_id}/approvals")
+
+            self.assertEqual(response.status_code, 200)
+            approvals = response.json()["items"]
+            self.assertEqual(approvals[-1]["approval_id"], approval.approval_id)
+            self.assertEqual(approvals[-1]["status"], "pending")
+
+    def test_expiration_cleanup_requires_runtime_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 expiry requires runtime")
+            approval = _create_expired_resource_approval(identity, detail, service)
+            approval_service = ApprovalService(service.repository, service)
+
+            with self.assertRaises(HTTPException) as raised:
+                approval_service.expire_pending_approvals(identity, detail.meta.session_id)
+
+            self.assertEqual(raised.exception.status_code, 500)
+            self.assertEqual(
+                raised.exception.detail["error_type"],
+                "approval_cleanup_dependencies_missing",
+            )
+            approvals = service.get_session(identity, detail.meta.session_id).approvals
+            self.assertEqual(approvals[-1].approval_id, approval.approval_id)
+            self.assertEqual(approvals[-1].status, "pending")
+
+    def test_get_session_skips_expiration_cleanup_when_run_lock_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 get session locked expiry")
+            approval = _create_expired_resource_approval(identity, detail, service)
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = unexpected_agent_runtime
+            app.dependency_overrides[get_operation_service] = lambda: operation_service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with session_locks.acquire_run_lock(detail.meta.session_id) as acquired:
+                self.assertTrue(acquired)
+                with TestClient(app) as client:
+                    response = client.get(f"/api/v1/sessions/{detail.meta.session_id}")
+
+            self.assertEqual(response.status_code, 200)
+            payload_approval = response.json()["session"]["approvals"][-1]
+            self.assertEqual(payload_approval["approval_id"], approval.approval_id)
+            self.assertEqual(payload_approval["status"], "pending")
+            approvals = service.get_session(identity, detail.meta.session_id).approvals
+            self.assertEqual(approvals[-1].status, "pending")
+
+    def test_get_approvals_skips_expiration_cleanup_when_run_lock_busy_without_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 approvals locked expiry")
+            approval = _create_expired_resource_approval(identity, detail, service)
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = unexpected_agent_runtime
+            app.dependency_overrides[get_operation_service] = lambda: operation_service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with session_locks.acquire_run_lock(detail.meta.session_id) as acquired:
+                self.assertTrue(acquired)
+                with TestClient(app) as client:
+                    response = client.get(f"/api/v1/sessions/{detail.meta.session_id}/approvals")
+
+            self.assertEqual(response.status_code, 200)
+            payload_approval = response.json()["items"][-1]
+            self.assertEqual(payload_approval["approval_id"], approval.approval_id)
+            self.assertEqual(payload_approval["status"], "pending")
+            approvals = service.get_session(identity, detail.meta.session_id).approvals
+            self.assertEqual(approvals[-1].status, "pending")
 
     def test_approval_proposal_includes_current_values_when_snapshot_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -933,6 +1202,72 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(payload["detail"]["existing_task"]["task_id"], "task-001")
             self.assertEqual(service.get_session(identity, detail.meta.session_id).approvals[-1].status, "pending")
 
+    def test_batch_async_approval_rejects_duplicate_conflict_key_before_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 duplicate async batch")
+            approval = ApprovalService(service.repository, service).create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase7_duplicate_async_batch",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_requests=[
+                        {
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "image_type": "mysql",
+                                "image_tag": "8.0.38",
+                            },
+                        },
+                        {
+                            "name": "create_service_image_upgrade_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "child_service_type": "mysql",
+                                "image_type": "mysql",
+                                "image_tag": "8.0.39",
+                            },
+                        },
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "create_service_image_upgrade_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                        {
+                            "action_name": "create_service_image_upgrade_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase7_duplicate_001", "call_phase7_duplicate_002"],
+                ),
+            )
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: AsyncTaskResumeRuntime()
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            payload = response.json()
+            self.assertEqual(payload["detail"]["error_type"], "task_conflict")
+            self.assertIn("operation_conflict_key", payload["detail"])
+            current = service.get_session(identity, detail.meta.session_id)
+            self.assertEqual(current.approvals[-1].status, "pending")
+            self.assertEqual(task_service.list_tasks(detail.meta), [])
+
     def test_approval_decision_rechecks_expiration_after_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -1108,6 +1443,29 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             approvals = service.get_session(identity, detail.meta.session_id).approvals
             self.assertEqual(approvals[-1].status, "expired")
             self.assertTrue(approvals[-1].resume_failed)
+
+    def test_archive_returns_409_when_session_run_lock_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase7 archive locked")
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: ExpiringRuntime()
+            app.dependency_overrides[get_operation_service] = lambda: operation_service
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with session_locks.acquire_run_lock(detail.meta.session_id) as acquired:
+                self.assertTrue(acquired)
+                with TestClient(app) as client:
+                    response = client.post(f"/api/v1/sessions/{detail.meta.session_id}/archive")
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"]["error_type"], "session_run_locked")
 
     def test_query_expiration_does_not_restore_archived_session_or_create_next_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

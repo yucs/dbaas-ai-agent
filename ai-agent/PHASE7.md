@@ -269,6 +269,8 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
 
 批量审批第一版只支持“批准全部 / 拒绝全部”。
 不支持部分批准、单项参数编辑或自动拆分成多条审批。
+如果同一批 approval 内多个异步 tool call 生成相同 `operation_conflict_key`，
+批准前应返回 `409 task_conflict`，审批保持 `pending`，不得先执行其中一部分。
 
 ### 4.2 OperationResult
 
@@ -872,25 +874,40 @@ TTL 第一版建议：
 如果检查发现 approval 过期，就标记 `expired` 并 resume reject。
 这样可以避免用户忘记处理确认，导致 Session 长期卡在 `pending approval`。
 `GET /api/v1/sessions/{session_id}` 和
-`GET /api/v1/sessions/{session_id}/approvals` 必须执行该 lazy expiration，
-否则页面刷新后会继续看到已过期的 pending 确认卡和批准按钮。
+`GET /api/v1/sessions/{session_id}/approvals` 必须尝试执行该 lazy expiration。
+如果当前 `session_run_lock` 空闲，查询接口应完成过期标记和 DeepAgent rejected resume
+清理；如果锁正被同 Session 的 DeepAgent run/resume 占用，查询接口可以跳过本次清理并返回
+当前 latest view。此时响应里可能仍是 `pending + expires_at <= now`，
+前端必须按 `expires_at` 本地兜底禁用批准/拒绝按钮并提示刷新。
+查询接口应先轻量判断当前 Session 是否存在 `pending + expires_at <= now` 或
+`expired + resume_failed=true` 的 approval；如果需要 cleanup，应先尝试获取
+`session_run_lock`，拿不到锁时直接返回 latest view；只有拿到锁且重新确认仍需要 cleanup
+时才初始化 DeepAgent runtime，避免普通查询或锁忙查询被运行时初始化失败或变慢拖累。
 
 过期处理中的 DeepAgent resume 是清理暂停点，不是执行 DBAAS 操作。
+lazy expiration 需要完整的 `agent_runtime`、`operation_service` 和 `task_service`
+依赖；如果调用点缺少这些依赖，不允许只把 approval 标记为 `expired` 后跳过
+DeepAgent 暂停点清理，应直接暴露内部调用错误。
 建议采用保守顺序：
 
 ```text
-1. 先把 approval 标记为 expired
-2. 再 best-effort Command(resume=reject)
-3. 如果 resume 失败，记录 resume_failed=true 和 resume_error
-4. 下次查询 approvals 或发新消息前继续尝试 resume reject
+1. 先获取当前 Session 的 session_run_lock
+2. 重新读取最新 approval
+3. 把 approval 标记为 expired + resume_failed=true，表示业务审批已过期且暂停点待清理
+4. 使用 Command(resume=reject) 清理 DeepAgent 暂停点
+5. 如果 resume 成功，追加 expired + resume_failed=false
+6. 如果 resume 失败，保留 resume_failed=true，并记录 resume_error
+7. 下次查询 approvals 或发新消息前继续尝试 resume reject
 ```
 
 `resume_failed` 不应把 approval 改回 `pending`，
 也不应调用 DBAAS 写接口。
 查询 Session、查询 approvals、发新消息前都应重试清理 `resume_failed=true`
-的 expired approval。查询接口即使清理失败，也应返回 `expired` 状态和
-`resume_failed/resume_error`，让前端不再展示批准按钮；发新消息前重试 resume
-仍失败时，返回 `409 Conflict` 或 `503`，提示当前 Session 的过期审批暂停点尚未清理完成。
+的 expired approval。查询接口如果拿到 `session_run_lock` 并执行清理，即使清理失败，
+也应返回 `expired` 状态和 `resume_failed/resume_error`，让前端不再展示批准按钮；
+如果因为 `session_run_lock` 被占用而跳过本次清理，则返回当前 latest view，
+前端继续按 `expires_at <= now` 兜底禁用审批按钮。发新消息前重试 resume 仍失败时，
+返回 `409 Conflict` 或 `503`，提示当前 Session 的过期审批暂停点尚未清理完成。
 审批 decision 接口如果发现 pending approval 已过期，也必须走同一套过期处理：
 先标记 `expired`，再使用 reject resume 清理暂停点，最后返回 `409 approval_expired`。
 审批 decision 在拿到 Session run lock 并重新读取最新 approval 后，必须再次检查
@@ -905,40 +922,40 @@ lazy expiration 入口包含查询接口，因此查询 Session 或 approvals �
 更新 approval 状态、重试 DeepAgent reject resume。超时清理属于系统收尾，
 查询触发的清理不应追加 assistant message，也不应因此把 archived Session 自动恢复为 active。
 超时 rejected resume 后即使 DeepAgent 返回新的 approval request，也不应创建新的审批卡。
+如果查询触发 lazy expiration 时 `session_run_lock` 正被同 Session 的 DeepAgent run/resume
+占用，查询可以跳过本次清理并返回当前 latest view；前端仍必须按 `expires_at <= now`
+本地禁用审批按钮并提示刷新。发新消息前如果清理需要锁但暂时拿不到锁，应返回冲突，
+不能在暂停点未清理时继续推进同一个 Session。
 
 过期清理后的状态语义：
 
 ```text
 pending + expires_at <= now
-  -> 首次发现超时，标记 expired，并尝试 DeepAgent reject resume 清理暂停点
+  -> 首次发现超时，获取 session_run_lock 后标记 expired + resume_failed=true，
+     并尝试 DeepAgent reject resume 清理暂停点
+
+expired + resume_failed=true
+  -> 业务审批已过期，但 DeepAgent 暂停点仍待清理或上次清理失败；
+     后续查询、发消息前或归档前继续重试清理
 
 expired + resume_failed=false
   -> 业务审批已过期，DeepAgent 暂停点也已清理成功；后续 lazy expiration 必须跳过，
      不再重复调用 resume
-
-expired + resume_failed=true
-  -> 业务审批已过期，但 DeepAgent 暂停点清理失败；后续查询或发消息前继续重试清理
 ```
 
-当前第一版不额外实现本地幂等锁，顺序请求下依赖上述状态语义避免重复清理：
-只要 reject resume 成功，最新 approval 就会保留 `expired + resume_failed=false`，
-下一次 lazy expiration 会直接跳过。并发场景下如果两个请求几乎同时发现同一个
-`pending + expired` approval，理论上可能同时尝试 resume 同一个 DeepAgent interrupt。
-该风险暂时接受，原因是超时清理统一使用 rejected resume，不会批准 DBAAS 写操作；
-且预期 DeepAgent/LangGraph 对同一 thread 已完成的 resume 不会产生新的业务写入。
-如果后续日志中出现重复 assistant message、重复 resume error，或重复 resume 影响体验，
-再补 session lock + 重新读取最新 approval 的幂等保护。
+第一版使用 `session_run_lock` 串行化同一 Session 的过期清理，避免两个请求同时 resume
+同一个 DeepAgent interrupt。顺序请求下，只要 reject resume 成功，最新 approval 就会保留
+`expired + resume_failed=false`，下一次 lazy expiration 会直接跳过。
 
 锁职责需要区分：
 
 - `session_run_lock` 保护用户主运行链路，例如用户发消息触发 DeepAgent run、
   用户 approval decision 触发 DeepAgent resume。
-- lazy expiration 的 DeepAgent rejected resume cleanup 属于系统 best-effort 收尾，
-  第一版可以不强制持有 `session_run_lock`。
+- lazy expiration 的 DeepAgent rejected resume cleanup 也会推进同一个 DeepAgent thread，
+  因此执行清理时必须持有 `session_run_lock`；查询入口拿不到锁时可以跳过本次清理。
 - Session 文件锁保护 `approvals.jsonl` / `operations.jsonl` / `tasks.jsonl` append 写入。
   cleanup 前后的 approval 状态更新必须通过 Session 文件锁写入完整最新记录。
-- 因此，lazy cleanup 的剩余风险是语义层面的重复 cleanup，不是 jsonl 文件写坏；
-  重复 cleanup 风险按 rejected cleanup 场景暂时接受。
+- 不在 Session 文件锁内执行 DeepAgent resume；文件锁只包住 append 写入。
 
 归档和删除 Session 的处理略有区别：
 
@@ -1001,6 +1018,9 @@ approval 变为 `approved`、`rejected` 或 `expired` 后，
 发新消息前仍要先执行 approval lazy expiration。
 如果 pending approval 已过期，应先标记为 `expired` 并通过 reject resume 清理暂停点，
 再判断是否仍有 `pending approval`。
+发消息接口必须在拿到 `session_run_lock` 后重新执行 lazy expiration 和
+pending approval 检查，不能只在锁外检查一次；否则并发请求可能在第一个请求创建
+pending approval 后继续启动新的 DeepAgent run。
 
 ### 5.8 session_run_lock
 
@@ -1026,6 +1046,15 @@ POST /api/v1/sessions/{session_id}/messages/stream
 -> session_run_lock 已被占用: 409 Conflict
 ```
 
+发消息请求拿到 `session_run_lock` 后，应按顺序执行：
+
+```text
+1. approval lazy expiration cleanup
+2. pending approval 检查
+3. append user message
+4. DeepAgent run
+```
+
 approval decision 恢复执行时也需要占用同一个 Session 的 `session_run_lock`。
 如果同一个 approval 被重复提交，应优先按 approval 最新状态做幂等返回，
 不能重复执行已批准的写操作。
@@ -1033,8 +1062,10 @@ approval decision 接口如果发现 pending approval 已过期，真正的
 `expired` 标记与 DeepAgent rejected resume 清理也应在拿到 `session_run_lock`
 并重新读取最新 approval 后执行。
 approval lazy expiration 的 rejected resume cleanup 是系统收尾，不批准 DBAAS 写操作；
-查询、发消息前检查、归档/删除前检查触发该 cleanup 时，第一版不强制持有
-`session_run_lock`，但所有 approval 状态落盘仍必须走 Session 文件锁。
+但它仍会推进同一个 DeepAgent thread。查询、发消息前检查、归档/删除前检查真正执行
+该 cleanup 时必须持有 `session_run_lock`；查询入口拿不到锁时可以跳过本次清理并返回
+当前 latest view，发消息和归档入口拿不到锁时返回 `409 Conflict`。
+所有 approval 状态落盘仍必须走 Session 文件锁。
 
 异步 DBAAS task 不需要持有 `session_run_lock`。
 task 创建成功后，即使 DBAAS 任务仍在运行，也不阻止用户在同一 Session 继续发起其他无冲突请求。
@@ -1063,7 +1094,7 @@ task 刷新本身不推进 DeepAgent thread，不需要占用 DeepAgent run/resu
 7. 释放 session_run_lock
 
 lazy expiration cleanup：
-1. 可不强制获取 session_run_lock
+1. 获取 session_run_lock；查询入口拿不到锁时跳过本次 cleanup
 2. 标记 expired / resume_failed / resume_failed cleared 等状态更新必须短暂获取 Session 文件锁并 append
 3. 不在 Session 文件锁内执行 DeepAgent resume
 ```
@@ -1885,16 +1916,16 @@ Session 数据和对应 thread checkpoint。
 
 ```text
 POST /api/v1/sessions/{session_id}/archive
+-> 获取 session_run_lock，拿不到则 409 Conflict
 -> 先执行 approval lazy expiration
 -> 有 expired approval 且 resume_failed=true: 409 Conflict
--> session_run_lock 已被占用: 409 Conflict
 -> 有 pending approval: 409 Conflict
 -> 有 non-terminal task: 409 Conflict
 -> 否则允许归档
 
 DELETE /api/v1/sessions/{session_id}
+-> 获取 session_run_lock，拿不到则 409 Conflict
 -> 先执行 approval lazy expiration
--> session_run_lock 已被占用: 409 Conflict
 -> 有 pending approval: 409 Conflict
 -> 有 non-terminal task: 409 Conflict
 -> 否则允许删除
@@ -1903,6 +1934,8 @@ DELETE /api/v1/sessions/{session_id}
 `restore` 不需要该限制。
 恢复 Session 只会让会话重新可见，不会丢失审批、任务或 DeepAgent thread 上下文。
 
+归档和删除从检查未结束事项开始就应持有当前 Session 的 `session_run_lock`，
+直到归档或删除动作完成，避免检查通过后另一个请求又推进同一个 DeepAgent thread。
 删除判断应以当前进程 `session_run_lock` 状态、Session 下的 `approvals.jsonl` 和 `tasks.jsonl` 为准。
 
 ## 10. SSE 与 API 设计
@@ -2021,14 +2054,8 @@ GET  /api/v1/sessions/{session_id}/approvals
 POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 ```
 
-`GET approvals` 支持按 status 过滤：
-
-```text
-pending
-approved
-rejected
-expired
-```
+`GET approvals` 第一版暂不支持服务端 `status` 过滤，返回当前 Session 下全部 approvals；
+前端如需只展示 `pending/approved/rejected/expired` 中某类状态，先在本地过滤。
 
 审批决策接口在 P7A 中同步完成 DeepAgent resume，并返回恢复后的最新结果。
 建议响应至少包含：
@@ -2424,6 +2451,11 @@ get_dbaas_task_tool
 POST /api/v1/sessions/{session_id}/archive
 DELETE /api/v1/sessions/{session_id}
 ```
+
+归档和删除接口需要从未结束事项检查开始就非阻塞获取当前 Session 的
+`session_run_lock`，拿不到锁时返回 `409 session_run_locked`。
+拿到锁后，在同一把锁内完成 approval lazy expiration、未结束事项判断、
+归档或删除动作。
 
 如果存在 `pending approval`，返回：
 
