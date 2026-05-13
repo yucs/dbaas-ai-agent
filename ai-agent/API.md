@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文档用于定义第一阶段的 API 设计，重点覆盖以下能力：
+本文档用于定义当前 DBAAS 智能助手的 API 契约，重点覆盖以下能力：
 
 本项目基于 DeepAgent 实现，因此这里的 API 设计不是一个普通聊天后端接口，
 而是围绕“Session 绑定 DeepAgent thread，并在该 thread 上持续执行”的模型展开。
@@ -13,7 +13,7 @@
 - 当前前端主链路使用 SSE 流式返回
 - 命中人工确认时，需要暂停运行并在确认后恢复同一个 thread
 
-本阶段重点覆盖：
+当前接口重点覆盖：
 
 - 多用户、多 Session 管理
 - 登录后加载用户历史 Session 列表
@@ -21,6 +21,7 @@
 - Session 下继续发送消息
 - 提供 SSE 流式消息接口
 - 支持审批查询与审批决策
+- 支持 operation 结果、当前 Session 任务查询与任务 SSE
 
 ## 1.1 能力边界
 
@@ -48,20 +49,21 @@ DeepAgent 原生支持：
 
 ## 2. 设计范围
 
-第一阶段 API 主要解决：
+当前 API 主要解决：
 
 - Session 列表展示
 - Session 详情加载
 - 新建 Session
-- 归档与删除
+- 归档、恢复与删除
 - 会话内消息发送
 - 运行流式输出
 - 强制人工确认相关接口
+- 当前 Session 下的异步任务追踪
 
 暂不覆盖：
 
-- 完整任务编排 API
-- 后台任务订阅推送
+- 跨 Session 的任务中心
+- 全局任务编排 API
 - 跨 Session 搜索
 - 高级权限中心
 
@@ -77,11 +79,11 @@ DeepAgent 原生支持：
 
 ### 3.2 用户身份
 
-第一阶段建议直接使用 `user_id` 作为当前用户标识。
+当前本地开发阶段直接使用 `user_id` 作为产品层用户标识。
 
 但调用 `mock-server` 时，不应简单地把所有 `user_id` 都直接当作 `user`。
 
-第一阶段建议拆成：
+身份模型拆成：
 
 - `user_id`
   - 当前产品用户标识
@@ -100,7 +102,7 @@ DeepAgent 原生支持：
   - 使用 `Authorization: Bearer user:<user>`
   - 第一阶段可简化为 `user = user_id`
 
-因此在第一阶段：
+因此在当前实现中：
 
 - Session 按产品层 `user_id` 组织
 - 只有普通用户场景才将 `user_id` 作为 `user`
@@ -209,8 +211,7 @@ POST /api/v1/sessions
 - 生成新的 `session_id`
 - 创建 Session 目录
 - 初始化 `meta.json`
-- 初始化 `messages.jsonl`
-- 初始化 `approvals.jsonl`
+- `messages.jsonl`、`approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` 可按首次写入懒创建
 - 更新当前用户的 `index.json`
 
 #### 返回示例
@@ -226,7 +227,8 @@ POST /api/v1/sessions
       "created_at": "2026-04-22T12:20:00Z"
     },
     "messages": [],
-    "approvals": []
+    "approvals": [],
+    "operations": []
   }
 }
 ```
@@ -247,6 +249,8 @@ GET /api/v1/sessions/{session_id}
 - 读取 `meta.json`
 - 读取 `messages.jsonl`
 - 读取 `approvals.jsonl`
+- 读取 `operations.jsonl`
+- `tasks.jsonl` 不放入 Session 详情，统一通过任务接口读取
 
 #### 返回示例
 
@@ -265,6 +269,7 @@ GET /api/v1/sessions/{session_id}
       "updated_at": "2026-04-22T12:10:00Z"
     },
     "approvals": [],
+    "operations": [],
     "messages": [
       {
         "message_id": "msg_001",
@@ -285,6 +290,9 @@ POST /api/v1/sessions/{session_id}/archive
 
 #### 行为
 
+- 非阻塞获取当前 Session 的 `session_run_lock`
+- 执行 pending approval lazy expiration
+- 如果仍存在待确认审批、非终态任务或未清理完成的过期审批暂停点，返回 `409 Conflict`
 - 更新 `meta.json.status = archived`
 - 写入 `archived_at`
 - 同步更新 `index.json`
@@ -293,8 +301,11 @@ POST /api/v1/sessions/{session_id}/archive
 
 ```json
 {
-  "session_id": "sess_001",
-  "status": "archived"
+  "session": {
+    "session_id": "sess_001",
+    "status": "archived",
+    "archived_at": "2026-04-22T12:12:00Z"
+  }
 }
 ```
 
@@ -318,6 +329,9 @@ DELETE /api/v1/sessions/{session_id}
 
 #### 行为
 
+- 非阻塞获取当前 Session 的 `session_run_lock`
+- 执行 pending approval lazy expiration
+- 如果仍存在待确认审批或非终态任务，返回 `409 Conflict`
 - 从 `data/users/<user_id>/sessions/index.json` 中移除
 - 删除 `data/users/<user_id>/sessions/<session_id>/` 目录
 - 同步删除该 Session 绑定的 `thread_id` 对应 DeepAgent checkpoint 数据
@@ -326,6 +340,7 @@ DELETE /api/v1/sessions/{session_id}
 #### 说明
 
 第一阶段中，`archive` 负责“可恢复”，`delete` 负责“真正删除”。
+第七阶段后，归档和删除会额外受 pending approval、running task 和 session run lock 约束。
 
 ## 5. 消息与运行接口
 
@@ -349,11 +364,15 @@ POST /api/v1/sessions/{session_id}/messages
 
 #### 行为
 
+- 非阻塞获取当前 Session 的 `session_run_lock`
+- 执行 pending approval lazy expiration
+- 如果当前 Session 仍有待确认审批，返回 `409 Conflict`
 - 如果当前 Session 状态为 `archived`，先自动恢复为 `active`
 - 将用户消息追加到 `messages.jsonl`
 - 复用当前 Session 对应的 `thread_id`
 - 调用 DeepAgent 执行
-- 将 assistant 消息写回 `messages.jsonl`
+- 普通完成时将 assistant 消息写回 `messages.jsonl`
+- 命中写工具审批时返回 `approval` 且 `paused=true`，本轮不写入 assistant 消息
 - 返回本轮消息结果与 `run_id`
 
 #### 返回示例
@@ -415,6 +434,10 @@ Accept: text/event-stream
   - 当前运行即将开始上下文压缩
 - `compression_completed`
   - 当前运行的上下文压缩已经完成
+- `approval.required`
+  - 当前运行命中人工确认，返回审批记录
+- `run.paused`
+  - 当前运行已经暂停，等待审批决策
 - `done`
   - assistant 消息已经写入 `messages.jsonl`
 - `error`
@@ -431,6 +454,7 @@ data: {"detail":"函数调用失败：mock_tool 参数 invalid","error_type":"fu
 
 - 本轮不会写入 assistant 消息
 - 已写入的 user 消息保留
+- 后端会写入一条 `role=ai-agent` 的错误说明，并在事件中返回 `ai_agent_message`
 - `detail` 是脱敏后的前端可展示错误
 - 完整异常和 traceback 只写入后端日志
 - `error_type` 用于区分 `function_error`、`timeout_error`、`provider_error` 等类别
@@ -440,15 +464,16 @@ data: {"detail":"函数调用失败：mock_tool 参数 invalid","error_type":"fu
 
 ```text
 event: compression_started
-data: {"run_id":"run_001","mode":"deepagent","message":"上下文较长，正在整理早期内容。","details":{"phase":"started","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":null}}
+data: {"run_id":"run_001","mode":"deepagent","message":"上下文较长，正在整理早期内容。","system_message":null,"details":{"phase":"started","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":null}}
 
 event: compression_completed
-data: {"run_id":"run_001","mode":"deepagent","message":"上下文已自动压缩，本会话会继续使用同一个 Session。","details":{"phase":"completed","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":1200}}
+data: {"run_id":"run_001","mode":"deepagent","message":"上下文已自动压缩，本会话会继续使用同一个 Session。","system_message":{"message_id":"msg_001","role":"system","content":"上下文已自动压缩，本会话会继续使用同一个 Session。","created_at":"2026-04-22T12:10:03Z"},"details":{"phase":"completed","summarized_messages":8,"keep":"('messages', 6)","trigger":"('tokens', 98304)","summary_chars":1200}}
 ```
 
-压缩事件只用于提醒页面：
+压缩事件用于提醒页面：
 
-- 不写入 `messages.jsonl`
+- `compression_started` 不写入 `messages.jsonl`
+- `compression_completed` 可以写入一条去重后的 `role=system` 提醒消息，并通过 `system_message` 返回
 - 不展示摘要正文
 - 不改变 `session_id`
 - 不改变 `thread_id`
@@ -500,44 +525,6 @@ DeepAgent 原生更偏运行时语义，例如：
 - 补充 `session_id`、`run_id` 等页面需要的字段
 - 再通过 SSE 返回给前端
 
-### 5.4 后续独立运行事件流
-
-```http
-GET /api/v1/sessions/{session_id}/runs/{run_id}/events
-Accept: text/event-stream
-```
-
-#### 作用
-
-这是后续为长任务、审批恢复和断线重连预留的独立运行事件流。
-
-当前第四阶段前端主路径不使用这个接口，而是直接使用：
-
-```http
-POST /api/v1/sessions/{session_id}/messages/stream
-```
-
-#### 建议事件类型
-
-- `message.delta`
-- `message.completed`
-- `tool.called`
-- `tool.completed`
-- `approval.required`
-- `approval.resolved`
-- `run.paused`
-- `run.resumed`
-- `run.completed`
-- `run.failed`
-
-#### 说明
-
-这样设计的好处是：
-
-- 消息提交和流式订阅解耦
-- 更符合标准 SSE 的使用方式
-- 更容易支持断线重连
-
 ## 6. 审批接口
 
 ### 6.1 查询 Session 下的审批记录
@@ -546,11 +533,11 @@ POST /api/v1/sessions/{session_id}/messages/stream
 GET /api/v1/sessions/{session_id}/approvals
 ```
 
-#### 请求参数
+#### 查询语义
 
-- `status`
-  - 可选
-  - 可取值：`pending`、`approved`、`rejected`、`expired`
+第一版返回当前 Session 下全部 approvals，不做服务端 `status` 过滤。
+前端如需只展示 `pending`、`approved`、`rejected`、`expired` 中某类状态，
+先在本地过滤。
 
 #### 数据来源
 
@@ -580,13 +567,32 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 - 校验当前用户有权限访问该 Session，并满足 approval 要求的角色
 - 更新当前 Session 下的审批记录状态
 - 触发当前 Session 绑定的 Thread 恢复执行
-- 通过 SSE 推送 `approval.resolved` 和后续运行事件
+- 同步返回审批最新状态、恢复后的 assistant 消息、system 消息、operation 和 task 结果
 - P7A 不要求审批备注字段
 
 #### 决策值建议
 
 - `approved`
 - `rejected`
+
+#### 返回字段
+
+- `approval`
+  - 审批最新状态
+- `assistant_message`
+  - resume 后写入 `messages.jsonl` 的助手消息；用户拒绝时使用固定说明
+- `system_message`
+  - 异步 task 创建成功时由后端写入的系统提醒；没有新提醒时为 `null`
+- `operations`
+  - 本次 approval resume 触发的 operation 列表
+- `tasks`
+  - 本次 approval resume 创建或关联的 task 列表
+- `next_approval`
+  - resume 后再次命中写工具 interrupt 时返回新的待确认审批
+- `paused`
+  - 是否因 `next_approval` 再次暂停
+- `run_id` / `mode`
+  - 本次 resume 对应的运行信息
 
 ## 7. 页面加载与接口关系
 
@@ -614,9 +620,9 @@ GET /api/v1/sessions/{session_id}
 
 页面建议按以下顺序执行：
 
-1. `POST /api/v1/sessions/{session_id}/messages`
-2. 直接使用响应中的 `assistant_message` 更新当前窗口
-3. 如后续接入 SSE，再订阅 `runs/{run_id}/events`
+1. `POST /api/v1/sessions/{session_id}/messages/stream`
+2. 按 SSE 事件更新当前窗口
+3. 如果调用方不支持 SSE，可退回 `POST /api/v1/sessions/{session_id}/messages`
 
 ### 7.4 用户归档或删除 Session
 
@@ -643,7 +649,10 @@ GET /sessions/{session_id}
 -> data/users/<user_id>/sessions/<session_id>/meta.json
 -> data/users/<user_id>/sessions/<session_id>/messages.jsonl
 -> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+-> data/users/<user_id>/sessions/<session_id>/operations.jsonl
 ```
+
+`tasks.jsonl` 不放入 Session 详情响应，统一通过任务接口读取。
 
 ### 8.3 审批
 
@@ -652,57 +661,41 @@ GET /sessions/{session_id}/approvals
 -> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
-## 9. 第一版代码目录骨架建议
-
-基于当前 API 和本地目录模型，建议首版代码骨架如下：
+### 8.4 任务
 
 ```text
-ai-agent/
-  src/dbass_ai_agent/
-    api/
-      app.py
-      routes_sessions.py
-      routes_messages.py
-      routes_approvals.py
-      sse.py
-      schemas.py
-    sessions/
-      service.py
-      repository.py
-      index_store.py
-      file_store.py
-    agent/
-      runtime.py
-      stream.py
-      approvals.py
-    persistence/
-      paths.py
-      ids.py
-      clock.py
+GET /sessions/{session_id}/tasks
+-> data/users/<user_id>/sessions/<session_id>/tasks.jsonl
 ```
 
-### 9.1 目录职责建议
+## 9. 当前代码目录映射
 
-- `api/`
-  - 对外 HTTP 与 SSE 接口
-- `sessions/`
-  - Session 元数据、列表索引和文件读写
-- `agent/`
-  - Deep Agent 运行、流式事件和审批恢复
-- `persistence/`
-  - 路径拼装、ID 生成、时间工具等基础设施
+当前 API 相关代码主要分布在：
+
+- `backend/src/dbass_ai_agent/api/`
+  - 对外 HTTP、SSE 路由、依赖注入和响应 schema
+- `backend/src/dbass_ai_agent/sessions/`
+  - Session 元数据、列表索引、消息、审批、operation/task append-only 文件读写
+- `backend/src/dbass_ai_agent/agent/`
+  - DeepAgent runtime、流式事件转换、上下文压缩事件
+- `backend/src/dbass_ai_agent/operations/`
+  - 审批决策、operation/task 记录和写操作编排
+- `backend/src/dbass_ai_agent/infra/`
+  - 路径拼装、ID 生成、时间和日志等基础设施
 
 ## 10. 当前建议结论
 
-第一阶段建议先把 API 收敛为：
+当前 API 已收敛为：
 
 - `GET /api/v1/sessions`
 - `POST /api/v1/sessions`
 - `GET /api/v1/sessions/{session_id}`
 - `POST /api/v1/sessions/{session_id}/messages`
-- `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
+- `POST /api/v1/sessions/{session_id}/messages/stream`
 - `GET /api/v1/sessions/{session_id}/approvals`
 - `POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision`
+- `GET /api/v1/sessions/{session_id}/tasks`
+- `GET /api/v1/sessions/{session_id}/tasks/events`
 - `POST /api/v1/sessions/{session_id}/archive`
 - `POST /api/v1/sessions/{session_id}/restore`
 - `DELETE /api/v1/sessions/{session_id}`

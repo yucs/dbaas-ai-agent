@@ -1,4 +1,4 @@
-# DBAAS 智能助手第三阶段当前状态
+# DBAAS 智能助手第三阶段当前状态与压缩实现
 
 ## 1. 当前阶段结论
 
@@ -28,13 +28,64 @@
 - 压缩发生时的后端日志
 - 产品层原始消息继续保留
 
+当前结论是：
+
+- 页面历史与 Session 文件仍保存原始消息
+- DeepAgent 继续在原 `thread_id` 上运行
+- 长会话压缩由项目自定义包装的 `SummarizationMiddleware` 完成
+- 压缩提示词和阈值由项目自己的 `config.toml` 控制
+- 不再维护 `summary.json`
+- 不向前端发送摘要正文
+
 对应代码主要在：
 
 - [backend/src/dbass_ai_agent/agent/factory.py](./backend/src/dbass_ai_agent/agent/factory.py)
 - [backend/src/dbass_ai_agent/agent/runtime.py](./backend/src/dbass_ai_agent/agent/runtime.py)
 - [backend/src/dbass_ai_agent/config.py](./backend/src/dbass_ai_agent/config.py)
 
-## 3. 本阶段明确不做
+## 3. 当前实现链路
+
+当前消息链路是：
+
+```text
+User
+  -> routes_chat.py
+  -> SessionService.append_user_message(...)
+  -> DeepAgentRuntime.stream_reply(...)
+  -> agent.stream(..., stream_mode="messages", config={"configurable": {"thread_id": thread_id}})
+  -> SummarizationMiddleware（必要时压缩）
+  -> SSE compression_started/compression_completed/token/done events
+  -> SessionService.append_assistant_message(...)
+  -> messages.jsonl
+```
+
+当前没有放弃 `create_deep_agent()`，也没有在业务层重新拼一套 agent graph。
+后端仍然通过 `deepagents.create_deep_agent(...)` 保留 DeepAgents 默认主链路能力。
+
+DeepAgents 自己会在 `create_deep_agent()` 内部创建 `SummarizationMiddleware`。
+如果项目侧再额外挂一个同类 middleware，会触发 duplicate middleware 报错。
+因此当前实现采用的是：
+
+1. 创建主对话模型
+2. 创建专门给压缩用的 summary model
+3. 基于项目配置生成自定义 `SummarizationMiddleware` 包装层
+4. 临时 patch DeepAgents 内部的 `create_summarization_middleware`
+5. 在 patch 生效窗口内调用 `create_deep_agent()`
+
+对应代码在 [backend/src/dbass_ai_agent/agent/factory.py](./backend/src/dbass_ai_agent/agent/factory.py)：
+
+- `build_runtime_artifacts()`
+- `build_summarization_middleware_factory()`
+- `patch_deepagents_summarization_factory()`
+
+这样做的收益是：
+
+- 不会重复挂载 summarization middleware
+- 继续使用 DeepAgents 主体能力
+- 把压缩提示词和阈值切到项目自己的配置
+- 在同一个包装层追加项目侧 side effects
+
+## 4. 本阶段明确不做
 
 - `summary.json`
 - `SessionSummary`
@@ -44,8 +95,11 @@
 - `session_events`
 - 独立记忆系统
 - 跨 Session 语义层
+- `MemoryMiddleware`
+- facts store
+- 基于压缩触发的新 `thread_id`
 
-## 4. 当前压缩配置
+## 5. 当前压缩配置
 
 本阶段真正生效的压缩配置是：
 
@@ -58,7 +112,45 @@
 这些配置都已经进入运行时，
 不再只是文档上的预留项。
 
-## 5. 当前用户侧感知
+配置映射关系是：
+
+- `compression_enabled`
+  - 是否接管并启用项目侧压缩配置
+- `soft_trigger_tokens`
+  - 转换为 `trigger=("tokens", ...)`
+- `keep_recent_messages`
+  - 转换为 `keep=("messages", ...)`
+- `summary_max_tokens`
+  - 作为 summary model 的 `max_completion_tokens`
+- `compression_prompt_path`
+  - 作为 `summary_prompt`
+
+配置读取见 [backend/src/dbass_ai_agent/config.py](./backend/src/dbass_ai_agent/config.py)，
+实际组装见 [backend/src/dbass_ai_agent/agent/factory.py](./backend/src/dbass_ai_agent/agent/factory.py)。
+
+## 6. 压缩提示词
+
+当前压缩提示词来自：
+
+- [backend/prompts/compression.md](./backend/prompts/compression.md)
+
+它要求压缩模型输出结构化 JSON，重点保留：
+
+- 当前目标
+- 已确认事实
+- 观察到的资源
+- 已完成动作
+- 已批准或已拒绝动作
+- 待处理事项
+- 约束条件
+
+需要注意：
+
+- 这份 JSON 是运行时摘要内容
+- 它不会再额外持久化为 Session 文件
+- 它不是产品层公开的数据结构契约
+
+## 7. 当前用户侧感知
 
 对用户来说，本阶段的效果是：
 
@@ -67,7 +159,18 @@
 - Session 不会因为压缩切换新的 `thread_id`
 - 后端会在压缩发生时输出日志
 
-## 6. 钩子扩展方向
+压缩发生后：
+
+- `messages.jsonl` 不会因为压缩而删改已有消息
+- SSE 流式接口在 `compression_completed` 时可以追加一条去重后的 `role=system` 提醒
+- 页面历史消息不会消失
+- `meta.json` 不会新增摘要字段
+- `session_id` 不会变化
+- `thread_id` 不会切换
+
+所以压缩影响的是模型上下文，不是产品层记录。
+
+## 8. 钩子扩展方向
 
 当前这一版实现已经证明：
 
@@ -78,6 +181,7 @@
 当前已经落地的钩子动作是：
 
 - 压缩日志
+- 请求级压缩通知发布
 
 后续如果产品需要，也可以沿同一位置扩展：
 
@@ -86,7 +190,52 @@
 - metrics / tracing
 - 其他非持久化观测动作
 
-## 7. 当前验证状态
+当前建议继续遵守两个约束：
+
+- 不要回到全局 `SESSION_META` 这类共享状态
+- SSE / 前端提醒必须基于当前请求和当前 `thread_id` 的上下文做隔离
+
+## 9. 压缩与记忆边界
+
+当前项目还没有实现独立的长期记忆系统。
+
+当前真正存在的状态只有两类：
+
+- 产品层记录
+  - `meta.json`
+  - `messages.jsonl`
+  - `approvals.jsonl`
+- 运行时状态
+  - `thread_id`
+  - SQLite checkpoint
+  - `SummarizationMiddleware` 在 thread 内部维护的压缩上下文
+
+因此当前最准确的说法是：
+
+- 有运行时上下文压缩
+- 没有独立长期记忆
+- 没有 facts store
+- 没有 `session_events`
+- 没有跨 Session 语义记忆
+
+下面这些虽然和上下文延续有关，但当前不应被当成独立记忆系统：
+
+- `thread_id`
+- checkpoint
+- `SummarizationMiddleware` 生成的运行时摘要
+- 页面上的历史消息回放
+
+它们解决的是“这次调用还能不能接着跑”，不是“系统长期应该记住哪些稳定事实”。
+
+当前系统的产品层真相仍然是：
+
+- 原始消息
+- 审批记录
+- Session 元信息
+
+运行时压缩结果不是产品层真相。
+
+## 10. 当前验证状态
 
 当前仓库已经补了压缩相关测试，覆盖：
 
@@ -99,7 +248,7 @@
 - [backend/tests/test_factory.py](./backend/tests/test_factory.py)
 - [backend/tests/test_summarization_middleware.py](./backend/tests/test_summarization_middleware.py)
 
-## 8. 后续顺序
+## 11. 后续顺序
 
 第三阶段之后如果继续推进，更合理的顺序是：
 
@@ -109,3 +258,11 @@
 4. 再决定是否需要事实层记忆或事件层
 
 在那之前，不建议重新引入业务侧摘要存储。
+
+如果后续真的要实现记忆层，至少需要满足：
+
+- 不能替代产品层原始消息
+- 不能替代实时 DBAAS 查询
+- 不能把运行时摘要直接当最终事实
+- 必须可审计
+- 必须按用户和 Session 做清晰隔离

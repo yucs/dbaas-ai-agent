@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse
 from dbass_ai_agent.api.deps import close_agent_runtime, get_app_settings
 from dbass_ai_agent.api.routes_approvals import router as approvals_router
 from dbass_ai_agent.api.routes_chat import router as chat_router
-from dbass_ai_agent.api.routes_runs import router as runs_router
 from dbass_ai_agent.api.routes_sessions import router as sessions_router
 from dbass_ai_agent.api.routes_tasks import router as tasks_router
 from dbass_ai_agent.config import Settings
@@ -79,7 +78,6 @@ def create_app() -> FastAPI:
     app.include_router(approvals_router)
     app.include_router(tasks_router)
     app.include_router(chat_router)
-    app.include_router(runs_router)
 
     @app.middleware("http")
     async def request_logging_middleware(request: Request, call_next):

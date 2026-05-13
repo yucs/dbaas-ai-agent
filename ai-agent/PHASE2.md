@@ -14,11 +14,10 @@
 相关文档：
 
 - [DESIGN.md](./DESIGN.md)
-- [SESSIONS.md](./SESSIONS.md)
 - [API.md](./API.md)
-- [MEMORY.md](./MEMORY.md)
 - [PHASE1.md](./PHASE1.md)
-- [CONTEXT_ARCHITECTURE.md](./CONTEXT_ARCHITECTURE.md)
+- [PHASE3.md](./PHASE3.md)
+- [PHASE4.md](./PHASE4.md)
 
 ## 2. 第二阶段当前结论
 
@@ -237,8 +236,11 @@
 
 第二阶段时 SSE 路由只是预留：
 
-- `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
-  - 返回 `501 Not Implemented`
+- 独立 run 事件流只作为占位方案
+- 当时返回 `501 Not Implemented`
+
+当前主干已经移除这个长期未启用的占位接口。
+后续如果需要 run 级断线重连或独立运行事件流，应重新设计并实现，而不是继续暴露空接口。
 
 因此第二阶段当时仍是：
 
@@ -275,7 +277,7 @@
 - 压缩优先留在 `SummarizationMiddleware` 与原 `thread_id` 内部
 - 不再把 `summary.json` 作为 Session 恢复输入
 
-更具体的当前实现，统一以 [PHASE3.md](./PHASE3.md) 和 [CONTEXT_ARCHITECTURE.md](./CONTEXT_ARCHITECTURE.md) 为准。
+更具体的当前实现，统一以 [PHASE3.md](./PHASE3.md) 和 [PHASE4.md](./PHASE4.md) 为准。
 
 ## 6. 第二阶段完成标准与当前验收结果
 

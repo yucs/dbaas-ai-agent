@@ -14,7 +14,6 @@ src/dbass_ai_agent/agent/runtime.py
 src/dbass_ai_agent/api/__init__.py
 src/dbass_ai_agent/api/deps.py
 src/dbass_ai_agent/api/routes_chat.py
-src/dbass_ai_agent/api/routes_runs.py
 src/dbass_ai_agent/api/routes_sessions.py
 src/dbass_ai_agent/api/schemas.py
 src/dbass_ai_agent/identity/__init__.py

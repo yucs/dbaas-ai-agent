@@ -13,9 +13,7 @@
 相关文档：
 
 - [DESIGN.md](./DESIGN.md)
-- [SESSIONS.md](./SESSIONS.md)
 - [API.md](./API.md)
-- [MEMORY.md](./MEMORY.md)
 - [PHASE2.md](./PHASE2.md)
 
 ## 2. 第一阶段当前结论
@@ -143,21 +141,29 @@
 
 ### 4.2 文件投影结构
 
-当前仍然沿用第一阶段确定的本地文件结构：
+当前 Session 目录仍然沿用第一阶段确定的本地文件投影模型，
+并在后续阶段按同一目录继续扩展：
 
 ```text
 data/users/<user_id>/sessions/index.json
 data/users/<user_id>/sessions/<session_id>/meta.json
 data/users/<user_id>/sessions/<session_id>/messages.jsonl
 data/users/<user_id>/sessions/<session_id>/approvals.jsonl
+data/users/<user_id>/sessions/<session_id>/operations.jsonl
+data/users/<user_id>/sessions/<session_id>/tasks.jsonl
 ```
 
-其中已经实际接入并参与主流程的是：
+其中第一阶段基座文件是：
 
 - `index.json`
 - `meta.json`
 - `messages.jsonl`
 - `approvals.jsonl`
+
+第七阶段在同一个 Session 目录下继续扩展：
+
+- `operations.jsonl`
+- `tasks.jsonl`
 
 这里的“接入”含义是：
 
@@ -165,7 +171,78 @@ data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 - 页面和服务层都直接围绕它们组织当前 Session 视图
 - 长会话压缩属于运行时内部能力，不再额外投影成 Session 文件
 
-### 4.3 `session_id` 与 `thread_id` 绑定
+文件职责如下：
+
+- `index.json`
+  - 当前用户历史 Session 列表的直接来源
+  - 页面左侧列表优先读取它，而不是每次扫描所有 Session 子目录
+  - 负责承载排序、归档过滤、删除过滤、标题和预览
+- `meta.json`
+  - 单个 Session 的元信息
+  - 保存 `session_id`、`user_id`、`role`、`user`、`thread_id`、`title`、`status`、`created_at`、`updated_at`、`archived_at`
+  - `role` 和 `user` 是 Session 创建时的身份快照，后续请求必须与该快照匹配才能继续运行
+- `messages.jsonl`
+  - 当前 Session 的原始消息记录
+  - 按逐行 JSON append 写入，至少包含消息 ID、角色、内容和创建时间
+  - 页面历史、导出和产品层展示都以这里的原始消息为准
+  - 当前消息角色包括 `user`、`assistant`、`system`、`ai-agent`
+- `approvals.jsonl`
+  - 当前 Session 的审批记录
+  - 按逐行 JSON append 写入，不是 JSON array
+  - 用于查询待审批状态、展示历史审批记录和审计写操作流程
+- `operations.jsonl`
+  - 第七阶段扩展文件，保存写操作生命周期和 latest view
+  - `GET /sessions/{session_id}` 会返回折叠后的 `operations`
+- `tasks.jsonl`
+  - 第七阶段扩展文件，保存异步任务引用和最新观测状态
+  - 不放入 Session 详情，统一通过 `GET /sessions/{session_id}/tasks` 读取
+
+`index.json` 条目至少需要支持：
+
+- `session_id`
+- `title`
+- `status`
+- `updated_at`
+- `last_message_at`
+- `preview`
+
+### 4.3 Session 加载与消息写入流程
+
+登录后加载历史 Session 的流程是：
+
+1. 用户登录
+2. 后端识别 `user_id`
+3. 读取 `data/users/<user_id>/sessions/index.json`
+4. 返回该用户的 Session 列表
+5. 前端渲染侧边栏历史会话
+
+打开某个 Session 的流程是：
+
+1. 用户点击某个 `session_id`
+2. 后端读取 `meta.json`
+3. 后端读取 `messages.jsonl`
+4. 后端读取 `approvals.jsonl`
+5. 后端读取 `operations.jsonl`
+6. 将该 Session 内容返回给前端
+7. 前端将其加载到当前窗口
+
+当前 Session 继续对话的流程是：
+
+1. 前端向当前 `session_id` 发送用户消息
+2. 后端将用户消息追加到 `messages.jsonl`
+3. Agent 在当前活动 `thread_id` 上继续执行
+4. 返回本轮 assistant 消息结果
+5. 普通完成时将 assistant 消息继续追加到 `messages.jsonl`
+6. 更新 `meta.json.updated_at`
+7. 更新 `index.json` 中该条目的 `updated_at`、`last_message_at` 和 `preview`
+
+压缩不会改变上述产品层文件：
+
+- Session 继续绑定原活动线程
+- 压缩状态不额外落盘到 Session 目录
+- 压缩不会触发线程切换
+
+### 4.4 `session_id` 与 `thread_id` 绑定
 
 第一阶段确立的“一条 Session 绑定一条 Thread”的规则仍然成立，而且当前实现比早期约定更清晰：
 
@@ -181,6 +258,62 @@ data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 - 可以直接从 Session 快速定位对应 Thread
 - 第二阶段接入真实 DeepAgent 后无需重构产品层主键模型
 
+Session 是产品概念，Thread 是 Agent 运行概念。
+
+因此需要区分：
+
+- `delete session`
+  - 可以清理对应运行时线程数据
+- `context compression`
+  - 优先在原 `thread_id` 内完成
+  - 不额外生成产品层摘要文件
+  - 不因此清理当前 `thread_id`
+
+### 4.5 创建、归档、恢复与删除语义
+
+创建新 Session 时需要：
+
+- 生成新的 `session_id`
+- 创建对应目录
+- 写入 `meta.json`
+- 更新 `index.json`
+- `messages.jsonl`、`approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` 可按首次写入懒创建
+
+归档 Session 时不移动目录，只更新：
+
+- `meta.json.status = archived`
+- `archived_at`
+- `index.json` 中对应条目
+
+如果用户在已归档 Session 中继续发送消息，当前实现会先自动恢复成 `active`，
+再继续本次消息处理。
+
+删除 Session 采用真正删除，而不是逻辑删除：
+
+- 归档或删除前会检查 `session_run_lock`、pending approval 和非终态 task
+- 从 `index.json` 中移除该 Session
+- 删除 `data/users/<user_id>/sessions/<session_id>/` 目录
+- 同步删除该 Session 绑定的 `thread_id` 运行时数据
+- 页面刷新后不再出现在历史列表中
+
+因此当前语义是：
+
+- `archive`：隐藏但可恢复
+- `delete`：真正删除
+
+### 4.6 为什么不用一个大 JSON
+
+第一阶段不建议把一个用户的所有 Session 和消息都塞进单个大 JSON。
+
+原因是：
+
+- 历史列表读取和会话正文读取的关注点不同
+- 大文件后续容易膨胀
+- 每次更新都要重写整份文件
+- 删除、归档、会话切换会越来越难维护
+
+当前目录结构足够轻量，同时保留了迁移到 SQLite 或 PostgreSQL 的空间。
+
 ## 5. 第一阶段接口落地情况
 
 当前已经落地的接口包括：
@@ -193,12 +326,10 @@ data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 - `POST /api/v1/sessions/{session_id}/archive`
 - `POST /api/v1/sessions/{session_id}/restore`
 - `DELETE /api/v1/sessions/{session_id}`
-- `GET /api/v1/sessions/{session_id}/runs/{run_id}/events`
 
-其中需要特别说明：
-
-- SSE 事件接口目前仍返回 `501 Not Implemented`
-- 也就是说接口路径已经预留，但第一阶段主链路仍然是普通请求响应
+第一阶段曾经讨论过预留独立 run SSE 路径，
+但当前主干已移除该占位接口。
+当前对话流统一使用 `/messages/stream`，异步任务状态统一使用 `/tasks/events`。
 
 ## 6. 第一阶段前端实现优化
 

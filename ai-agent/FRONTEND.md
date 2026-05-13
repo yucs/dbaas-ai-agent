@@ -16,22 +16,25 @@
 相关文档：
 
 - [DESIGN.md](./DESIGN.md)
-- [SESSIONS.md](./SESSIONS.md)
 - [API.md](./API.md)
 - [PHASE1.md](./PHASE1.md)
 - [PHASE2.md](./PHASE2.md)
 
 ## 2. 前端设计原则
 
-### 2.1 页面先服务当前 MVP
+### 2.1 页面先服务当前会话
 
-当前阶段前端的核心目标不是做复杂工作台，而是稳定完成下面几件事：
+当前阶段前端的核心目标不是做全局 DBAAS 工作台，
+而是围绕当前 Session 稳定完成下面几件事：
 
 - 简单登录
 - 查看当前用户自己的 Session 列表
 - 创建 Session
 - 打开某个 Session
 - 在当前 Session 中继续问答
+- 通过 SSE 流式接收回答
+- 展示当前 Session 内的审批卡和操作结果
+- 展示当前 Session 内的异步任务状态
 - 删除 Session
 
 ### 2.2 页面不要过早暴露后续能力
@@ -42,9 +45,11 @@
 - 审批中心
 - 独立 SSE 流式事件面板
 - DBAAS 工具调用细节
-- 任务面板
+- 跨 Session 任务中心
+- 全局 DBAAS 运维工作台
 
 这些能力后续可以补，但当前不应成为页面主路径的一部分。
+当前页面可以展示当前 Session 内的审批卡、操作结果和任务面板。
 
 ### 2.3 页面只认产品层 Session
 
@@ -138,6 +143,9 @@ Session 创建后身份不可变。
    - 当前 Session 状态
    - 删除按钮
    - 消息列表
+   - 审批卡
+   - 操作结果卡
+   - 当前 Session 任务面板
    - 输入框
    - 发送按钮
 
@@ -222,6 +230,20 @@ Session 创建后身份不可变。
 5. 通过 SSE 持续接收 assistant 文本增量
 6. 流式结束后用真实 assistant 消息替换掉占位消息
 
+如果本轮触发人工确认：
+
+1. 前端接收 `approval.required`
+2. 在当前会话时间线中展示审批卡
+3. 接收 `run.paused` 后清理助手占位状态
+4. 禁止继续发送新消息，直到当前 pending approval 被处理
+
+如果本轮创建异步任务：
+
+1. 审批决策响应或任务 SSE 可能返回 `system_message`
+2. 前端插入后端返回的系统消息
+3. 通过任务接口刷新当前 Session 任务面板
+4. 建立当前 Session 的 `tasks/events` 订阅，接收任务状态变化
+
 ### 6.6 发送时的体验要求
 
 当前阶段已经启用 SSE，页面体验应避免“完全卡住”的感觉。
@@ -232,7 +254,7 @@ Session 创建后身份不可变。
 - 本地先插入 assistant 占位消息
 - 后续 `token` 事件持续追加到 assistant 占位消息
 - 收到 `done` 后替换为后端落盘后的真实 assistant 消息
-- 收到 `compression_started` / `compression_completed` 后显示轻量提示，但不把它插入消息列表
+- 收到 `compression_started` / `compression_completed` 后显示轻量提示；如果事件携带 `system_message`，插入后端返回的系统消息
 - 不在成功后立刻做不必要的全量页面刷新
 - 不在发送时弹出登录页
 - 只有明确错误时才显示错误提示
@@ -246,6 +268,8 @@ Session 创建后身份不可变。
 - 一般错误提示
 - DBAAS 问题命中但后台尚未启用
 - 初始化失败
+- 压缩开始或完成提示
+- 任务状态变化提示
 
 ### 7.2 哪些提示不应出现
 
@@ -263,19 +287,29 @@ Session 创建后身份不可变。
 
 发送消息、切换 Session、加载历史消息都不应触发确认弹窗。
 
-## 8. 当前阶段不做的前端能力
+## 8. 当前阶段前端边界
 
 以下能力明确后置：
 
 - 归档 / 恢复 UI
-- 审批卡片
-- SSE 流式输出
-- Token 级逐字渲染
-- DBAAS 工具执行进度面板
 - 多标签页同步
 - 搜索 Session
 - 收藏 Session
 - Session 分组
+- 跨 Session 任务中心
+- 全局审批中心
+- 单任务详情页
+- 手动 task refresh 按钮
+- DBAAS 工具原始调用参数面板
+
+当前已经属于会话页主路径的能力包括：
+
+- SSE 流式输出
+- Token 增量渲染
+- 当前 Session 审批卡
+- 当前 Session 操作结果卡
+- 当前 Session 任务面板
+- 当前 Session task SSE 状态订阅
 
 ## 9. 与后端接口的关系
 
@@ -284,15 +318,18 @@ Session 创建后身份不可变。
 - `GET /api/v1/sessions`
 - `POST /api/v1/sessions`
 - `GET /api/v1/sessions/{session_id}`
-- `POST /api/v1/sessions/{session_id}/messages`
+- `POST /api/v1/sessions/{session_id}/messages/stream`
+- `GET /api/v1/sessions/{session_id}/approvals`
+- `POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision`
+- `GET /api/v1/sessions/{session_id}/tasks`
+- `GET /api/v1/sessions/{session_id}/tasks/events`
 - `DELETE /api/v1/sessions/{session_id}`
 
-当前阶段前端不依赖：
+兼容或后置接口：
 
+- `POST /api/v1/sessions/{session_id}/messages`
 - `archive`
 - `restore`
-- SSE 事件流接口
-- 审批接口
 
 ## 10. 当前阶段验收标准
 
@@ -308,3 +345,6 @@ Session 创建后身份不可变。
 8. 当前页面不显示归档 / 恢复
 9. 刷新页面后仍能恢复当前登录态
 10. 选择历史 Session 后可以在当前窗口继续问答
+11. 命中写操作时可以展示审批卡，并支持批准或拒绝
+12. 异步任务创建后可以展示当前 Session 任务状态
+13. 当前 Session task SSE 能更新任务面板，并在终态时展示系统提醒

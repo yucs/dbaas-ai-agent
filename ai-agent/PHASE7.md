@@ -61,6 +61,25 @@ DBAAS 工具层负责：
 对于 Agent 来说，升级、扩容、启停都是“受控操作工具”；
 同步或异步只是工具返回结果中的一个属性。
 
+## 2.1 当前实现状态
+
+截至当前主干，第七阶段相关能力已经从设计推进到实现状态。
+
+已经落地的主路径包括：
+
+- 写工具审批中断与恢复
+- session-scoped 审批查询和审批决策接口
+- `approvals.jsonl`、`operations.jsonl`、`tasks.jsonl` append-only 持久化
+- 批量审批和批量 operation / task 返回
+- 当前 Session 的任务查询接口
+- 当前 Session 的 `tasks/events` SSE
+- 异步任务终态系统提醒
+- 前端审批卡、操作结果卡和当前 Session 任务面板
+- 归档 / 删除前的 pending approval、running task 和 `session_run_lock` 保护
+
+因此本文档后面的“P7A / P7B / 第一批 / 第二批”章节应理解为设计演进记录和验收清单。
+如果这些章节中的“计划实现”措辞与当前代码状态不一致，以当前实现和 [API.md](./API.md) 为准。
+
 ## 3. 当前 mock-server 能力
 
 当前相邻 `mock-server` 已具备的服务写接口包括：
@@ -1958,10 +1977,15 @@ error
 
 ```text
 approval.required
-approval.resolved
 run.paused
-run.resumed
 ```
+
+当前代码中，`/messages/stream` 只在命中人工确认时推送
+`approval.required` 和 `run.paused`。
+用户批准或拒绝后的恢复执行由
+`POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision`
+同步返回，不通过 `/messages/stream` 额外推送 `approval.resolved` 或 `run.resumed`。
+这两个事件名只作为后续独立 run 事件流或断线重连模型的预留语义。
 
 `/messages/stream` 不承载异步任务后续状态变化。
 异步任务可能在本次 AI run 结束后很久才完成，
@@ -2025,24 +2049,15 @@ done
 
 ### 10.2 独立运行事件流
 
-当前 `GET /api/v1/sessions/{session_id}/runs/{run_id}/events` 仍未启用。
+早期曾预留过独立 run 事件流接口，用于表达 run 级事件订阅。
+当前主干已经移除这个长期返回 `501 Not Implemented` 的占位接口。
 
 P7A 不启用独立 run 事件流，避免同时维护两套运行事件通道。
 审批恢复完成后，前端通过审批决策接口响应和当前 Session 刷新补齐结果。
 
-后续如果审批恢复后需要支持断线重连，再启用独立 run 事件流。
+后续如果审批恢复后需要支持断线重连，再重新设计独立 run 事件流。
 
-推荐语义：
-
-```text
-POST /api/v1/sessions/{session_id}/messages
--> 返回 run_id
-
-GET /api/v1/sessions/{session_id}/runs/{run_id}/events
--> 订阅该 run 的后续事件
-```
-
-但第一版仍可以先沿用 `/messages/stream` 主链路，
+第一版仍沿用 `/messages/stream` 主链路，
 审批恢复完成后通过当前页面状态刷新或新一轮事件推送补齐结果。
 
 ### 10.3 审批接口
@@ -2886,6 +2901,13 @@ backend/prompts/system.md
 
 第七阶段后，压缩策略必须保护操作事实。
 
+当前仍然不把运行时压缩摘要视为产品层真相：
+
+- 页面展示以原始消息为准
+- 审计以审批、operation 和 task 记录为准
+- 删除、归档、恢复以 Session 文件和索引为准
+- `SummarizationMiddleware` 生成的摘要只服务运行时上下文延续
+
 压缩摘要中至少保留：
 
 - 已观察到的服务对象
@@ -2900,7 +2922,38 @@ backend/prompts/system.md
 操作事实不应只依赖自然语言消息。
 持久化记录才是审计和恢复依据。
 
+如果后续评估独立事实层或记忆层，只应考虑“对执行恢复有价值的稳定事实”，
+而不是泛化知识记忆。
+
+更适合进入未来事实层的内容包括：
+
+- 用户当前 DBAAS 操作目标
+- 已明确观察过的重要资源对象
+- 已完成的重要写操作
+- 已批准或已拒绝的动作
+- 当前仍待处理的事项
+- 对后续执行有影响的约束
+
+不应进入长期事实层的内容包括：
+
+- 服务实时状态
+- 主机实时状态
+- 集群实时状态
+- 站点实时状态
+- 异步任务最新状态
+- 大段工具返回原文
+- 与 DBAAS 执行无关的闲聊
+
+原因是这些信息变化快，必须实时查后端。一旦固化到 memory，
+很容易变成错误事实。
+
 ## 15. 分阶段落地
+
+本节保留第七阶段拆分 P7A/P7B 时的落地批次和验收清单，
+用于追溯当时的设计取舍。
+当前主干已经实现了其中一部分后续批次能力，例如 task SSE 和前端任务面板；
+如果本节中的“第一批不要求实现”等表述与代码现状不一致，
+以本文档 `2.1 当前实现状态` 和 [API.md](./API.md) 为准。
 
 ### 15.0 第一批实现范围
 
