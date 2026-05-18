@@ -31,6 +31,8 @@
 - `GET /users/{user}`
 - `GET /services`
 - `GET /services/{name}`
+- `POST /api/v1/prechecks/service-resource-update`
+- `POST /api/v1/prechecks/service-storage-update`
 - `PUT /services/{name}/resource`
 - `PUT /services/{name}/storage`
 - `POST /services/{name}/image-upgrade`
@@ -98,6 +100,8 @@ curl http://127.0.0.1:8000/services
 - `GET /services` 查询当前内存中已加载的服务组，支持按 `user` 过滤
 - `GET /services/{name}` 按服务组名称查询
 - 返回服务组聚合视图，包含站点归属、网络、子服务、单元和备份策略摘要
+- `POST /api/v1/prechecks/service-resource-update` 返回资源规格调整前的只读预检事实
+- `POST /api/v1/prechecks/service-storage-update` 返回存储规格调整前的只读预检事实
 - `GET /sites`、`GET /clusters`、`GET /hosts` 查询平台资源拓扑
 - `PUT /services/{name}/resource` 按指定子服务类型更新 CPU、内存和 `platformAuto`
 - `PUT /services/{name}/storage` 按指定子服务类型更新存储和 `platformAuto`
@@ -213,6 +217,34 @@ curl 'http://127.0.0.1:8000/services?user=payment-team-prod' \
 ```bash
 curl http://127.0.0.1:8000/services \
   -H 'Authorization: Bearer user:payment-team-prod'
+```
+
+资源规格预检：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
+  -H 'Authorization: Bearer admin' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "service_name": "mysql-xf2",
+    "child_service_type": "mysql",
+    "target_cpu_cores": 16,
+    "target_memory_gb": 64
+  }'
+```
+
+存储规格预检：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-storage-update \
+  -H 'Authorization: Bearer admin' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "service_name": "mysql-xf2",
+    "child_service_type": "mysql",
+    "target_data_volume_gb": 1024,
+    "target_log_volume_gb": 200
+  }'
 ```
 
 更新资源规格：

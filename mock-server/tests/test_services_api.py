@@ -178,6 +178,107 @@ def test_update_service_storage_updates_only_requested_storage_fields() -> None:
     assert all(unit["storage"]["log"]["size"] == 100 for unit in mysql_service["units"])
 
 
+def test_precheck_service_resource_update_returns_lightweight_facts() -> None:
+    client = create_test_client()
+
+    response = client.post(
+        "/api/v1/prechecks/service-resource-update",
+        headers=admin_headers(),
+        json={
+            "service_name": "mysql-xf2",
+            "child_service_type": "mysql",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["service_name"] == "mysql-xf2"
+    assert payload["child_service_type"] == "mysql"
+    assert payload["current_spec"]["cpu_cores"] > 0
+    assert payload["current_spec"]["memory_gb"] > 0
+    assert payload["available_specs"]
+    assert payload["runtime"]["unit_count"] == len(payload["metrics"]["units"])
+    assert payload["metrics"]["time_window"] == "1d"
+    first_metric = payload["metrics"]["units"][0]
+    assert first_metric["cpu"]["latest"].endswith("%")
+    assert first_metric["memory"]["avg"].endswith("%")
+    assert payload["hard_errors"] == []
+
+
+def test_precheck_service_resource_update_reports_insufficient_capacity() -> None:
+    client = create_test_client()
+
+    response = client.post(
+        "/api/v1/prechecks/service-resource-update",
+        headers=admin_headers(),
+        json={
+            "service_name": "mysql-xf2",
+            "child_service_type": "mysql",
+            "target_cpu_cores": 1_000_000,
+            "target_memory_gb": 1_000_000,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hard_errors"] == [
+        {
+            "code": "insufficient_capacity",
+            "message": "当前主机或资源池资源不足，无法调整到目标值。",
+        }
+    ]
+
+
+def test_precheck_service_storage_update_returns_lightweight_facts() -> None:
+    client = create_test_client()
+
+    response = client.post(
+        "/api/v1/prechecks/service-storage-update",
+        headers=admin_headers(),
+        json={
+            "service_name": "mysql-xf2",
+            "child_service_type": "mysql",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["service_name"] == "mysql-xf2"
+    assert payload["child_service_type"] == "mysql"
+    assert payload["current_storage"]["data_volume_gb"] > 0
+    assert payload["current_storage"]["log_volume_gb"] > 0
+    assert payload["runtime"]["unit_count"] == len(payload["metrics"]["units"])
+    first_metric = payload["metrics"]["units"][0]
+    assert set(first_metric) == {"unit_name", "data_usage", "log_usage"}
+    assert first_metric["data_usage"].endswith("%")
+    assert first_metric["log_usage"].endswith("%")
+    assert payload["hard_errors"] == []
+
+
+def test_precheck_service_storage_update_reports_insufficient_capacity() -> None:
+    client = create_test_client()
+
+    response = client.post(
+        "/api/v1/prechecks/service-storage-update",
+        headers=admin_headers(),
+        json={
+            "service_name": "mysql-xf2",
+            "child_service_type": "mysql",
+            "target_data_volume_gb": 1_000_000,
+            "target_log_volume_gb": 1_000_000,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hard_errors"] == [
+        {
+            "code": "insufficient_capacity",
+            "message": "当前存储池资源不足，无法调整到目标值。",
+        }
+    ]
+
+
 def test_update_service_resource_returns_404_when_service_not_found() -> None:
     client = create_test_client()
 

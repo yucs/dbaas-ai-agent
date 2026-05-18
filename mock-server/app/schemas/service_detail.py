@@ -118,6 +118,132 @@ class UpdateServiceStorageRequest(ApiSchema):
         return self
 
 
+class HardError(ApiSchema):
+    """预检发现的明确错误。"""
+
+    code: str = Field(description="错误码")
+    message: str = Field(description="错误说明")
+
+
+class PrecheckRuntimeUnit(ApiSchema):
+    """预检返回的异常单元摘要。"""
+
+    unit_name: str = Field(description="单元名称")
+    status: str = Field(description="单元状态")
+
+
+class PrecheckRuntime(ApiSchema):
+    """预检返回的运行状态摘要。"""
+
+    unit_count: int = Field(description="单元总数")
+    running_count: int = Field(description="RUNNING 单元数")
+    abnormal_units: list[PrecheckRuntimeUnit] = Field(default_factory=list, description="异常单元列表")
+
+
+class PrecheckResourceSpec(ApiSchema):
+    """CPU / 内存规格。"""
+
+    cpu_cores: float = Field(description="CPU 核数")
+    memory_gb: float = Field(description="内存大小")
+
+
+class PrecheckAvailableResourceSpec(PrecheckResourceSpec):
+    """DBAAS 支持选择的资源规格套餐。"""
+
+    label: str = Field(description="规格展示标签")
+
+
+class PrecheckResourceMetricStats(ApiSchema):
+    """单项资源使用率摘要。"""
+
+    latest: str = Field(description="最新值")
+    max: str = Field(description="最近窗口最大值")
+    min: str = Field(description="最近窗口最小值")
+    avg: str = Field(description="最近窗口平均值")
+
+
+class PrecheckResourceUnitMetric(ApiSchema):
+    """单元 CPU / 内存使用率摘要。"""
+
+    unit_name: str = Field(description="单元名称")
+    cpu: PrecheckResourceMetricStats = Field(description="CPU 使用率")
+    memory: PrecheckResourceMetricStats = Field(description="内存使用率")
+
+
+class PrecheckResourceMetrics(ApiSchema):
+    """资源规格预检监控摘要。"""
+
+    time_window: str = Field(description="统计窗口")
+    units: list[PrecheckResourceUnitMetric] = Field(default_factory=list, description="单元监控摘要")
+    missing_metric_units: list[str] = Field(default_factory=list, description="缺失监控数据的单元")
+
+
+class PrecheckServiceResourceUpdateRequest(ApiSchema):
+    """资源规格调整预检请求。"""
+
+    service_name: str = Field(description="服务名")
+    child_service_type: str = Field(description="子服务类型")
+    target_cpu_cores: float | None = Field(default=None, gt=0, description="目标 CPU 核数")
+    target_memory_gb: float | None = Field(default=None, gt=0, description="目标内存大小")
+
+
+class PrecheckServiceResourceUpdateResponse(ApiSchema):
+    """资源规格调整预检响应。"""
+
+    service_name: str = Field(description="服务名")
+    child_service_type: str = Field(description="子服务类型")
+    current_spec: PrecheckResourceSpec = Field(description="当前规格")
+    available_specs: list[PrecheckAvailableResourceSpec] = Field(
+        default_factory=list,
+        description="DBAAS 支持选择的资源规格",
+    )
+    runtime: PrecheckRuntime = Field(description="运行状态摘要")
+    metrics: PrecheckResourceMetrics = Field(description="监控摘要")
+    hard_errors: list[HardError] = Field(default_factory=list, description="明确错误")
+
+
+class PrecheckStorageSpec(ApiSchema):
+    """data / log 卷容量。"""
+
+    data_volume_gb: float = Field(description="data 卷容量")
+    log_volume_gb: float = Field(description="log 卷容量")
+
+
+class PrecheckStorageUnitMetric(ApiSchema):
+    """单元 data / log 当前使用率。"""
+
+    unit_name: str = Field(description="单元名称")
+    data_usage: str = Field(description="data 卷当前使用率")
+    log_usage: str = Field(description="log 卷当前使用率")
+
+
+class PrecheckStorageMetrics(ApiSchema):
+    """存储规格预检监控摘要。"""
+
+    units: list[PrecheckStorageUnitMetric] = Field(default_factory=list, description="单元监控摘要")
+    missing_metric_units: list[str] = Field(default_factory=list, description="缺失监控数据的单元")
+
+
+class PrecheckServiceStorageUpdateRequest(ApiSchema):
+    """存储规格调整预检请求。"""
+
+    service_name: str = Field(description="服务名")
+    child_service_type: str = Field(description="子服务类型")
+    target_data_volume_gb: float | None = Field(default=None, gt=0, description="目标 data 卷容量")
+    target_log_volume_gb: float | None = Field(default=None, gt=0, description="目标 log 卷容量")
+
+
+class PrecheckServiceStorageUpdateResponse(ApiSchema):
+    """存储规格调整预检响应。"""
+
+    service_name: str = Field(description="服务名")
+    child_service_type: str = Field(description="子服务类型")
+    current_storage: PrecheckStorageSpec = Field(description="当前存储规格")
+    runtime: PrecheckRuntime = Field(description="运行状态摘要")
+    metrics: PrecheckStorageMetrics = Field(description="监控摘要")
+    hard_errors: list[HardError] = Field(default_factory=list, description="明确错误")
+
+
 class ServiceImageUpgradeRequest(ApiSchema):
     """`POST /services/{name}/image-upgrade` 的请求模型。"""
 

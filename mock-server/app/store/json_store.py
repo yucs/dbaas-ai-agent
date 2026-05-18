@@ -120,6 +120,90 @@ class JsonDataStore:
             ]
             return [self._public_user_summary(service_user) for service_user in users]
 
+    def precheck_service_resource_update(
+        self,
+        name: str,
+        *,
+        child_service_type: str,
+        target_cpu_cores: float | None = None,
+        target_memory_gb: float | None = None,
+    ) -> dict[str, Any]:
+        """返回资源规格调整前的只读预检事实。"""
+
+        with self._lock:
+            target_services = self._get_target_child_services(name, child_service_type)
+            units = [unit for child_service in target_services for unit in child_service.get("units", [])]
+            current_cpu = float(units[0].get("cpu") or 0.0) if units else 0.0
+            current_memory = float(units[0].get("memory") or 0.0) if units else 0.0
+            hard_errors = self._resource_capacity_errors(
+                units,
+                target_cpu_cores=target_cpu_cores,
+                target_memory_gb=target_memory_gb,
+            )
+
+            return {
+                "service_name": name,
+                "child_service_type": child_service_type,
+                "current_spec": {
+                    "cpu_cores": current_cpu,
+                    "memory_gb": current_memory,
+                },
+                "available_specs": self._available_resource_specs(current_cpu, current_memory),
+                "runtime": self._precheck_runtime(units),
+                "metrics": {
+                    "time_window": "1d",
+                    "units": [
+                        {
+                            "unit_name": unit["name"],
+                            "cpu": self._resource_metric_stats("cpu", unit["name"]),
+                            "memory": self._resource_metric_stats("memory", unit["name"]),
+                        }
+                        for unit in units
+                    ],
+                    "missing_metric_units": [],
+                },
+                "hard_errors": hard_errors,
+            }
+
+    def precheck_service_storage_update(
+        self,
+        name: str,
+        *,
+        child_service_type: str,
+        target_data_volume_gb: float | None = None,
+        target_log_volume_gb: float | None = None,
+    ) -> dict[str, Any]:
+        """返回存储规格调整前的只读预检事实。"""
+
+        with self._lock:
+            target_services = self._get_target_child_services(name, child_service_type)
+            units = [unit for child_service in target_services for unit in child_service.get("units", [])]
+            current_storage = self._current_storage_spec(units)
+            hard_errors = self._storage_capacity_errors(
+                units,
+                target_data_volume_gb=target_data_volume_gb,
+                target_log_volume_gb=target_log_volume_gb,
+            )
+
+            return {
+                "service_name": name,
+                "child_service_type": child_service_type,
+                "current_storage": current_storage,
+                "runtime": self._precheck_runtime(units),
+                "metrics": {
+                    "units": [
+                        {
+                            "unit_name": unit["name"],
+                            "data_usage": self._percent_metric("storage", unit["name"], "data"),
+                            "log_usage": self._percent_metric("storage", unit["name"], "log"),
+                        }
+                        for unit in units
+                    ],
+                    "missing_metric_units": [],
+                },
+                "hard_errors": hard_errors,
+            }
+
     def get_user(self, user: str) -> dict[str, Any] | None:
         """返回指定用户详情，用户名直接等于服务组 user。"""
 
@@ -1193,6 +1277,159 @@ class JsonDataStore:
         if updated_service is None:
             raise ServiceNotFoundError(name)
         return updated_service
+
+    def _precheck_runtime(self, units: list[dict[str, Any]]) -> dict[str, Any]:
+        """返回预检使用的运行状态摘要。"""
+
+        abnormal_units = [
+            {
+                "unit_name": unit["name"],
+                "status": str(unit.get("containerStatus") or unit.get("healthStatus") or "UNKNOWN").lower(),
+            }
+            for unit in units
+            if unit.get("containerStatus") != "RUNNING"
+        ]
+        return {
+            "unit_count": len(units),
+            "running_count": sum(1 for unit in units if unit.get("containerStatus") == "RUNNING"),
+            "abnormal_units": abnormal_units,
+        }
+
+    def _available_resource_specs(self, current_cpu: float, current_memory: float) -> list[dict[str, Any]]:
+        """返回稳定的 mock 资源规格候选。"""
+
+        candidates = {
+            (max(current_cpu, 2.0), max(current_memory, 4.0)),
+            (max(current_cpu * 2, 4.0), max(current_memory * 2, 8.0)),
+            (max(current_cpu * 4, 8.0), max(current_memory * 4, 16.0)),
+        }
+        return [
+            {
+                "cpu_cores": cpu,
+                "memory_gb": memory,
+                "label": f"{self._format_number(cpu)}C{self._format_number(memory)}G",
+            }
+            for cpu, memory in sorted(candidates)
+        ]
+
+    def _resource_metric_stats(self, metric_name: str, unit_name: str) -> dict[str, str]:
+        """返回稳定的 CPU/内存使用率摘要。"""
+
+        latest_value = self._percent_number("resource", metric_name, unit_name, "latest", minimum=25, spread=65)
+        max_value = min(99.9, latest_value + self._percent_number("resource", metric_name, unit_name, "max", minimum=5, spread=15))
+        min_value = max(0.0, latest_value - self._percent_number("resource", metric_name, unit_name, "min", minimum=10, spread=20))
+        avg_value = (latest_value + min_value + max_value) / 3
+        return {
+            "latest": self._format_percent(latest_value),
+            "max": self._format_percent(max_value),
+            "min": self._format_percent(min_value),
+            "avg": self._format_percent(avg_value),
+        }
+
+    def _current_storage_spec(self, units: list[dict[str, Any]]) -> dict[str, float]:
+        """返回当前 data/log 卷容量。"""
+
+        if not units:
+            return {"data_volume_gb": 0.0, "log_volume_gb": 0.0}
+        storage = units[0]["storage"]
+        return {
+            "data_volume_gb": float(storage["data"]["size"]),
+            "log_volume_gb": float(storage["log"]["size"]),
+        }
+
+    def _resource_capacity_errors(
+        self,
+        units: list[dict[str, Any]],
+        *,
+        target_cpu_cores: float | None,
+        target_memory_gb: float | None,
+    ) -> list[dict[str, str]]:
+        """校验目标 CPU/内存是否超过所在主机容量。"""
+
+        if target_cpu_cores is None and target_memory_gb is None:
+            return []
+
+        host_usage = self._host_resource_usage()
+        for unit in units:
+            host = self._hosts_by_id[unit["hostId"]]
+            usage = host_usage[unit["hostId"]]
+            next_cpu = usage["cpu"] - float(unit.get("cpu") or 0.0) + float(target_cpu_cores or unit.get("cpu") or 0.0)
+            next_memory = usage["memory"] - float(unit.get("memory") or 0.0) + float(target_memory_gb or unit.get("memory") or 0.0)
+            if next_cpu > float(host["cpuCapacity"]) or next_memory > float(host["memoryCapacity"]):
+                return [
+                    {
+                        "code": "insufficient_capacity",
+                        "message": "当前主机或资源池资源不足，无法调整到目标值。",
+                    }
+                ]
+        return []
+
+    def _storage_capacity_errors(
+        self,
+        units: list[dict[str, Any]],
+        *,
+        target_data_volume_gb: float | None,
+        target_log_volume_gb: float | None,
+    ) -> list[dict[str, str]]:
+        """校验目标 data/log 容量是否超过所在磁盘容量。"""
+
+        if target_data_volume_gb is None and target_log_volume_gb is None:
+            return []
+
+        for unit in units:
+            host = self._hosts_by_id[unit["hostId"]]
+            for volume_name, target_size in (
+                ("data", target_data_volume_gb),
+                ("log", target_log_volume_gb),
+            ):
+                if target_size is None:
+                    continue
+                volume = unit["storage"][volume_name]
+                disk = host["_diskById"][volume["diskId"]]
+                next_used = float(disk["used"]) - float(volume["size"]) + float(target_size)
+                if next_used > float(disk["capacity"]):
+                    return [
+                        {
+                            "code": "insufficient_capacity",
+                            "message": "当前存储池资源不足，无法调整到目标值。",
+                        }
+                    ]
+        return []
+
+    def _host_resource_usage(self) -> dict[str, dict[str, float]]:
+        """汇总当前每台主机已分配的 CPU/内存。"""
+
+        usage = {host_id: {"cpu": 0.0, "memory": 0.0} for host_id in self._hosts_by_id}
+        for service in self._services_by_name.values():
+            for child_service in service.get("services", []):
+                for unit in child_service.get("units", []):
+                    host_usage = usage[unit["hostId"]]
+                    host_usage["cpu"] += float(unit.get("cpu") or 0.0)
+                    host_usage["memory"] += float(unit.get("memory") or 0.0)
+        return usage
+
+    def _percent_metric(self, *parts: object) -> str:
+        """返回稳定的百分比字符串。"""
+
+        return self._format_percent(self._percent_number(*parts, minimum=15, spread=80))
+
+    def _percent_number(self, *parts: object, minimum: float, spread: float) -> float:
+        """返回稳定的百分比数字。"""
+
+        seed = self._stable_int(*parts)
+        return round(minimum + (seed % int(spread * 10)) / 10, 1)
+
+    def _format_percent(self, value: float) -> str:
+        """格式化百分比字符串。"""
+
+        return f"{round(value, 1):.1f}%"
+
+    def _format_number(self, value: float) -> str:
+        """格式化规格数字。"""
+
+        if float(value).is_integer():
+            return str(int(value))
+        return str(round(value, 1))
 
     def _select_target_units(self, target_services: list[dict[str, Any]], unit_ids: list[str] | None) -> list[dict[str, Any]]:
         """返回本次任务要操作的单元列表。"""

@@ -5,6 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.auth import CurrentUser, ensure_service_access, get_current_user, resolve_service_user_filter
 from app.schemas import (
     CreateTaskResponse,
+    PrecheckServiceResourceUpdateRequest,
+    PrecheckServiceResourceUpdateResponse,
+    PrecheckServiceStorageUpdateRequest,
+    PrecheckServiceStorageUpdateResponse,
     ServiceDetailResponse,
     ServiceImageUpgradeRequest,
     UpdateServiceResourceRequest,
@@ -53,6 +57,60 @@ def list_services(
         ServiceDetailResponse.model_validate(service_detail)
         for service_detail in store.list_service_details(user=effective_user)
     ]
+
+
+@router.post("/api/v1/prechecks/service-resource-update", response_model=PrecheckServiceResourceUpdateResponse)
+def precheck_service_resource_update(
+    payload: PrecheckServiceResourceUpdateRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PrecheckServiceResourceUpdateResponse:
+    """返回服务 CPU/内存资源调整前的只读预检事实。"""
+
+    store = get_store(request)
+    ensure_service_access(store, current_user, payload.service_name)
+    try:
+        result = store.precheck_service_resource_update(
+            payload.service_name,
+            child_service_type=payload.child_service_type,
+            target_cpu_cores=payload.target_cpu_cores,
+            target_memory_gb=payload.target_memory_gb,
+        )
+    except ServiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"service '{payload.service_name}' not found") from None
+    except ChildServiceTypeNotFoundError:
+        raise HTTPException(
+            status_code=502,
+            detail=f"service '{payload.service_name}' has no child service type '{payload.child_service_type}'",
+        ) from None
+    return PrecheckServiceResourceUpdateResponse.model_validate(result)
+
+
+@router.post("/api/v1/prechecks/service-storage-update", response_model=PrecheckServiceStorageUpdateResponse)
+def precheck_service_storage_update(
+    payload: PrecheckServiceStorageUpdateRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> PrecheckServiceStorageUpdateResponse:
+    """返回服务 data/log 卷容量调整前的只读预检事实。"""
+
+    store = get_store(request)
+    ensure_service_access(store, current_user, payload.service_name)
+    try:
+        result = store.precheck_service_storage_update(
+            payload.service_name,
+            child_service_type=payload.child_service_type,
+            target_data_volume_gb=payload.target_data_volume_gb,
+            target_log_volume_gb=payload.target_log_volume_gb,
+        )
+    except ServiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"service '{payload.service_name}' not found") from None
+    except ChildServiceTypeNotFoundError:
+        raise HTTPException(
+            status_code=502,
+            detail=f"service '{payload.service_name}' has no child service type '{payload.child_service_type}'",
+        ) from None
+    return PrecheckServiceStorageUpdateResponse.model_validate(result)
 
 
 @router.put("/services/{name}/resource", response_model=ServiceDetailResponse)
