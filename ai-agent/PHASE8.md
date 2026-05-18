@@ -14,7 +14,7 @@ precheck_service_storage_update_tool
 - 不做统一 precheck 平台。
 - 一个高价值操作对应一个专用 precheck tool。
 - 没有目标规格或目标容量时，不做主机、资源池或存储池容量校验。
-- 有目标规格或目标容量时，DBAAS 需要校验资源是否足够；不足放入 `hard_errors`。
+- 有目标规格或目标容量时，DBAAS 需要校验资源是否足够；不足放入 `blocking_errors`。
 - CPU / 内存 `metrics` 只返回 unit 级摘要，不返回 service summary，不返回原始时间序列。
 - 存储 `metrics` 只返回每个 unit 当前最新 data/log 使用率。
 - 真正执行仍走 Phase7 写工具和确认卡链路。
@@ -67,7 +67,7 @@ precheck_service_resource_update_tool
 
 当用户询问服务是否需要扩容/缩容，或用户已指定 CPU、内存目标规格并希望执行前查看风险时，可以调用本工具。
 
-本工具返回当前规格、DBAAS 支持选择的资源套餐、unit 运行状态、unit 级 CPU/内存使用率摘要和 hard_errors。
+本工具返回当前规格、DBAAS 支持选择的资源套餐、unit 运行状态、unit 级 CPU/内存使用率摘要和 blocking_errors。
 
 本工具不执行写操作，不创建 approval。
 ```
@@ -94,7 +94,7 @@ precheck_service_storage_update_tool
 
 当用户询问服务 data/log 卷是否需要扩容，或用户已指定目标容量并希望执行前查看风险时，可以调用本工具。
 
-本工具返回当前 data/log 卷容量、unit 运行状态、unit 级 data/log 当前使用率和 hard_errors。
+本工具返回当前 data/log 卷容量、unit 运行状态、unit 级 data/log 当前使用率和 blocking_errors。
 
 本工具不执行写操作，不创建 approval。
 ```
@@ -180,7 +180,7 @@ POST /api/v1/prechecks/service-resource-update
     ],
     "missing_metric_units": []
   },
-  "hard_errors": []
+  "blocking_errors": []
 }
 ```
 
@@ -234,7 +234,7 @@ POST /api/v1/prechecks/service-storage-update
     ],
     "missing_metric_units": []
   },
-  "hard_errors": []
+  "blocking_errors": []
 }
 ```
 
@@ -248,13 +248,14 @@ POST /api/v1/prechecks/service-storage-update
 
 - `runtime`：unit 数量、running 数量和异常 unit 摘要；`abnormal_units` 使用 `{unit_name, status}`。
 - `metrics.missing_metric_units`：缺失整组监控数据的 unit；第一版不展开单个指标字段缺失。
-- `hard_errors`：明确错误，固定使用 `{code, message}`；例如服务不存在、目标值不合法、目标资源不足。
+- `blocking_errors`：DBAAS 成功完成 precheck 后返回的业务阻断错误，固定使用 `{code, message}`；例如目标资源不足。
+- DBAAS HTTP 错误、权限错误、连接失败或响应格式异常不放入 `blocking_errors`；ai-agent tool 会返回 `status=error`，并带上 `error_type`、`message` 和可选 `status_code`。
 
-`hard_errors` 非空示例：
+`blocking_errors` 非空示例：
 
 ```json
 {
-  "hard_errors": [
+  "blocking_errors": [
     {
       "code": "insufficient_capacity",
       "message": "当前主机、资源池或存储池资源不足，无法调整到目标值。"
@@ -263,7 +264,7 @@ POST /api/v1/prechecks/service-storage-update
 }
 ```
 
-mock-server 联调时，为了方便稳定触发 `hard_errors`，当前固定使用以下阈值：
+mock-server 联调时，为了方便稳定触发 `blocking_errors`，当前固定使用以下阈值：
 
 - CPU 目标值大于 `100C` 时返回资源不足；测试可填 `101C`。
 - 内存目标值大于 `300G` 时返回资源不足；测试可填 `301G`。
@@ -280,7 +281,7 @@ mock-server 联调时，为了方便稳定触发 `hard_errors`，当前固定使
 
 只有用户看完 precheck 建议或风险说明后仍明确要求继续执行时，才调用现有受控写工具；如果此前没有带目标参数做过 precheck，应先带目标参数再次调用对应 precheck tool。
 
-如果 precheck 返回可选项，推荐规格或目标值应优先从可选项中选择。hard_errors 非空时，不建议继续执行，应说明原因。
+如果 precheck 返回可选项，推荐规格或目标值应优先从可选项中选择。blocking_errors 非空时，不建议继续执行，应说明原因。
 
 当前可用 precheck tool：
 - 资源规格调整：precheck_service_resource_update_tool
@@ -314,8 +315,8 @@ Phase8 v1 明确不做：
 - 资源 precheck 返回的 `metrics` 只包含 unit 级 CPU / 内存摘要。
 - 存储 precheck 返回的 `metrics` 只包含 unit 级 data / log 当前使用率。
 - precheck 返回可选项时，推荐规格或目标值优先来自可选项。
-- 用户指定目标值但主机、资源池或存储池资源不足时，DBAAS 通过 `hard_errors` 返回。
-- `hard_errors` 非空时，模型说明错误原因，不建议继续执行。
+- 用户指定目标值但主机、资源池或存储池资源不足时，DBAAS 通过 `blocking_errors` 返回。
+- `blocking_errors` 非空时，模型说明错误原因，不建议继续执行。
 - precheck 查询失败时，模型说明缺少依据；如果用户仍明确要求执行，仍可回到 Phase7 写工具链路。
 
 一句话总结：

@@ -28,7 +28,7 @@ from dbass_ai_agent.agent.factory import (  # noqa: E402
     patch_deepagents_summarization_factory,
 )
 from dbass_ai_agent.agent.compression_events import capture_compression_notices  # noqa: E402
-from dbass_ai_agent.agent.prompt import load_system_prompt  # noqa: E402
+from dbass_ai_agent.agent.prompt import load_compression_prompt, load_system_prompt  # noqa: E402
 from dbass_ai_agent.config import Settings  # noqa: E402
 
 
@@ -153,6 +153,27 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
 
             with self.assertRaises(FileNotFoundError):
                 load_system_prompt(system_path, "user")
+
+    def test_load_system_prompt_requires_common_prompt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_dir = Path(tmpdir)
+            system_path = prompt_dir / "system.md"
+            (prompt_dir / "user_extend_system_prompt.md").write_text("user rules", encoding="utf-8")
+
+            with self.assertRaises(FileNotFoundError):
+                load_system_prompt(system_path, "user")
+
+    def test_load_compression_prompt_reads_required_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_path = Path(tmpdir) / "compression.md"
+            prompt_path.write_text("compression rules", encoding="utf-8")
+
+            self.assertEqual(load_compression_prompt(prompt_path), "compression rules")
+
+    def test_load_compression_prompt_requires_prompt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(FileNotFoundError):
+                load_compression_prompt(Path(tmpdir) / "compression.md")
 
     def test_create_runtime_agent_wraps_missing_role_prompt_as_factory_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

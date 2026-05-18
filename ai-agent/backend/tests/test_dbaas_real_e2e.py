@@ -62,7 +62,7 @@ class DbaasRealE2ETests(unittest.TestCase):
         self.assertIn("precheck_service_resource_update_tool", tool_names)
         self.assertNotIn("update_service_resource_tool", tool_names)
         self.assertTrue(
-            any(marker in reply.content for marker in ["资源不足", "hard_errors", "insufficient_capacity"]),
+            any(marker in reply.content for marker in ["资源不足", "blocking_errors", "insufficient_capacity"]),
             reply.content,
         )
 

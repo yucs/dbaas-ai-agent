@@ -28,7 +28,7 @@ def build_precheck_tools(settings: Settings, identity_getter: Callable[[], Ident
         """只读工具，用于服务 CPU/内存调整建议和执行前预检。
 
         用户询问是否需要扩容/缩容、推荐 CPU/内存目标规格、评估目标规格风险或执行资源调整前，调用本工具。
-        本工具返回当前规格、可选规格、运行状态、unit 级 CPU/内存监控摘要和 hard_errors，不执行写操作。
+        本工具返回当前规格、可选规格、运行状态、unit 级 CPU/内存监控摘要和 blocking_errors，不执行写操作。
         """
 
         try:
@@ -53,7 +53,7 @@ def build_precheck_tools(settings: Settings, identity_getter: Callable[[], Ident
         """只读工具，用于服务 data/log 卷容量调整建议和执行前预检。
 
         用户询问是否需要扩盘、推荐 data/log 目标容量、评估目标容量风险或执行存储调整前，调用本工具。
-        本工具返回当前容量、运行状态、unit 级 data/log 最新使用率和 hard_errors，不执行写操作。
+        本工具返回当前容量、运行状态、unit 级 data/log 最新使用率和 blocking_errors，不执行写操作。
         """
 
         try:

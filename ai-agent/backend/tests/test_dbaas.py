@@ -201,7 +201,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
                 {
                     "service_name": "mysql-xf2",
                     "child_service_type": "mysql",
-                    "hard_errors": [],
+                    "blocking_errors": [],
                 },
             )
         )
@@ -219,7 +219,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
                 }
             )
 
-        self.assertEqual(result["hard_errors"], [])
+        self.assertEqual(result["blocking_errors"], [])
         self.assertEqual(fake_client.last_method, "POST")
         self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-resource-update"))
         self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer admin"})
@@ -233,7 +233,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
             },
         )
 
-    def test_storage_precheck_tool_returns_hard_errors_from_dbaas(self) -> None:
+    def test_storage_precheck_tool_returns_blocking_errors_from_dbaas(self) -> None:
         tools = _tool_map()
         fake_client = _FakeDbaasHttpClient(
             _FakeDbaasResponse(
@@ -241,7 +241,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
                 {
                     "service_name": "mysql-xf2",
                     "child_service_type": "mysql",
-                    "hard_errors": [
+                    "blocking_errors": [
                         {
                             "code": "insufficient_capacity",
                             "message": "当前存储池资源不足，无法调整到目标值。",
@@ -264,7 +264,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
                 }
             )
 
-        self.assertEqual(result["hard_errors"][0]["code"], "insufficient_capacity")
+        self.assertEqual(result["blocking_errors"][0]["code"], "insufficient_capacity")
         self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-storage-update"))
         self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer user:payment-team-prod"})
         self.assertEqual(
@@ -298,6 +298,26 @@ class DbaasPrecheckToolTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "dbaas_request_failed")
         self.assertEqual(result["status_code"], 502)
         self.assertIn("service has no child service type", result["message"])
+
+    def test_precheck_tool_handles_non_object_error_response(self) -> None:
+        tools = _tool_map()
+        fake_client = _FakeDbaasHttpClient(_FakeDbaasResponse(502, ["upstream unavailable"]))
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+        ):
+            result = tools["precheck_service_resource_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                }
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "dbaas_request_failed")
+        self.assertEqual(result["status_code"], 502)
+        self.assertIn("upstream unavailable", result["message"])
 
 
 def _config(tmpdir: str) -> DbaasConfig:

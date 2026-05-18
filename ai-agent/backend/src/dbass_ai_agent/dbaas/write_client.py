@@ -262,9 +262,14 @@ def _identity_headers(identity: Identity) -> dict[str, str]:
 
 def _format_response_error(response: httpx.Response) -> str:
     try:
-        detail = response.json().get("detail")
+        payload = response.json()
     except ValueError:
         detail = response.text
+    else:
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("message") or payload
+        else:
+            detail = payload
     if not detail:
         detail = response.reason_phrase
     return f"DBAAS 控制面返回错误 {response.status_code}：{detail}"
