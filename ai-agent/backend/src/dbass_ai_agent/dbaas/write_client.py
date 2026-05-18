@@ -95,13 +95,29 @@ class DbaasWriteClient:
             payload["target_cpu_cores"] = target_cpu_cores
         if target_memory_gb is not None:
             payload["target_memory_gb"] = target_memory_gb
-        return self._request_json(
+        result = self._request_json(
             identity,
             "POST",
             "/api/v1/prechecks/service-resource-update",
             json=payload,
             timeout_seconds=timeout_seconds,
         )
+        _validate_precheck_response(
+            result,
+            required_fields=(
+                "service_name",
+                "child_service_type",
+                "current_spec",
+                "available_specs",
+                "runtime",
+                "metrics",
+                "blocking_errors",
+            ),
+            object_fields=("current_spec", "runtime", "metrics"),
+            list_fields=("available_specs",),
+            endpoint_name="service-resource-update",
+        )
+        return result
 
     def precheck_service_storage_update(
         self,
@@ -121,13 +137,28 @@ class DbaasWriteClient:
             payload["target_data_volume_gb"] = target_data_volume_gb
         if target_log_volume_gb is not None:
             payload["target_log_volume_gb"] = target_log_volume_gb
-        return self._request_json(
+        result = self._request_json(
             identity,
             "POST",
             "/api/v1/prechecks/service-storage-update",
             json=payload,
             timeout_seconds=timeout_seconds,
         )
+        _validate_precheck_response(
+            result,
+            required_fields=(
+                "service_name",
+                "child_service_type",
+                "current_storage",
+                "runtime",
+                "metrics",
+                "blocking_errors",
+            ),
+            object_fields=("current_storage", "runtime", "metrics"),
+            list_fields=(),
+            endpoint_name="service-storage-update",
+        )
+        return result
 
     def update_service_storage(
         self,
@@ -258,6 +289,64 @@ def _identity_headers(identity: Identity) -> dict[str, str]:
             error_type="permission_identity_missing",
         )
     return {"Authorization": f"Bearer user:{identity.user}"}
+
+
+def _validate_precheck_response(
+    payload: dict[str, Any],
+    *,
+    required_fields: tuple[str, ...],
+    object_fields: tuple[str, ...],
+    list_fields: tuple[str, ...],
+    endpoint_name: str,
+) -> None:
+    missing = [field for field in required_fields if field not in payload]
+    if missing:
+        raise DbaasWriteClientError(
+            f"DBAAS precheck 响应缺少必需字段：{', '.join(missing)}。",
+            error_type="dbaas_invalid_response",
+        )
+
+    for field in ("service_name", "child_service_type"):
+        if not isinstance(payload[field], str):
+            raise DbaasWriteClientError(
+                f"DBAAS precheck 响应字段 `{field}` 必须是字符串。",
+                error_type="dbaas_invalid_response",
+            )
+
+    for field in object_fields:
+        if not isinstance(payload[field], dict):
+            raise DbaasWriteClientError(
+                f"DBAAS precheck 响应字段 `{field}` 必须是对象。",
+                error_type="dbaas_invalid_response",
+            )
+
+    for field in list_fields:
+        if not isinstance(payload[field], list):
+            raise DbaasWriteClientError(
+                f"DBAAS precheck 响应字段 `{field}` 必须是数组。",
+                error_type="dbaas_invalid_response",
+            )
+
+    _validate_blocking_errors(payload["blocking_errors"], endpoint_name=endpoint_name)
+
+
+def _validate_blocking_errors(value: Any, *, endpoint_name: str) -> None:
+    if not isinstance(value, list):
+        raise DbaasWriteClientError(
+            f"DBAAS precheck 响应字段 `blocking_errors` 必须是数组：{endpoint_name}。",
+            error_type="dbaas_invalid_response",
+        )
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise DbaasWriteClientError(
+                f"DBAAS precheck 响应字段 `blocking_errors[{index}]` 必须是对象。",
+                error_type="dbaas_invalid_response",
+            )
+        if not isinstance(item.get("code"), str) or not isinstance(item.get("message"), str):
+            raise DbaasWriteClientError(
+                f"DBAAS precheck 响应字段 `blocking_errors[{index}]` 缺少字符串 code/message。",
+                error_type="dbaas_invalid_response",
+            )
 
 
 def _format_response_error(response: httpx.Response) -> str:

@@ -141,7 +141,7 @@ class JsonDataStore:
             units = [unit for child_service in target_services for unit in child_service.get("units", [])]
             current_cpu = float(units[0].get("cpu") or 0.0) if units else 0.0
             current_memory = float(units[0].get("memory") or 0.0) if units else 0.0
-            hard_errors = self._resource_capacity_errors(
+            blocking_errors = self._resource_capacity_errors(
                 units,
                 target_cpu_cores=target_cpu_cores,
                 target_memory_gb=target_memory_gb,
@@ -168,7 +168,7 @@ class JsonDataStore:
                     ],
                     "missing_metric_units": [],
                 },
-                "hard_errors": hard_errors,
+                "blocking_errors": blocking_errors,
             }
 
     def precheck_service_storage_update(
@@ -185,7 +185,7 @@ class JsonDataStore:
             target_services = self._get_target_child_services(name, child_service_type)
             units = [unit for child_service in target_services for unit in child_service.get("units", [])]
             current_storage = self._current_storage_spec(units)
-            hard_errors = self._storage_capacity_errors(
+            blocking_errors = self._storage_capacity_errors(
                 units,
                 target_data_volume_gb=target_data_volume_gb,
                 target_log_volume_gb=target_log_volume_gb,
@@ -207,7 +207,7 @@ class JsonDataStore:
                     ],
                     "missing_metric_units": [],
                 },
-                "hard_errors": hard_errors,
+                "blocking_errors": blocking_errors,
             }
 
     def get_user(self, user: str) -> dict[str, Any] | None:

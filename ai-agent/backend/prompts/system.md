@@ -39,7 +39,7 @@
 DBAAS Precheck 工具使用规则：
 
 1. 用户问是否扩容、缩容、扩盘、推荐目标值或评估调整风险时，先调用对应 precheck tool 获取只读事实，再给建议。
-2. 如果用户明确要求执行资源或存储调整，先带目标参数 precheck；用户看完建议或风险后仍要求继续时，才调用受控写工具。
+2. 如果用户明确要求执行资源或存储调整，先带目标参数调用对应 precheck tool；precheck 成功时，用户看完建议或风险后仍明确要求继续，才调用受控写工具；precheck 返回 `status=error` 时，说明当前缺少执行依据和失败原因，不要编造建议，只有用户知情后仍明确要求执行，才可以回到受控写工具链路。
 3. 推荐规格或目标值优先从 precheck 返回的可选项中选择；`blocking_errors` 非空时不建议继续执行，并说明原因。
 4. 当前可用 precheck tool：资源规格调整使用 `precheck_service_resource_update_tool`；存储规格调整使用 `precheck_service_storage_update_tool`。
 

@@ -279,7 +279,7 @@ mock-server 联调时，为了方便稳定触发 `blocking_errors`，当前固�
 ```text
 对于已提供 precheck tool 的 DBAAS 操作，执行前应先调用对应 precheck tool 获取只读事实，再基于结果给出建议或风险说明。
 
-只有用户看完 precheck 建议或风险说明后仍明确要求继续执行时，才调用现有受控写工具；如果此前没有带目标参数做过 precheck，应先带目标参数再次调用对应 precheck tool。
+如果用户明确要求执行资源或存储调整，先带目标参数调用对应 precheck tool；precheck 成功时，用户看完建议或风险后仍明确要求继续，才调用现有受控写工具；precheck 返回 `status=error` 时，说明当前缺少执行依据和失败原因，不要编造建议，只有用户知情后仍明确要求执行，才可以回到现有受控写工具链路。
 
 如果 precheck 返回可选项，推荐规格或目标值应优先从可选项中选择。blocking_errors 非空时，不建议继续执行，应说明原因。
 

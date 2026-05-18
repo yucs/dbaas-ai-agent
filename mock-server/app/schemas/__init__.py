@@ -15,7 +15,7 @@ from .metric import HistoryMetricPoint, LatestMetricPoint
 from .service_detail import (
     BackupStrategySummary,
     ChildService,
-    HardError,
+    BlockingError,
     PrecheckAvailableResourceSpec,
     PrecheckResourceMetrics,
     PrecheckResourceMetricStats,
@@ -54,7 +54,7 @@ __all__ = [
     "HostSummary",
     "HostUnitSummary",
     "HistoryMetricPoint",
-    "HardError",
+    "BlockingError",
     "LatestMetricPoint",
     "PrecheckAvailableResourceSpec",
     "PrecheckResourceMetrics",

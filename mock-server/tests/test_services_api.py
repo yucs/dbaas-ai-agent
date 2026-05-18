@@ -203,7 +203,7 @@ def test_precheck_service_resource_update_returns_lightweight_facts() -> None:
     first_metric = payload["metrics"]["units"][0]
     assert first_metric["cpu"]["latest"].endswith("%")
     assert first_metric["memory"]["avg"].endswith("%")
-    assert payload["hard_errors"] == []
+    assert payload["blocking_errors"] == []
 
 
 def test_precheck_service_resource_update_reports_insufficient_capacity() -> None:
@@ -222,7 +222,7 @@ def test_precheck_service_resource_update_reports_insufficient_capacity() -> Non
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["hard_errors"] == [
+    assert payload["blocking_errors"] == [
         {
             "code": "insufficient_capacity",
             "message": "当前主机或资源池资源不足，无法调整到目标值。",
@@ -253,7 +253,7 @@ def test_precheck_service_storage_update_returns_lightweight_facts() -> None:
     assert set(first_metric) == {"unit_name", "data_usage", "log_usage"}
     assert first_metric["data_usage"].endswith("%")
     assert first_metric["log_usage"].endswith("%")
-    assert payload["hard_errors"] == []
+    assert payload["blocking_errors"] == []
 
 
 def test_precheck_service_storage_update_reports_insufficient_capacity() -> None:
@@ -272,7 +272,7 @@ def test_precheck_service_storage_update_reports_insufficient_capacity() -> None
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["hard_errors"] == [
+    assert payload["blocking_errors"] == [
         {
             "code": "insufficient_capacity",
             "message": "当前存储池资源不足，无法调整到目标值。",

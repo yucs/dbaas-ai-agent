@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -49,18 +50,31 @@ class DbaasRealE2ETests(unittest.TestCase):
                         identity=identity,
                         session=session,
                         user_message=_user_message(
-                            "请把 mysql-xf2/mysql 扩到 101C/301G。"
-                            "如果资源不足就不要执行，只说明原因。"
+                            "mysql-xf2/mysql 扩到 101C301G"
                         ),
                     )
-                    tool_names = _thread_tool_names(runtime, session)
+                    tool_calls = _thread_tool_calls(runtime, session)
                 finally:
                     _close_runtime(runtime)
 
+        tool_names = [item["name"] for item in tool_calls]
+        resource_prechecks = [
+            item for item in tool_calls if item["name"] == "precheck_service_resource_update_tool"
+        ]
         self.assertFalse(reply.paused, reply.content)
         self.assertIsNone(reply.approval_request)
         self.assertIn("precheck_service_resource_update_tool", tool_names)
         self.assertNotIn("update_service_resource_tool", tool_names)
+        self.assertTrue(resource_prechecks, tool_calls)
+        target_precheck = _first_tool_call_with_args(
+            resource_prechecks,
+            target_cpu_cores=101,
+            target_memory_gb=301,
+        )
+        self.assertIsNotNone(target_precheck, tool_calls)
+        assert target_precheck is not None
+        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
         self.assertTrue(
             any(marker in reply.content for marker in ["资源不足", "blocking_errors", "insufficient_capacity"]),
             reply.content,
@@ -80,10 +94,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     reply = runtime.generate_reply(
                         identity=identity,
                         session=session,
-                        user_message=_user_message(
-                            "mysql-xf2/mysql 最近 CPU 压力比较高，你建议扩到什么 CPU/内存规格？"
-                            "只给建议和风险，不要执行扩容，也不要触发确认卡。"
-                        ),
+                        user_message=_user_message("mysql-xf2/mysql CPU 要不要扩"),
                     )
                     tool_names = _thread_tool_names(runtime, session)
                 finally:
@@ -93,6 +104,122 @@ class DbaasRealE2ETests(unittest.TestCase):
         self.assertIsNone(reply.approval_request)
         self.assertIn("precheck_service_resource_update_tool", tool_names)
         self.assertNotIn("update_service_resource_tool", tool_names)
+
+    def test_real_llm_short_resource_update_prechecks_then_continue_pauses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            port = _free_port()
+            settings = _real_e2e_settings(root, port)
+            identity = Identity(user_id="admin", role="admin", user=None)
+            session = _session_meta(identity, "thread_dbaas_real_e2e_precheck_then_continue")
+
+            with _mock_server(port):
+                runtime = DeepAgentRuntime(settings)
+                try:
+                    first_reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message("mysql-xf2/mysql 扩到 16C64G"),
+                    )
+                    first_tool_calls = _thread_tool_calls(runtime, session)
+                    second_reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message("继续"),
+                    )
+                finally:
+                    _close_runtime(runtime)
+
+        first_tool_names = [item["name"] for item in first_tool_calls]
+        resource_prechecks = [
+            item for item in first_tool_calls if item["name"] == "precheck_service_resource_update_tool"
+        ]
+        self.assertFalse(first_reply.paused, first_reply.content)
+        self.assertIsNone(first_reply.approval_request)
+        self.assertIn("precheck_service_resource_update_tool", first_tool_names)
+        self.assertNotIn("update_service_resource_tool", first_tool_names)
+        self.assertTrue(resource_prechecks, first_tool_calls)
+        target_precheck = _first_tool_call_with_args(
+            resource_prechecks,
+            target_cpu_cores=16,
+            target_memory_gb=64,
+        )
+        self.assertIsNotNone(target_precheck, first_tool_calls)
+        assert target_precheck is not None
+        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
+
+        self.assertTrue(second_reply.paused, second_reply.content)
+        self.assertIsNotNone(second_reply.approval_request)
+        approval_tool_names = [
+            item.get("name")
+            for item in (second_reply.approval_request.action_requests if second_reply.approval_request else [])
+        ]
+        self.assertIn("update_service_resource_tool", approval_tool_names)
+
+    def test_real_llm_short_storage_update_prechecks_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            port = _free_port()
+            settings = _real_e2e_settings(root, port)
+            identity = Identity(user_id="admin", role="admin", user=None)
+            session = _session_meta(identity, "thread_dbaas_real_e2e_storage_precheck")
+
+            with _mock_server(port):
+                runtime = DeepAgentRuntime(settings)
+                try:
+                    reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message("mysql-xf2/mysql data 扩到 1024G，log 扩到 200G"),
+                    )
+                    tool_calls = _thread_tool_calls(runtime, session)
+                finally:
+                    _close_runtime(runtime)
+
+        tool_names = [item["name"] for item in tool_calls]
+        storage_prechecks = [
+            item for item in tool_calls if item["name"] == "precheck_service_storage_update_tool"
+        ]
+        self.assertFalse(reply.paused, reply.content)
+        self.assertIsNone(reply.approval_request)
+        self.assertIn("precheck_service_storage_update_tool", tool_names)
+        self.assertNotIn("update_service_storage_tool", tool_names)
+        self.assertTrue(storage_prechecks, tool_calls)
+        target_precheck = _first_tool_call_with_args(
+            storage_prechecks,
+            target_data_volume_gb=1024,
+            target_log_volume_gb=200,
+        )
+        self.assertIsNotNone(target_precheck, tool_calls)
+        assert target_precheck is not None
+        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
+
+    def test_real_llm_short_storage_advice_uses_precheck_without_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            port = _free_port()
+            settings = _real_e2e_settings(root, port)
+            identity = Identity(user_id="admin", role="admin", user=None)
+            session = _session_meta(identity, "thread_dbaas_real_e2e_storage_advice")
+
+            with _mock_server(port):
+                runtime = DeepAgentRuntime(settings)
+                try:
+                    reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message("mysql-xf2/mysql 磁盘要不要扩"),
+                    )
+                    tool_names = _thread_tool_names(runtime, session)
+                finally:
+                    _close_runtime(runtime)
+
+        self.assertFalse(reply.paused, reply.content)
+        self.assertIsNone(reply.approval_request)
+        self.assertIn("precheck_service_storage_update_tool", tool_names)
+        self.assertNotIn("update_service_storage_tool", tool_names)
 
     def test_real_llm_answers_snapshot_success_and_unavailable_after_mock_stops(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -291,27 +418,71 @@ def _close_runtime(runtime: DeepAgentRuntime) -> None:
 
 
 def _thread_tool_names(runtime: DeepAgentRuntime, session: SessionMeta) -> list[str]:
+    return [item["name"] for item in _thread_tool_calls(runtime, session)]
+
+
+def _thread_tool_calls(runtime: DeepAgentRuntime, session: SessionMeta) -> list[dict[str, object]]:
     state = runtime._agent_for_session(session).get_state(
         config={"configurable": {"thread_id": session.thread_id}},
     )
     values = getattr(state, "values", {}) or {}
     messages = values.get("messages", [])
-    names: list[str] = []
+    calls: list[dict[str, object]] = []
     for message in messages:
-        tool_name = getattr(message, "name", None)
-        if isinstance(tool_name, str) and tool_name:
-            names.append(tool_name)
         for tool_call in getattr(message, "tool_calls", None) or []:
             if isinstance(tool_call, dict) and isinstance(tool_call.get("name"), str):
-                names.append(tool_call["name"])
+                calls.append(
+                    {
+                        "name": tool_call["name"],
+                        "args": tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {},
+                    }
+                )
         additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
         for raw_call in additional_kwargs.get("tool_calls") or []:
-            if not isinstance(raw_call, dict):
-                continue
-            function = raw_call.get("function")
-            if isinstance(function, dict) and isinstance(function.get("name"), str):
-                names.append(function["name"])
-    return names
+            parsed = _parse_raw_tool_call(raw_call)
+            if parsed is not None:
+                calls.append(parsed)
+    return calls
+
+
+def _first_tool_call_with_args(
+    tool_calls: list[dict[str, object]],
+    **expected_args: object,
+) -> dict[str, object] | None:
+    for tool_call in tool_calls:
+        args = tool_call.get("args")
+        if not isinstance(args, dict):
+            continue
+        if all(_arg_equal(args.get(key), value) for key, value in expected_args.items()):
+            return tool_call
+    return None
+
+
+def _arg_equal(actual: object, expected: object) -> bool:
+    if isinstance(expected, (int, float)):
+        try:
+            return float(actual) == float(expected)
+        except (TypeError, ValueError):
+            return False
+    return actual == expected
+
+
+def _parse_raw_tool_call(raw_call: object) -> dict[str, object] | None:
+    if not isinstance(raw_call, dict):
+        return None
+    function = raw_call.get("function")
+    if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+        return None
+    args: dict[str, object] = {}
+    raw_args = function.get("arguments")
+    if isinstance(raw_args, str) and raw_args.strip():
+        try:
+            loaded = json.loads(raw_args)
+        except json.JSONDecodeError:
+            loaded = {}
+        if isinstance(loaded, dict):
+            args = loaded
+    return {"name": function["name"], "args": args}
 
 
 if __name__ == "__main__":

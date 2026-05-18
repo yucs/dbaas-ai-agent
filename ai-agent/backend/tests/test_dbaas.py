@@ -198,11 +198,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
         fake_client = _FakeDbaasHttpClient(
             _FakeDbaasResponse(
                 200,
-                {
-                    "service_name": "mysql-xf2",
-                    "child_service_type": "mysql",
-                    "blocking_errors": [],
-                },
+                _resource_precheck_response(),
             )
         )
 
@@ -238,16 +234,14 @@ class DbaasPrecheckToolTests(unittest.TestCase):
         fake_client = _FakeDbaasHttpClient(
             _FakeDbaasResponse(
                 200,
-                {
-                    "service_name": "mysql-xf2",
-                    "child_service_type": "mysql",
-                    "blocking_errors": [
+                _storage_precheck_response(
+                    blocking_errors=[
                         {
                             "code": "insufficient_capacity",
                             "message": "当前存储池资源不足，无法调整到目标值。",
                         }
                     ],
-                },
+                ),
             )
         )
 
@@ -319,6 +313,55 @@ class DbaasPrecheckToolTests(unittest.TestCase):
         self.assertEqual(result["status_code"], 502)
         self.assertIn("upstream unavailable", result["message"])
 
+    def test_precheck_tool_returns_error_payload_when_required_field_missing(self) -> None:
+        tools = _tool_map()
+        fake_client = _FakeDbaasHttpClient(
+            _FakeDbaasResponse(
+                200,
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                    "blocking_errors": [],
+                },
+            )
+        )
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+        ):
+            result = tools["precheck_service_resource_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                }
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "dbaas_invalid_response")
+        self.assertIn("缺少必需字段", result["message"])
+
+    def test_precheck_tool_returns_error_payload_when_blocking_errors_is_not_list(self) -> None:
+        tools = _tool_map()
+        payload = _storage_precheck_response()
+        payload["blocking_errors"] = {"code": "insufficient_capacity"}
+        fake_client = _FakeDbaasHttpClient(_FakeDbaasResponse(200, payload))
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+        ):
+            result = tools["precheck_service_storage_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                }
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "dbaas_invalid_response")
+        self.assertIn("blocking_errors", result["message"])
+
 
 def _config(tmpdir: str) -> DbaasConfig:
     return DbaasConfig(
@@ -334,6 +377,78 @@ def _config(tmpdir: str) -> DbaasConfig:
         metric_snapshot_cleanup_interval_seconds=600,
         metric_refresh_lock_timeout_seconds=10,
     )
+
+
+def _resource_precheck_response(blocking_errors: list[dict] | None = None) -> dict:
+    return {
+        "service_name": "mysql-xf2",
+        "child_service_type": "mysql",
+        "current_spec": {
+            "cpu_cores": 2,
+            "memory_gb": 4,
+        },
+        "available_specs": [
+            {
+                "cpu_cores": 4,
+                "memory_gb": 8,
+                "label": "4C8G",
+            }
+        ],
+        "runtime": {
+            "unit_count": 1,
+            "running_count": 1,
+            "abnormal_units": [],
+        },
+        "metrics": {
+            "time_window": "1d",
+            "units": [
+                {
+                    "unit_name": "mysql-0",
+                    "cpu": {
+                        "latest": "82.5%",
+                        "max": "96.8%",
+                        "min": "21.3%",
+                        "avg": "67.4%",
+                    },
+                    "memory": {
+                        "latest": "71.2%",
+                        "max": "84.6%",
+                        "min": "48.9%",
+                        "avg": "63.1%",
+                    },
+                }
+            ],
+            "missing_metric_units": [],
+        },
+        "blocking_errors": blocking_errors or [],
+    }
+
+
+def _storage_precheck_response(blocking_errors: list[dict] | None = None) -> dict:
+    return {
+        "service_name": "mysql-xf2",
+        "child_service_type": "mysql",
+        "current_storage": {
+            "data_volume_gb": 500,
+            "log_volume_gb": 100,
+        },
+        "runtime": {
+            "unit_count": 1,
+            "running_count": 1,
+            "abnormal_units": [],
+        },
+        "metrics": {
+            "units": [
+                {
+                    "unit_name": "mysql-0",
+                    "data_usage": "78.5%",
+                    "log_usage": "42.1%",
+                }
+            ],
+            "missing_metric_units": [],
+        },
+        "blocking_errors": blocking_errors or [],
+    }
 
 
 def _service(name: str, user: str, *, health_status: str = "HEALTHY") -> dict:

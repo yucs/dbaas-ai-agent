@@ -247,7 +247,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-storage-update \
   }'
 ```
 
-precheck 联调触发 `hard_errors` 的固定阈值：
+precheck 联调触发 `blocking_errors` 的固定阈值：
 
 - CPU 目标值大于 `100C` 返回资源不足，测试可填 `101`。
 - 内存目标值大于 `300G` 返回资源不足，测试可填 `301`。

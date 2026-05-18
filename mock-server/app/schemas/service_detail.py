@@ -118,8 +118,8 @@ class UpdateServiceStorageRequest(ApiSchema):
         return self
 
 
-class HardError(ApiSchema):
-    """预检发现的明确错误。"""
+class BlockingError(ApiSchema):
+    """预检发现的阻断错误。"""
 
     code: str = Field(description="错误码")
     message: str = Field(description="错误说明")
@@ -199,7 +199,7 @@ class PrecheckServiceResourceUpdateResponse(ApiSchema):
     )
     runtime: PrecheckRuntime = Field(description="运行状态摘要")
     metrics: PrecheckResourceMetrics = Field(description="监控摘要")
-    hard_errors: list[HardError] = Field(default_factory=list, description="明确错误")
+    blocking_errors: list[BlockingError] = Field(default_factory=list, description="阻断错误")
 
 
 class PrecheckStorageSpec(ApiSchema):
@@ -241,7 +241,7 @@ class PrecheckServiceStorageUpdateResponse(ApiSchema):
     current_storage: PrecheckStorageSpec = Field(description="当前存储规格")
     runtime: PrecheckRuntime = Field(description="运行状态摘要")
     metrics: PrecheckStorageMetrics = Field(description="监控摘要")
-    hard_errors: list[HardError] = Field(default_factory=list, description="明确错误")
+    blocking_errors: list[BlockingError] = Field(default_factory=list, description="阻断错误")
 
 
 class ServiceImageUpgradeRequest(ApiSchema):
