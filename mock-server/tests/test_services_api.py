@@ -1,3 +1,4 @@
+import re
 import time
 
 from fastapi.testclient import TestClient
@@ -361,6 +362,10 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
     create_payload = create_response.json()
     assert list(create_payload.keys()) == ["taskId"]
     task_id = create_payload["taskId"]
+    assert re.fullmatch(
+        r"task-service-image-upgrade-mysql-xf2-mysql-[0-9a-f]{6}",
+        task_id,
+    )
 
     task_response = client.get(f"/tasks/{task_id}", headers=admin_headers())
     assert task_response.status_code == 200

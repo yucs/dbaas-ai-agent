@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import secrets
 import threading
 import time
 from typing import Any
@@ -359,7 +360,11 @@ class JsonDataStore:
             target_services = self._get_target_child_services(name, child_service_type)
             target_units = self._select_target_units(target_services, unit_ids)
             now = self._utcnow()
-            task_id = self._next_task_id()
+            task_id = self._next_task_id(
+                action="service.image.upgrade",
+                service_name=name,
+                child_service_type=child_service_type,
+            )
             selected_unit_ids = [unit["id"] for unit in target_units]
             task = {
                 "taskId": task_id,
@@ -1585,11 +1590,34 @@ class JsonDataStore:
             return "UNHEALTHY"
         return "WARN"
 
-    def _next_task_id(self) -> str:
-        """生成递增任务 ID。"""
+    def _next_task_id(
+        self,
+        *,
+        action: str,
+        service_name: str,
+        child_service_type: str,
+    ) -> str:
+        """生成包含动作、服务、子服务和随机后缀的任务 ID。"""
 
-        self._task_sequence += 1
-        return f"task-{self._task_sequence:04d}"
+        prefix = "-".join(
+            [
+                "task",
+                self._slug(action),
+                self._slug(service_name),
+                self._slug(child_service_type),
+            ]
+        )
+        while True:
+            task_id = f"{prefix}-{secrets.token_hex(3)}"
+            if task_id not in self._tasks_by_id:
+                return task_id
+
+    @staticmethod
+    def _slug(value: str) -> str:
+        """将任务 ID 组成片段规范化为 URL 友好的短文本。"""
+
+        normalized = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+        return normalized or "unknown"
 
     def _utcnow(self) -> str:
         """返回当前 UTC 时间字符串。"""

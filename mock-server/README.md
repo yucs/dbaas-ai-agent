@@ -302,7 +302,7 @@ curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
 查询通用任务：
 
 ```bash
-curl http://127.0.0.1:8000/tasks/task-0001 \
+curl http://127.0.0.1:8000/tasks/task-service-image-upgrade-mysql-xf2-mysql-a3f9c2 \
   -H 'Authorization: Bearer admin'
 ```
 
@@ -437,6 +437,7 @@ mock-server/
 
 - 所有异步接口都应返回 `taskId`
 - 统一通过 `GET /tasks/{taskId}` 查询任务状态
+- mock-server 生成的 `taskId` 包含动作、服务名、子服务类型和随机后缀，例如 `task-service-image-upgrade-mysql-xf2-mysql-a3f9c2`
 - 当前通用任务字段包括 `taskId`、`type`、`status`、`message`、`reason`、`resourceType`、`resourceName`、`result`、`createdAt`、`updatedAt`
 - 当前任务状态使用 `RUNNING`、`SUCCESS`、`FAILED`
 - `POST /services/{name}/image-upgrade` 会创建 `service.image.upgrade` 类型任务
