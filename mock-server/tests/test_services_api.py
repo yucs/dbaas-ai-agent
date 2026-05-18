@@ -214,8 +214,8 @@ def test_precheck_service_resource_update_reports_insufficient_capacity() -> Non
         json={
             "service_name": "mysql-xf2",
             "child_service_type": "mysql",
-            "target_cpu_cores": 1_000_000,
-            "target_memory_gb": 1_000_000,
+            "target_cpu_cores": 101,
+            "target_memory_gb": 301,
         },
     )
 
@@ -264,8 +264,8 @@ def test_precheck_service_storage_update_reports_insufficient_capacity() -> None
         json={
             "service_name": "mysql-xf2",
             "child_service_type": "mysql",
-            "target_data_volume_gb": 1_000_000,
-            "target_log_volume_gb": 1_000_000,
+            "target_data_volume_gb": 2001,
+            "target_log_volume_gb": 2001,
         },
     )
 

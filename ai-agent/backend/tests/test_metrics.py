@@ -183,6 +183,8 @@ class MetricToolTests(unittest.TestCase):
         self.assertIn("query_unit_latest_metric_data_tool", tool_names)
         self.assertIn("query_unit_metric_history_tool", tool_names)
         self.assertIn("get_current_time_tool", tool_names)
+        self.assertIn("precheck_service_resource_update_tool", tool_names)
+        self.assertIn("precheck_service_storage_update_tool", tool_names)
 
 
 class _FakeResponse:

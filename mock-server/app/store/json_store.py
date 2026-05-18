@@ -14,6 +14,11 @@ import time
 from typing import Any
 
 
+MOCK_RESOURCE_CPU_CAPACITY_LIMIT = 100.0
+MOCK_RESOURCE_MEMORY_CAPACITY_LIMIT_GB = 300.0
+MOCK_STORAGE_CAPACITY_LIMIT_GB = 2000.0
+
+
 class ServiceNotFoundError(KeyError):
     """服务组不存在。"""
 
@@ -1348,6 +1353,19 @@ class JsonDataStore:
 
         if target_cpu_cores is None and target_memory_gb is None:
             return []
+        if (
+            target_cpu_cores is not None
+            and target_cpu_cores > MOCK_RESOURCE_CPU_CAPACITY_LIMIT
+        ) or (
+            target_memory_gb is not None
+            and target_memory_gb > MOCK_RESOURCE_MEMORY_CAPACITY_LIMIT_GB
+        ):
+            return [
+                {
+                    "code": "insufficient_capacity",
+                    "message": "当前主机或资源池资源不足，无法调整到目标值。",
+                }
+            ]
 
         host_usage = self._host_resource_usage()
         for unit in units:
@@ -1375,6 +1393,19 @@ class JsonDataStore:
 
         if target_data_volume_gb is None and target_log_volume_gb is None:
             return []
+        if (
+            target_data_volume_gb is not None
+            and target_data_volume_gb > MOCK_STORAGE_CAPACITY_LIMIT_GB
+        ) or (
+            target_log_volume_gb is not None
+            and target_log_volume_gb > MOCK_STORAGE_CAPACITY_LIMIT_GB
+        ):
+            return [
+                {
+                    "code": "insufficient_capacity",
+                    "message": "当前存储池资源不足，无法调整到目标值。",
+                }
+            ]
 
         for unit in units:
             host = self._hosts_by_id[unit["hostId"]]

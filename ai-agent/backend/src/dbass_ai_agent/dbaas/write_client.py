@@ -77,6 +77,58 @@ class DbaasWriteClient:
             timeout_seconds=timeout_seconds,
         )
 
+    def precheck_service_resource_update(
+        self,
+        identity: Identity,
+        service_name: str,
+        *,
+        child_service_type: str,
+        target_cpu_cores: float | None = None,
+        target_memory_gb: float | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "service_name": service_name,
+            "child_service_type": child_service_type,
+        }
+        if target_cpu_cores is not None:
+            payload["target_cpu_cores"] = target_cpu_cores
+        if target_memory_gb is not None:
+            payload["target_memory_gb"] = target_memory_gb
+        return self._request_json(
+            identity,
+            "POST",
+            "/api/v1/prechecks/service-resource-update",
+            json=payload,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def precheck_service_storage_update(
+        self,
+        identity: Identity,
+        service_name: str,
+        *,
+        child_service_type: str,
+        target_data_volume_gb: float | None = None,
+        target_log_volume_gb: float | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "service_name": service_name,
+            "child_service_type": child_service_type,
+        }
+        if target_data_volume_gb is not None:
+            payload["target_data_volume_gb"] = target_data_volume_gb
+        if target_log_volume_gb is not None:
+            payload["target_log_volume_gb"] = target_log_volume_gb
+        return self._request_json(
+            identity,
+            "POST",
+            "/api/v1/prechecks/service-storage-update",
+            json=payload,
+            timeout_seconds=timeout_seconds,
+        )
+
     def update_service_storage(
         self,
         identity: Identity,

@@ -112,6 +112,8 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                     "query_unit_latest_metric_data_tool",
                     "query_unit_metric_history_tool",
                     "get_current_time_tool",
+                    "precheck_service_resource_update_tool",
+                    "precheck_service_storage_update_tool",
                     "update_service_resource_tool",
                     "update_service_storage_tool",
                     "create_service_image_upgrade_task_tool",

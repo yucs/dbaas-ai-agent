@@ -15,13 +15,14 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dbass_ai_agent.config import APP_ROOT  # noqa: E402
+from dbass_ai_agent.config import APP_ROOT, Settings  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
 from dbass_ai_agent.dbaas.query import query_dbaas_data  # noqa: E402
 from dbass_ai_agent.dbaas.schema import describe_schema, validate_payload  # noqa: E402
 from dbass_ai_agent.dbaas.sync import DbaasServiceSynchronizer, isoformat, utcnow  # noqa: E402
 from dbass_ai_agent.dbaas.tools import (  # noqa: E402
+    build_dbaas_tools,
     dbaas_tool_identity,
 )
 from dbass_ai_agent.dbaas.workspace import DbaasWorkspace, write_json_atomic, write_meta_atomic  # noqa: E402
@@ -191,6 +192,114 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertIn("后台同步可能尚未完成", result["message"])
 
 
+class DbaasPrecheckToolTests(unittest.TestCase):
+    def test_resource_precheck_tool_posts_target_payload(self) -> None:
+        tools = _tool_map()
+        fake_client = _FakeDbaasHttpClient(
+            _FakeDbaasResponse(
+                200,
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                    "hard_errors": [],
+                },
+            )
+        )
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+        ):
+            result = tools["precheck_service_resource_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                    "target_cpu_cores": 8,
+                    "target_memory_gb": 16,
+                }
+            )
+
+        self.assertEqual(result["hard_errors"], [])
+        self.assertEqual(fake_client.last_method, "POST")
+        self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-resource-update"))
+        self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer admin"})
+        self.assertEqual(
+            fake_client.last_json,
+            {
+                "service_name": "mysql-xf2",
+                "child_service_type": "mysql",
+                "target_cpu_cores": 8,
+                "target_memory_gb": 16,
+            },
+        )
+
+    def test_storage_precheck_tool_returns_hard_errors_from_dbaas(self) -> None:
+        tools = _tool_map()
+        fake_client = _FakeDbaasHttpClient(
+            _FakeDbaasResponse(
+                200,
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                    "hard_errors": [
+                        {
+                            "code": "insufficient_capacity",
+                            "message": "当前存储池资源不足，无法调整到目标值。",
+                        }
+                    ],
+                },
+            )
+        )
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="alice", role="user", user="payment-team-prod")),
+        ):
+            result = tools["precheck_service_storage_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "mysql",
+                    "target_data_volume_gb": 1_000_000,
+                    "target_log_volume_gb": 1_000_000,
+                }
+            )
+
+        self.assertEqual(result["hard_errors"][0]["code"], "insufficient_capacity")
+        self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-storage-update"))
+        self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer user:payment-team-prod"})
+        self.assertEqual(
+            fake_client.last_json,
+            {
+                "service_name": "mysql-xf2",
+                "child_service_type": "mysql",
+                "target_data_volume_gb": 1_000_000,
+                "target_log_volume_gb": 1_000_000,
+            },
+        )
+
+    def test_precheck_tool_returns_error_payload_when_dbaas_fails(self) -> None:
+        tools = _tool_map()
+        fake_client = _FakeDbaasHttpClient(
+            _FakeDbaasResponse(502, {"detail": "service has no child service type"})
+        )
+
+        with (
+            patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+        ):
+            result = tools["precheck_service_resource_update_tool"].invoke(
+                {
+                    "service_name": "mysql-xf2",
+                    "child_service_type": "redis",
+                }
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "dbaas_request_failed")
+        self.assertEqual(result["status_code"], 502)
+        self.assertIn("service has no child service type", result["message"])
+
+
 def _config(tmpdir: str) -> DbaasConfig:
     return DbaasConfig(
         server_base_url="http://127.0.0.1:9000",
@@ -276,6 +385,50 @@ def _write_expired_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> N
             "schema_version": "services.v1",
         },
     )
+
+
+def _tool_map() -> dict[str, object]:
+    return {item.name: item for item in build_dbaas_tools(Settings())}
+
+
+class _FakeDbaasResponse:
+    def __init__(self, status_code: int, payload: object) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.reason_phrase = "error" if status_code >= 400 else "ok"
+        self.text = str(payload)
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _FakeDbaasHttpClient:
+    def __init__(self, response: _FakeDbaasResponse) -> None:
+        self.response = response
+        self.last_method: str | None = None
+        self.last_url: str | None = None
+        self.last_headers: dict[str, str] | None = None
+        self.last_json: dict | None = None
+
+    def __enter__(self) -> "_FakeDbaasHttpClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict | None = None,
+    ) -> _FakeDbaasResponse:
+        self.last_method = method
+        self.last_url = url
+        self.last_headers = headers
+        self.last_json = json
+        return self.response
 
 
 def _read_json(path: Path):

@@ -13,6 +13,7 @@ from dbass_ai_agent.identity.models import Identity
 from .config import DbaasConfig, dbaas_config_from_settings
 from .constants import SERVICES_KIND
 from .metric_tools import build_metric_tools
+from .precheck_tools import build_precheck_tools
 from .query import query_dbaas_data
 from .schema import describe_schema
 from .write_tools import build_write_tools
@@ -41,6 +42,7 @@ def build_dbaas_tools(settings: Settings) -> list[Any]:
     return [
         *build_service_tools(settings),
         *build_metric_tools(settings, _require_identity),
+        *build_precheck_tools(settings, _require_identity),
         *build_write_tools(settings),
     ]
 

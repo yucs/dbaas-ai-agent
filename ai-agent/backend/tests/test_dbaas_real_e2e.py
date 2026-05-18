@@ -34,6 +34,66 @@ from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta  # noqa: E40
 
 
 class DbaasRealE2ETests(unittest.TestCase):
+    def test_real_llm_prechecks_explicit_resource_update_target_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            port = _free_port()
+            settings = _real_e2e_settings(root, port)
+            identity = Identity(user_id="admin", role="admin", user=None)
+            session = _session_meta(identity, "thread_dbaas_real_e2e_precheck_explicit_target")
+
+            with _mock_server(port):
+                runtime = DeepAgentRuntime(settings)
+                try:
+                    reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message(
+                            "请把 mysql-xf2/mysql 扩到 101C/301G。"
+                            "如果资源不足就不要执行，只说明原因。"
+                        ),
+                    )
+                    tool_names = _thread_tool_names(runtime, session)
+                finally:
+                    _close_runtime(runtime)
+
+        self.assertFalse(reply.paused, reply.content)
+        self.assertIsNone(reply.approval_request)
+        self.assertIn("precheck_service_resource_update_tool", tool_names)
+        self.assertNotIn("update_service_resource_tool", tool_names)
+        self.assertTrue(
+            any(marker in reply.content for marker in ["资源不足", "hard_errors", "insufficient_capacity"]),
+            reply.content,
+        )
+
+    def test_real_llm_uses_precheck_before_resource_update_advice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            port = _free_port()
+            settings = _real_e2e_settings(root, port)
+            identity = Identity(user_id="admin", role="admin", user=None)
+            session = _session_meta(identity, "thread_dbaas_real_e2e_precheck")
+
+            with _mock_server(port):
+                runtime = DeepAgentRuntime(settings)
+                try:
+                    reply = runtime.generate_reply(
+                        identity=identity,
+                        session=session,
+                        user_message=_user_message(
+                            "mysql-xf2/mysql 最近 CPU 压力比较高，你建议扩到什么 CPU/内存规格？"
+                            "只给建议和风险，不要执行扩容，也不要触发确认卡。"
+                        ),
+                    )
+                    tool_names = _thread_tool_names(runtime, session)
+                finally:
+                    _close_runtime(runtime)
+
+        self.assertFalse(reply.paused, reply.content)
+        self.assertIsNone(reply.approval_request)
+        self.assertIn("precheck_service_resource_update_tool", tool_names)
+        self.assertNotIn("update_service_resource_tool", tool_names)
+
     def test_real_llm_answers_snapshot_success_and_unavailable_after_mock_stops(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -228,6 +288,30 @@ def _close_runtime(runtime: DeepAgentRuntime) -> None:
     import asyncio
 
     asyncio.run(runtime.aclose())
+
+
+def _thread_tool_names(runtime: DeepAgentRuntime, session: SessionMeta) -> list[str]:
+    state = runtime._agent_for_session(session).get_state(
+        config={"configurable": {"thread_id": session.thread_id}},
+    )
+    values = getattr(state, "values", {}) or {}
+    messages = values.get("messages", [])
+    names: list[str] = []
+    for message in messages:
+        tool_name = getattr(message, "name", None)
+        if isinstance(tool_name, str) and tool_name:
+            names.append(tool_name)
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            if isinstance(tool_call, dict) and isinstance(tool_call.get("name"), str):
+                names.append(tool_call["name"])
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        for raw_call in additional_kwargs.get("tool_calls") or []:
+            if not isinstance(raw_call, dict):
+                continue
+            function = raw_call.get("function")
+            if isinstance(function, dict) and isinstance(function.get("name"), str):
+                names.append(function["name"])
+    return names
 
 
 if __name__ == "__main__":
