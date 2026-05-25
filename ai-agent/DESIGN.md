@@ -67,6 +67,8 @@ streaming、checkpoint、上下文压缩等能力，都优先围绕 DeepAgent �
   - 监控指标 catalog、latest/history 查询和快照刷新策略
 - [PHASE7.md](./PHASE7.md)
   - 写工具、审批闭环、operation/task 模型和异步任务追踪
+- [PHASE8.md](./PHASE8.md)
+  - 轻量 Precheck Tool、资源/存储调整前的只读事实查询和写前风险判断
 
 已合并的历史专项文档：
 
@@ -90,6 +92,7 @@ DeepAgent 原生支持：
 
 - DBAAS 领域 prompt、工具和策略
 - 对接 `mock-server` 与后续真实控制面的客户端封装
+- 写操作前的轻量 precheck 工具和事实查询策略
 - 多用户、多 Session 的产品层模型
 - Session 与 `thread_id` 的绑定规则
 - 历史 Session 列表、归档、删除等页面能力
@@ -103,6 +106,7 @@ DeepAgent 原生支持：
 - 产品层 Session 负责页面展示、审计、归档、删除和用户可理解的历史
 - 运行时压缩结果不是产品层真相
 - DBAAS 实时状态必须始终从后端接口读取
+- Precheck 只负责写前事实收集和风险说明，不是执行或审批链路
 
 ## 5. 高层架构
 
@@ -124,6 +128,7 @@ DeepAgent 原生支持：
 3. DBAAS Tool 层
    - 服务查询工具
    - 监控查询工具
+   - 写操作前 precheck 工具
    - 写操作工具
    - 异步任务查询与追踪工具
 
@@ -178,6 +183,13 @@ DBAAS 写操作必须通过受控工具执行，并满足：
 - 审批状态可持久化
 - 执行结果可审计
 - 异步任务可追踪
+
+Phase8 引入轻量 precheck tool 后，额外保持：
+
+- 对已提供 precheck 的资源或存储调整，执行前应先调用对应只读 precheck tool 获取当前规格、容量、运行状态和必要监控摘要
+- Precheck tool 不调用写接口、不创建 approval、不替代 Phase7 写工具，也不替代 DBAAS 控制面的硬校验
+- `blocking_errors` 非空时，模型应说明阻断原因，并且不建议继续执行
+- 用户在了解 precheck 结果后仍明确要求执行时，才回到 Phase7 受控写工具和确认卡链路
 
 ### 6.5 压缩不是长期记忆
 
