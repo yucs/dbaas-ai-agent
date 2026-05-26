@@ -66,14 +66,48 @@ class DbaasMetricCleanupBackground:
 
 
 def cleanup_metric_snapshots(config: DbaasConfig) -> MetricCleanupResult:
-    latest = _cleanup_dir(config.workspace_dir / METRICS_LATEST_DIR)
-    history = _cleanup_dir(config.workspace_dir / METRICS_HISTORY_DIR)
+    latest = _cleanup_kind_dirs(config.workspace_dir, METRICS_LATEST_DIR)
+    history = _cleanup_kind_dirs(config.workspace_dir, METRICS_HISTORY_DIR)
     return MetricCleanupResult(
         expired_pairs=latest.expired_pairs + history.expired_pairs,
         bad_meta=latest.bad_meta + history.bad_meta,
         missing_data_meta=latest.missing_data_meta + history.missing_data_meta,
         orphan_data=latest.orphan_data + history.orphan_data,
     )
+
+
+def _cleanup_kind_dirs(root: Path, kind: str) -> MetricCleanupResult:
+    result = MetricCleanupResult()
+    for directory in _iter_metric_dirs(root, kind):
+        current = _cleanup_dir(directory)
+        result = MetricCleanupResult(
+            expired_pairs=result.expired_pairs + current.expired_pairs,
+            bad_meta=result.bad_meta + current.bad_meta,
+            missing_data_meta=result.missing_data_meta + current.missing_data_meta,
+            orphan_data=result.orphan_data + current.orphan_data,
+        )
+    return result
+
+
+def _iter_metric_dirs(root: Path, kind: str) -> list[Path]:
+    directories: list[Path] = []
+    legacy_dir = root / kind
+    if legacy_dir.exists():
+        directories.append(legacy_dir)
+
+    admin_dir = root / "admin" / kind
+    if admin_dir.exists():
+        directories.append(admin_dir)
+
+    users_root = root / "users"
+    if users_root.exists():
+        for user_dir in sorted(users_root.iterdir()):
+            if not user_dir.is_dir():
+                continue
+            directory = user_dir / kind
+            if directory.exists():
+                directories.append(directory)
+    return directories
 
 
 def _cleanup_dir(directory: Path) -> MetricCleanupResult:
@@ -146,4 +180,3 @@ def _is_expired(meta: dict[str, Any], *, now) -> bool:
         return parse_time(expires_at) < now
     except ValueError:
         return True
-

@@ -82,11 +82,11 @@ metric_models.py
   - 避免 catalog/workspace/sync/history/query 之间重复定义松散 dict 结构
 
 metric_workspace.py
-  - 管理管理员 metrics_latest/{metric_key}.json 和 meta 路径
-  - 管理普通用户 metrics_latest/user__{safe_user}__{metric_key}.json 和 meta 路径
-  - 管理 metrics_history/{scope}__{safe_user}__{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.json 和 meta 路径
+  - 管理管理员 admin/metrics_latest/{metric_key}.json 和 meta 路径
+  - 管理普通用户 users/{safe_user}/metrics_latest/{metric_key}.json 和 meta 路径
+  - 管理 admin/metrics_history/... 和 users/{safe_user}/metrics_history/... 路径
   - 校验 metric_key
-  - 生成 safe_user、safe_unit_name 和 history scope key
+  - 生成 safe_user、safe_unit_name 和 scoped latest/history key
   - 复用 workspace.py 中的 tmp 写入和 os.replace 原子替换能力
 
 metric_sync.py
@@ -699,16 +699,16 @@ instance.redis.replicationStatus
 示例文件：
 
 ```text
-runtime/dbaas_workspace/metrics_latest/{metric_key}.json
-runtime/dbaas_workspace/metrics_latest/{metric_key}.meta.json
-runtime/dbaas_workspace/metrics_latest/user__{safe_user}__{metric_key}.json
-runtime/dbaas_workspace/metrics_latest/user__{safe_user}__{metric_key}.meta.json
+runtime/dbaas_workspace/admin/metrics_latest/{metric_key}.json
+runtime/dbaas_workspace/admin/metrics_latest/{metric_key}.meta.json
+runtime/dbaas_workspace/users/{safe_user}/metrics_latest/{metric_key}.json
+runtime/dbaas_workspace/users/{safe_user}/metrics_latest/{metric_key}.meta.json
 ```
 
 其中：
 
-- 管理员 latest 快照沿用原始 `{metric_key}.json` 路径
-- 普通用户 latest 快照必须加用户 scope 前缀，避免复用管理员全量快照
+- 管理员 latest 快照放在 `admin/metrics_latest/`
+- 普通用户 latest 快照放在 `users/{safe_user}/metrics_latest/`
 - `metric_key` 只能包含 `[a-zA-Z0-9._-]`，可以直接用于文件名
 - `{safe_user}` 需要做安全文件名转换，只保留 `[a-zA-Z0-9._-]`，其他字符替换为 `_`
 
@@ -717,15 +717,14 @@ safe filename 规则在 latest 和 history 中保持一致：
 - 只保留 `[a-zA-Z0-9._-]`
 - 其他字符替换为 `_`
 - 转换后为空字符串时使用 `unknown`
-- 管理员 user 固定使用 `all`
 
 示例：
 
 ```text
-runtime/dbaas_workspace/metrics_latest/container.cpu.use.json
-runtime/dbaas_workspace/metrics_latest/container.cpu.use.meta.json
-runtime/dbaas_workspace/metrics_latest/user__payment-platform-team__container.cpu.use.json
-runtime/dbaas_workspace/metrics_latest/user__payment-platform-team__container.cpu.use.meta.json
+runtime/dbaas_workspace/admin/metrics_latest/container.cpu.use.json
+runtime/dbaas_workspace/admin/metrics_latest/container.cpu.use.meta.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_latest/container.cpu.use.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_latest/container.cpu.use.meta.json
 ```
 
 第一版监控数据查询工具签名建议为：
@@ -788,8 +787,8 @@ Metric meta 建议字段。
   "scope": "admin",
   "user": null,
   "status": "fresh",
-  "data_path": ".../metrics_latest/container.cpu.use.json",
-  "meta_path": ".../metrics_latest/container.cpu.use.meta.json",
+  "data_path": ".../admin/metrics_latest/container.cpu.use.json",
+  "meta_path": ".../admin/metrics_latest/container.cpu.use.meta.json",
   "synced_at": "2026-04-29T12:00:00Z",
   "expires_at": "2026-04-29T12:00:30Z",
   "ttl_seconds": 30,
@@ -810,8 +809,8 @@ Metric meta 建议字段。
   "scope": "user",
   "user": "payment-platform-team",
   "status": "fresh",
-  "data_path": ".../metrics_latest/user__payment-platform-team__container.cpu.use.json",
-  "meta_path": ".../metrics_latest/user__payment-platform-team__container.cpu.use.meta.json",
+  "data_path": ".../users/payment-platform-team/metrics_latest/container.cpu.use.json",
+  "meta_path": ".../users/payment-platform-team/metrics_latest/container.cpu.use.meta.json",
   "synced_at": "2026-04-29T12:00:00Z",
   "expires_at": "2026-04-29T12:00:30Z",
   "ttl_seconds": 30,
@@ -842,7 +841,7 @@ tool 不单独保存每次 jq 查询结果，
   ],
   "preview_count": 1,
   "truncated": false,
-  "data_path": ".../metrics_latest/user__payment-platform-team__container.cpu.use.json",
+  "data_path": ".../users/payment-platform-team/metrics_latest/container.cpu.use.json",
   "message": "查询完成，结果来自最新 DBAAS 监控快照。"
 }
 ```
@@ -1109,10 +1108,10 @@ tool 调用 DBAAS 监控接口时必须携带用户身份，
 
 缓存隔离要求：
 
-- 管理员 latest 快照使用 `{metric_key}.json`
-- 普通用户 latest 快照使用 `user__{safe_user}__{metric_key}.json`
+- 管理员 latest 快照使用 `admin/metrics_latest/{metric_key}.json`
+- 普通用户 latest 快照使用 `users/{safe_user}/metrics_latest/{metric_key}.json`
 - 禁止普通用户复用管理员全量 latest 快照
-- history 快照也必须包含身份 scope，避免普通用户命中管理员历史缓存
+- history 快照也必须放在 `admin/metrics_history/` 或 `users/{safe_user}/metrics_history/`，避免普通用户命中管理员历史缓存
 
 工具调用身份示例：
 
@@ -1148,7 +1147,8 @@ query tool 只负责：
 
 后台清理任务负责：
 
-- 定期扫描 `runtime/dbaas_workspace/metrics_latest/` 和 `runtime/dbaas_workspace/metrics_history/`
+- 定期扫描 `runtime/dbaas_workspace/admin/metrics_latest/`、`runtime/dbaas_workspace/admin/metrics_history/`
+- 定期扫描 `runtime/dbaas_workspace/users/*/metrics_latest/` 和 `runtime/dbaas_workspace/users/*/metrics_history/`
 - 删除已过期的旧快照，并同时删除 data 和 meta
 - 删除 meta 缺失、meta 解析失败或字段不合法的坏快照
 - 删除 data 缺失时残留的 meta 文件
@@ -1167,8 +1167,8 @@ data/meta 必须作为一对文件维护和清理。
 文件配对示例：
 
 ```text
-data: metrics_latest/user__payment-platform-team__container.cpu.use.json
-meta: metrics_latest/user__payment-platform-team__container.cpu.use.meta.json
+data: users/payment-platform-team/metrics_latest/container.cpu.use.json
+meta: users/payment-platform-team/metrics_latest/container.cpu.use.meta.json
 ```
 
 执行模型：
@@ -1329,14 +1329,14 @@ DBAAS 应根据身份判断当前用户是否可访问该真实单元。
 路径格式：
 
 ```text
-runtime/dbaas_workspace/metrics_history/{scope}__{safe_user}__{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.json
-runtime/dbaas_workspace/metrics_history/{scope}__{safe_user}__{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.meta.json
+runtime/dbaas_workspace/admin/metrics_history/{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.json
+runtime/dbaas_workspace/admin/metrics_history/{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.meta.json
+runtime/dbaas_workspace/users/{safe_user}/metrics_history/{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.json
+runtime/dbaas_workspace/users/{safe_user}/metrics_history/{safe_unit_name}__{metric_key}__{start_ts}__{end_ts}.meta.json
 ```
 
 其中：
 
-- `scope` 为 `admin` 或 `user`
-- `safe_user` 在管理员场景固定为 `all`
 - `safe_user` 和 `safe_unit_name` 需要做安全文件名转换，只保留 `[a-zA-Z0-9._-]`，其他字符替换为 `_`
 - `metric_key` 只能包含 `[a-zA-Z0-9._-]`，可以直接用于文件名
 - `start_ts` 和 `end_ts` 为 Unix timestamp 秒数
@@ -1344,10 +1344,10 @@ runtime/dbaas_workspace/metrics_history/{scope}__{safe_user}__{safe_unit_name}__
 示例：
 
 ```text
-runtime/dbaas_workspace/metrics_history/admin__all__mysql-primary-01__container.cpu.use__1777437600__1777441200.json
-runtime/dbaas_workspace/metrics_history/admin__all__mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
-runtime/dbaas_workspace/metrics_history/user__payment-platform-team__mysql-primary-01__container.cpu.use__1777437600__1777441200.json
-runtime/dbaas_workspace/metrics_history/user__payment-platform-team__mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
+runtime/dbaas_workspace/admin/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.json
+runtime/dbaas_workspace/admin/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
 ```
 
 同一个 `scope + user + unit_name + metric_key + start_ts + end_ts` 命中本地历史缓存时，
@@ -1380,7 +1380,7 @@ max_by(.value)
 避免大结果进入工具返回和模型上下文。
 
 历史缓存清理可以复用 metric cleanup background task，
-扫描 `runtime/dbaas_workspace/metrics_history/` 并删除过期历史缓存。
+扫描 `runtime/dbaas_workspace/admin/metrics_history/` 和 `runtime/dbaas_workspace/users/*/metrics_history/` 并删除过期历史缓存。
 历史缓存过期策略复用 `metric_snapshot_ttl_seconds`。
 
 ## 19. 本阶段暂不决定的内容

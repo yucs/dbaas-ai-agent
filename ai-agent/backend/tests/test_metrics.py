@@ -52,6 +52,13 @@ class MetricWorkspaceTests(unittest.TestCase):
                 "container.cpu.use",
                 Identity(user_id="alice", role="user", user="payment/team"),
             )
+            admin_history = workspace.history_paths(
+                unit_name="mysql/primary 01",
+                metric_key="container.cpu.use",
+                start_ts=100,
+                end_ts=200,
+                identity=Identity(user_id="admin", role="admin", user=None),
+            )
             history = workspace.history_paths(
                 unit_name="mysql/primary 01",
                 metric_key="container.cpu.use",
@@ -60,9 +67,22 @@ class MetricWorkspaceTests(unittest.TestCase):
                 identity=Identity(user_id="alice", role="user", user="payment/team"),
             )
 
-            self.assertTrue(str(admin_latest.data_path).endswith("metrics_latest/container.cpu.use.json"))
-            self.assertTrue(str(user_latest.data_path).endswith("metrics_latest/user__payment_team__container.cpu.use.json"))
-            self.assertIn("metrics_history/user__payment_team__mysql_primary_01__container.cpu.use__100__200.json", str(history.data_path))
+            self.assertTrue(str(admin_latest.data_path).endswith("admin/metrics_latest/container.cpu.use.json"))
+            self.assertEqual(admin_latest.key, "admin/metrics_latest/container.cpu.use")
+            self.assertTrue(
+                str(user_latest.data_path).endswith(
+                    "users/payment_team/metrics_latest/container.cpu.use.json"
+                )
+            )
+            self.assertEqual(user_latest.key, "users/payment_team/metrics_latest/container.cpu.use")
+            self.assertIn(
+                "admin/metrics_history/mysql_primary_01__container.cpu.use__100__200.json",
+                str(admin_history.data_path),
+            )
+            self.assertIn(
+                "users/payment_team/metrics_history/mysql_primary_01__container.cpu.use__100__200.json",
+                str(history.data_path),
+            )
 
 
 class MetricQueryTests(unittest.TestCase):
@@ -134,7 +154,7 @@ class MetricCleanupTests(unittest.TestCase):
     def test_cleanup_removes_expired_bad_missing_and_orphan_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
-            latest_dir = config.workspace_dir / "metrics_latest"
+            latest_dir = config.workspace_dir / "admin" / "metrics_latest"
             latest_dir.mkdir(parents=True)
             expired_data = latest_dir / "expired.json"
             expired_meta = latest_dir / "expired.meta.json"
@@ -158,7 +178,9 @@ class MetricCleanupTests(unittest.TestCase):
                     "expires_at": isoformat(utcnow() + timedelta(seconds=60)),
                 },
             )
-            orphan_data = latest_dir / "orphan.json"
+            user_history_dir = config.workspace_dir / "users" / "payment_team" / "metrics_history"
+            user_history_dir.mkdir(parents=True)
+            orphan_data = user_history_dir / "orphan.json"
             write_json_atomic(orphan_data, [])
 
             result = cleanup_metric_snapshots(config)
