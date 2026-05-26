@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from deepagents.middleware.summarization import SummarizationMiddleware
@@ -23,6 +24,7 @@ from dbass_ai_agent.agent.factory import (  # noqa: E402
     _build_logged_summarization_middleware_class,
     _build_chat_model,
     _create_runtime_agent,
+    _interrupt_on_for_tools,
     build_runtime_artifacts,
     build_summarization_middleware_factory,
     patch_deepagents_summarization_factory,
@@ -103,23 +105,28 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             )
             self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
-            self.assertEqual(
-                {tool.name for tool in kwargs["tools"]},
-                {
-                    "query_dbaas_data_tool",
-                    "describe_dbaas_schema_tool",
-                    "describe_unit_metric_catalog_tool",
-                    "query_unit_latest_metric_data_tool",
-                    "query_unit_metric_history_tool",
-                    "get_current_time_tool",
-                    "precheck_service_resource_update_tool",
-                    "precheck_service_storage_update_tool",
-                    "update_service_resource_tool",
-                    "update_service_storage_tool",
-                    "create_service_image_upgrade_task_tool",
-                    "get_dbaas_task_tool",
-                    "list_current_session_tasks_tool",
-                },
+            expected_common_tools = {
+                "query_dbaas_data_tool",
+                "describe_dbaas_schema_tool",
+                "describe_unit_metric_catalog_tool",
+                "query_unit_latest_metric_data_tool",
+                "query_unit_metric_history_tool",
+                "get_current_time_tool",
+                "precheck_service_resource_update_tool",
+                "precheck_service_storage_update_tool",
+                "update_service_resource_tool",
+                "update_service_storage_tool",
+                "create_service_image_upgrade_task_tool",
+                "get_dbaas_task_tool",
+                "list_current_session_tasks_tool",
+            }
+            self.assertTrue(
+                expected_common_tools.issubset({tool.name for tool in kwargs["tools"]})
+            )
+            self.assertTrue(
+                expected_common_tools.issubset(
+                    {tool.name for tool in create_agent_mock.call_args_list[1].kwargs["tools"]}
+                )
             )
             self.assertEqual(
                 set(kwargs["interrupt_on"]),
@@ -134,6 +141,23 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 [call.kwargs["system_prompt"] for call in create_agent_mock.call_args_list],
                 ["system prompt user", "system prompt admin"],
             )
+
+    def test_interrupt_on_for_tools_filters_missing_role_tools(self) -> None:
+        with patch(
+            "dbass_ai_agent.agent.factory.build_interrupt_on_config",
+            return_value={
+                "user_write_tool": {"allowed_decisions": ["approve", "reject"]},
+                "admin_write_tool": {"allowed_decisions": ["approve", "reject"]},
+            },
+        ):
+            result = _interrupt_on_for_tools(
+                [
+                    SimpleNamespace(name="user_write_tool"),
+                    SimpleNamespace(name="read_only_tool"),
+                ]
+            )
+
+        self.assertEqual(set(result), {"user_write_tool"})
 
     def test_load_system_prompt_appends_role_extend_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

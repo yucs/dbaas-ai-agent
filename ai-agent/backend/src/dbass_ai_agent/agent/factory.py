@@ -252,14 +252,24 @@ def _create_runtime_agent(
         system_prompt = load_system_prompt(settings.system_prompt_path, role)
     except FileNotFoundError as exc:
         raise AgentFactoryError(str(exc)) from exc
+    tools = build_dbaas_tools(settings, role=role)
     with patch_deepagents_summarization_factory(summarization_factory):
         return create_deep_agent(
             model=model,
-            tools=build_dbaas_tools(settings),
+            tools=tools,
             checkpointer=checkpointer,
             system_prompt=system_prompt,
-            interrupt_on=build_interrupt_on_config(),
+            interrupt_on=_interrupt_on_for_tools(tools),
         )
+
+
+def _interrupt_on_for_tools(tools: list[Any]) -> dict[str, dict[str, Any]]:
+    tool_names = {tool.name for tool in tools if getattr(tool, "name", None)}
+    return {
+        tool_name: config
+        for tool_name, config in build_interrupt_on_config().items()
+        if tool_name in tool_names
+    }
 
 
 def _build_chat_model(

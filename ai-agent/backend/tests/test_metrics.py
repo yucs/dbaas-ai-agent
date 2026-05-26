@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -198,7 +199,7 @@ class MetricCleanupTests(unittest.TestCase):
 
 class MetricToolTests(unittest.TestCase):
     def test_build_dbaas_tools_includes_service_and_metric_tools(self) -> None:
-        tool_names = {item.name for item in build_dbaas_tools(Settings())}
+        tool_names = {item.name for item in build_dbaas_tools(Settings(), role="user")}
 
         self.assertIn("query_dbaas_data_tool", tool_names)
         self.assertIn("describe_unit_metric_catalog_tool", tool_names)
@@ -207,6 +208,19 @@ class MetricToolTests(unittest.TestCase):
         self.assertIn("get_current_time_tool", tool_names)
         self.assertIn("precheck_service_resource_update_tool", tool_names)
         self.assertIn("precheck_service_storage_update_tool", tool_names)
+
+    def test_build_dbaas_tools_adds_admin_only_tools_for_admin_role(self) -> None:
+        admin_only_tool = SimpleNamespace(name="query_dbaas_host_tool")
+
+        with patch(
+            "dbass_ai_agent.dbaas.tools.build_admin_only_tools",
+            return_value=[admin_only_tool],
+        ):
+            user_names = {item.name for item in build_dbaas_tools(Settings(), role="user")}
+            admin_names = {item.name for item in build_dbaas_tools(Settings(), role="admin")}
+
+        self.assertNotIn(admin_only_tool.name, user_names)
+        self.assertIn(admin_only_tool.name, admin_names)
 
 
 class _FakeResponse:

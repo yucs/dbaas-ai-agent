@@ -674,7 +674,7 @@ def _write_error_user_snapshot(config: DbaasConfig, user: str, message: str) -> 
 
 
 def _tool_map() -> dict[str, object]:
-    return {item.name: item for item in build_dbaas_tools(Settings())}
+    return {item.name: item for item in build_dbaas_tools(Settings(), role="user")}
 
 
 class _FakeDbaasResponse:

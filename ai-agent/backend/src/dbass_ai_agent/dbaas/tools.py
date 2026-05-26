@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from dbass_ai_agent.config import APP_ROOT, Settings
-from dbass_ai_agent.identity.models import Identity
+from dbass_ai_agent.identity.models import Identity, UserRole
 
 from .config import DbaasConfig, dbaas_config_from_settings
 from .constants import SERVICES_KIND
@@ -38,13 +38,21 @@ def dbaas_tool_identity(
         _current_identity.set(previous)
 
 
-def build_dbaas_tools(settings: Settings) -> list[Any]:
-    return [
+def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
+    tools = [
         *build_service_tools(settings),
         *build_metric_tools(settings, _require_identity),
         *build_precheck_tools(settings, _require_identity),
         *build_write_tools(settings),
     ]
+    if role == "admin":
+        tools.extend(build_admin_only_tools(settings))
+    return tools
+
+
+def build_admin_only_tools(settings: Settings) -> list[Any]:
+    del settings
+    return []
 
 
 def build_service_tools(settings: Settings) -> list[Any]:
