@@ -23,6 +23,7 @@ from .deps import (
     get_operation_service,
     get_session_service,
     get_task_service,
+    renew_dbaas_user_lease,
 )
 from .schemas import (
     CreateSessionRequest,
@@ -67,12 +68,14 @@ def create_session(
         thread_id=detail.meta.thread_id,
     ):
         logger.info("session created title=%s", detail.meta.title)
+    renew_dbaas_user_lease(request, identity)
     return SessionResponse(session=detail)
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
 def get_session(
     session_id: str,
+    request: Request,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
     approval_service: ApprovalService = Depends(get_approval_service),
@@ -87,7 +90,9 @@ def get_session(
         operation_service=operation_service,
         task_service=task_service,
     )
-    return SessionResponse(session=session_service.get_session(identity, session_id))
+    detail = session_service.get_session(identity, session_id)
+    renew_dbaas_user_lease(request, identity)
+    return SessionResponse(session=detail)
 
 
 @router.post("/{session_id}/archive", response_model=SessionMetaResponse)

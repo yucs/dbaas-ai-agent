@@ -13,6 +13,8 @@ class DbaasConfig:
     workspace_dir: Path
     sync_interval_seconds: int
     ttl_seconds: int
+    user_active_idle_timeout_seconds: int
+    user_snapshot_refresh_wait_seconds: int
     jq_timeout_seconds: int
     jq_max_preview_items: int
     jq_max_output_bytes: int
@@ -28,6 +30,8 @@ def dbaas_config_from_settings(settings: Settings) -> DbaasConfig:
         workspace_dir=settings.dbaas_workspace_dir,
         sync_interval_seconds=settings.dbaas_sync_interval_seconds,
         ttl_seconds=settings.dbaas_ttl_seconds,
+        user_active_idle_timeout_seconds=settings.dbaas_user_active_idle_timeout_seconds,
+        user_snapshot_refresh_wait_seconds=settings.dbaas_user_snapshot_refresh_wait_seconds,
         jq_timeout_seconds=settings.dbaas_jq_timeout_seconds,
         jq_max_preview_items=settings.dbaas_jq_max_preview_items,
         jq_max_output_bytes=settings.dbaas_jq_max_output_bytes,

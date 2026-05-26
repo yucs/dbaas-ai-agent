@@ -21,6 +21,7 @@ from .deps import (
     get_current_identity,
     get_session_service,
     get_task_service,
+    renew_dbaas_user_lease,
 )
 from .schemas import TasksResponse
 
@@ -31,11 +32,13 @@ router = APIRouter(prefix="/api/v1/sessions", tags=["tasks"])
 @router.get("/{session_id}/tasks", response_model=TasksResponse)
 def get_session_tasks(
     session_id: str,
+    request: Request,
     identity: Identity = Depends(get_current_identity),
     session_service: SessionService = Depends(get_session_service),
     task_service: TaskService = Depends(get_task_service),
 ) -> TasksResponse:
     session = session_service.get_session(identity, session_id).meta
+    renew_dbaas_user_lease(request, identity)
     return TasksResponse(items=task_service.list_tasks_with_lazy_refresh(identity, session))
 
 
@@ -49,6 +52,7 @@ async def stream_session_task_events(
     settings: Settings = Depends(get_app_settings),
 ) -> StreamingResponse:
     session = session_service.get_session(identity, session_id).meta
+    renew_dbaas_user_lease(request, identity)
     interval_seconds = max(1, settings.dbaas_task_refresh_interval_seconds)
 
     async def generate() -> AsyncIterator[str]:

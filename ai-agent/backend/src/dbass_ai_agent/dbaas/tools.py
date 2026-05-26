@@ -81,7 +81,7 @@ def build_service_tools(settings: Settings) -> list[Any]:
         上下文已有可用 services schema 时复用；仅在缺失、不足、字段不确定、jq 字段错误或用户要求时再次调用。
         """
 
-        return describe_schema(kind, app_root=APP_ROOT)
+        return describe_schema(kind, app_root=APP_ROOT, identity=_require_identity())
 
     return [query_dbaas_data_tool, describe_dbaas_schema_tool]
 

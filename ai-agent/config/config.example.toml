@@ -76,6 +76,10 @@ dir = "./data/runtime/dbaas_workspace"
 sync_interval_seconds = 8
 # 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
 ttl_seconds = 30
+# 普通用户会话多久没有续约后停止用户 services 快照同步，单位秒。
+user_active_idle_timeout_seconds = 300
+# 普通用户 services 快照缺失时，query 最多等待 prewarm/refresh 多久，单位秒。
+user_snapshot_refresh_wait_seconds = 3
 # 当前 Session 任务 SSE 订阅期间刷新非终态 task 的间隔，单位秒。
 task_refresh_interval_seconds = 10
 # 单次 jq 查询最多运行多久，单位秒。

@@ -11,6 +11,7 @@ from app.schemas import (
     PrecheckServiceStorageUpdateResponse,
     ServiceDetailResponse,
     ServiceImageUpgradeRequest,
+    UserServiceDetailResponse,
     UpdateServiceResourceRequest,
     UpdateServiceStorageRequest,
 )
@@ -31,7 +32,7 @@ def get_store(request: Request) -> JsonDataStore:
     return request.app.state.store
 
 
-@router.get("/services/{name}", response_model=ServiceDetailResponse)
+@router.get("/services/{name}", response_model=ServiceDetailResponse | UserServiceDetailResponse)
 def get_service(
     name: str,
     request: Request,
@@ -40,10 +41,13 @@ def get_service(
     """按服务组名称查询完整服务详情。"""
 
     store = get_store(request)
-    return ServiceDetailResponse.model_validate(ensure_service_access(store, current_user, name))
+    service_detail = ensure_service_access(store, current_user, name)
+    if current_user.is_admin:
+        return ServiceDetailResponse.model_validate(store._public_service_detail(service_detail))
+    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
 
 
-@router.get("/services", response_model=list[ServiceDetailResponse])
+@router.get("/services", response_model=list[ServiceDetailResponse] | list[UserServiceDetailResponse])
 def list_services(
     request: Request,
     user: str | None = Query(default=None, description="按服务组 user 精确过滤"),
@@ -53,8 +57,13 @@ def list_services(
 
     store = get_store(request)
     effective_user = resolve_service_user_filter(current_user, user)
+    if current_user.is_admin:
+        return [
+            ServiceDetailResponse.model_validate(service_detail)
+            for service_detail in store.list_service_details(user=effective_user)
+        ]
     return [
-        ServiceDetailResponse.model_validate(service_detail)
+        UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
         for service_detail in store.list_service_details(user=effective_user)
     ]
 
@@ -113,7 +122,7 @@ def precheck_service_storage_update(
     return PrecheckServiceStorageUpdateResponse.model_validate(result)
 
 
-@router.put("/services/{name}/resource", response_model=ServiceDetailResponse)
+@router.put("/services/{name}/resource", response_model=ServiceDetailResponse | UserServiceDetailResponse)
 def update_service_resource(
     name: str,
     payload: UpdateServiceResourceRequest,
@@ -139,10 +148,12 @@ def update_service_resource(
             status_code=502,
             detail=f"service '{name}' has no child service type '{payload.childServiceType}'",
         ) from None
-    return ServiceDetailResponse.model_validate(service_detail)
+    if current_user.is_admin:
+        return ServiceDetailResponse.model_validate(service_detail)
+    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
 
 
-@router.put("/services/{name}/storage", response_model=ServiceDetailResponse)
+@router.put("/services/{name}/storage", response_model=ServiceDetailResponse | UserServiceDetailResponse)
 def update_service_storage(
     name: str,
     payload: UpdateServiceStorageRequest,
@@ -169,7 +180,9 @@ def update_service_storage(
             status_code=502,
             detail=f"service '{name}' has no child service type '{payload.childServiceType}'",
         ) from None
-    return ServiceDetailResponse.model_validate(service_detail)
+    if current_user.is_admin:
+        return ServiceDetailResponse.model_validate(service_detail)
+    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
 
 
 @router.post("/services/{name}/image-upgrade", response_model=CreateTaskResponse)

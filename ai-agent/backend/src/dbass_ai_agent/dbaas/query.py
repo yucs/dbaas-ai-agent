@@ -4,11 +4,13 @@ import json
 import subprocess
 from typing import Any
 
+from dbass_ai_agent.config import APP_ROOT
 from dbass_ai_agent.identity.models import Identity
 
 from .config import DbaasConfig
-from .constants import SERVICES_KIND, SUPPORTED_KINDS
-from .sync import is_meta_fresh, read_meta
+from .constants import ADMIN_SCOPE, SERVICES_KIND, SUPPORTED_KINDS, USER_SCOPE
+from .schema import schema_path, schema_version
+from .sync import DbaasServiceSynchronizer, is_meta_fresh, read_meta
 from .workspace import DbaasWorkspace
 
 
@@ -40,6 +42,17 @@ def query_dbaas_data(
         }
 
     visible = _current_services_snapshot(config, identity)
+    if (
+        identity.role != ADMIN_SCOPE
+        and visible.get("status") == "error"
+        and visible.get("error_type") == "snapshot_missing"
+        and identity.user
+    ):
+        DbaasServiceSynchronizer(config).force_refresh_user_services(
+            identity.user,
+            timeout_seconds=config.user_snapshot_refresh_wait_seconds,
+        )
+        visible = _current_services_snapshot(config, identity)
     if visible.get("status") != "fresh":
         return visible
 
@@ -112,19 +125,7 @@ def query_dbaas_data(
 
 
 def _current_services_snapshot(config: DbaasConfig, identity: Identity) -> dict[str, Any]:
-    workspace = DbaasWorkspace(config)
-    meta_path = workspace.meta_path(SERVICES_KIND)
-    data_path = workspace.data_path(SERVICES_KIND)
-    meta = read_meta(meta_path)
-    if meta is None:
-        return _snapshot_unavailable(config, "服务列表快照元数据不存在，后台同步可能尚未完成。")
-    if not is_meta_fresh(meta):
-        return _snapshot_unavailable(config, "服务列表快照已过期，后台同步可能尚未完成或拉取 DBAAS 数据失败。")
-    if meta.get("data_path") != str(data_path):
-        return _snapshot_unavailable(config, "服务列表快照元数据中的 data_path 与当前工作目录不一致。")
-    if not data_path.exists():
-        return _snapshot_unavailable(config, "服务列表快照文件不存在，后台同步可能尚未完成。")
-    if identity.role != "admin" and not identity.user:
+    if identity.role != ADMIN_SCOPE and not identity.user:
         return {
             "kind": SERVICES_KIND,
             "status": "error",
@@ -132,31 +133,68 @@ def _current_services_snapshot(config: DbaasConfig, identity: Identity) -> dict[
             "data_path": None,
             "message": "当前用户身份缺少可见范围，无法查询 DBAAS 服务列表。",
         }
+    workspace = DbaasWorkspace(config)
+    scope = ADMIN_SCOPE if identity.role == ADMIN_SCOPE else USER_SCOPE
+    paths = workspace.paths(SERVICES_KIND, scope=scope, user=identity.user)
+    meta = read_meta(paths.meta_path)
+    if meta is None:
+        return _snapshot_unavailable(
+            paths,
+            (
+                "服务列表快照元数据不存在，后台同步可能尚未完成。"
+                if scope == ADMIN_SCOPE
+                else "服务列表快照元数据不存在，后台同步或当前用户 prewarm 可能尚未完成。"
+            ),
+            error_type="snapshot_missing" if scope == USER_SCOPE else "snapshot_unavailable",
+        )
+    if meta.get("status") == "error":
+        return _snapshot_unavailable(
+            paths,
+            str(meta.get("message") or meta.get("last_error") or "服务列表快照刷新失败。"),
+        )
+    if not is_meta_fresh(meta):
+        return _snapshot_unavailable(paths, "服务列表快照已过期，等待后台刷新后再查询。")
+    if meta.get("scope") != scope or meta.get("user") != paths.user:
+        return _snapshot_unavailable(paths, "服务列表快照元数据中的身份 scope 与当前身份不一致。")
+    if meta.get("schema_version") != schema_version(SERVICES_KIND, scope=scope):
+        return _snapshot_unavailable(paths, "服务列表快照元数据中的 schema_version 与当前身份不一致。")
+    if meta.get("schema_path") != str(schema_path(SERVICES_KIND, app_root=APP_ROOT, scope=scope)):
+        return _snapshot_unavailable(paths, "服务列表快照元数据中的 schema_path 与当前身份不一致。")
+    if meta.get("data_path") != str(paths.data_path):
+        return _snapshot_unavailable(paths, "服务列表快照元数据中的 data_path 与当前工作目录不一致。")
+    if not paths.data_path.exists():
+        return _snapshot_unavailable(
+            paths,
+            (
+                "服务列表快照文件不存在，后台同步可能尚未完成。"
+                if scope == ADMIN_SCOPE
+                else "服务列表快照文件不存在，后台同步或当前用户 prewarm 可能尚未完成。"
+            ),
+            error_type="snapshot_missing" if scope == USER_SCOPE else "snapshot_unavailable",
+        )
     return {
         **meta,
-        "scope": "admin" if identity.role == "admin" else "user",
-        "data_path": str(data_path),
+        "scope": scope,
+        "user": paths.user,
+        "data_path": str(paths.data_path),
     }
 
 
-def _snapshot_unavailable(config: DbaasConfig, message: str) -> dict[str, Any]:
-    workspace = DbaasWorkspace(config)
+def _snapshot_unavailable(paths, message: str, *, error_type: str = "snapshot_unavailable") -> dict[str, Any]:
     return {
         "kind": SERVICES_KIND,
-        "scope": "admin",
+        "scope": paths.scope,
+        "user": paths.user,
         "status": "error",
-        "error_type": "snapshot_unavailable",
+        "error_type": error_type,
         "data_path": None,
-        "meta_path": str(workspace.meta_path(SERVICES_KIND)),
+        "meta_path": str(paths.meta_path),
         "message": f"当前没有可用的服务列表快照：{message}",
     }
 
 
 def _jq_command(identity: Identity, jq_filter: str, data_path: str) -> list[str]:
-    if identity.role == "admin":
-        return ["jq", "-c", jq_filter, data_path]
-    wrapped_filter = f"[.[] | select(.user == $current_user)] | ({jq_filter})"
-    return ["jq", "--arg", "current_user", str(identity.user), "-c", wrapped_filter, data_path]
+    return ["jq", "-c", jq_filter, data_path]
 
 
 def _resolve_preview_limit(config: DbaasConfig, requested: int | None) -> int:

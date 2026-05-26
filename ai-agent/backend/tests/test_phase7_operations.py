@@ -2083,6 +2083,8 @@ def _dbaas_config(tmpdir: str) -> DbaasConfig:
         workspace_dir=Path(tmpdir) / "workspace",
         sync_interval_seconds=5,
         ttl_seconds=30,
+        user_active_idle_timeout_seconds=300,
+        user_snapshot_refresh_wait_seconds=3,
         jq_timeout_seconds=2,
         jq_max_preview_items=50,
         jq_max_output_bytes=1024 * 1024,

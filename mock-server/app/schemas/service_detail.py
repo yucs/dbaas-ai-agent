@@ -20,6 +20,15 @@ class ServiceVolumeSpec(ApiSchema):
     size: float = Field(description="卷容量大小")
 
 
+class UserServiceVolumeSpec(ApiSchema):
+    """普通用户可见的单元 volume 规格。"""
+
+    diskType: str = Field(description="挂载目标主机磁盘用途，例如 data、log")
+    mediaType: str = Field(description="挂载目标主机磁盘介质类型，例如 SSD、HDD")
+    mountPoint: str = Field(description="容器内挂载路径")
+    size: float = Field(description="卷容量大小")
+
+
 class ServiceStorageSpec(ApiSchema):
     """单元存储规格。"""
 
@@ -27,11 +36,25 @@ class ServiceStorageSpec(ApiSchema):
     log: ServiceVolumeSpec = Field(description="log 卷规格")
 
 
+class UserServiceStorageSpec(ApiSchema):
+    """普通用户可见的单元存储规格。"""
+
+    data: UserServiceVolumeSpec = Field(description="data 卷规格")
+    log: UserServiceVolumeSpec = Field(description="log 卷规格")
+
+
 class ServiceNetworkSpec(ApiSchema):
     """服务组网络信息。"""
 
     vpcId: str = Field(description="服务组所在 VPC ID")
     subnetId: str = Field(description="服务组所在子网 ID")
+    cidr: str = Field(description="服务组所在子网网段")
+    gateway: str = Field(description="服务组所在子网网关")
+
+
+class UserServiceNetworkSpec(ApiSchema):
+    """普通用户可见的服务组网络信息。"""
+
     cidr: str = Field(description="服务组所在子网网段")
     gateway: str = Field(description="服务组所在子网网关")
 
@@ -56,6 +79,22 @@ class ServiceUnit(ApiSchema):
     storage: ServiceStorageSpec = Field(description="单元存储规格")
 
 
+class UserServiceUnit(ApiSchema):
+    """普通用户可见的子服务下单元信息。"""
+
+    name: str = Field(description="单元名称")
+    type: str = Field(description="单元类型，例如 docker")
+    role: str = Field(description="单元角色，例如 primary、replica、proxy、manager")
+    image: str | None = Field(default=None, description="单元容器镜像名称")
+    version: str | None = Field(default=None, description="单元真实版本，例如 8.0.36")
+    healthStatus: str = Field(description="单元健康状态，例如 HEALTHY、DEGRADED、UNHEALTHY")
+    containerStatus: str = Field(description="单元容器状态，例如 RUNNING、STOPPED、RESTARTING")
+    containerIp: str = Field(description="单元容器 IP")
+    cpu: float | None = Field(default=None, description="CPU 核数")
+    memory: float | None = Field(default=None, description="内存大小")
+    storage: UserServiceStorageSpec = Field(description="单元存储规格")
+
+
 class ChildService(ApiSchema):
     """服务组中的子服务信息。"""
 
@@ -68,6 +107,20 @@ class ChildService(ApiSchema):
     nodeHA: bool | None = Field(default=None, description="是否开启节点高可用")
     platformAuto: bool | None = Field(default=None, description="是否由平台自动分配规格")
     units: list[ServiceUnit] = Field(default_factory=list, description="子服务下的单元列表")
+
+
+class UserChildService(ApiSchema):
+    """普通用户可见的服务组子服务信息。"""
+
+    name: str = Field(description="子服务名称")
+    type: str = Field(description="子服务类型")
+    version: str | None = Field(default=None, description="子服务版本")
+    port: int | None = Field(default=None, description="服务端口")
+    healthStatus: str = Field(description="子服务健康状态，例如 HEALTHY、DEGRADED、UNHEALTHY")
+    clusterHA: bool | None = Field(default=None, description="是否开启集群高可用")
+    nodeHA: bool | None = Field(default=None, description="是否开启节点高可用")
+    platformAuto: bool | None = Field(default=None, description="是否由平台自动分配规格")
+    units: list[UserServiceUnit] = Field(default_factory=list, description="子服务下的单元列表")
 
 
 class UpdateStorageSpecRequest(ApiSchema):
@@ -284,6 +337,28 @@ class ServiceDetailResponse(ApiSchema):
     healthStatus: str = Field(description="服务组健康状态，例如 HEALTHY、DEGRADED、UNHEALTHY")
     network: ServiceNetworkSpec = Field(description="服务组网络信息")
     services: list[ChildService] = Field(default_factory=list, description="服务组下的子服务列表")
+    backupStrategy: BackupStrategySummary | None = Field(
+        default=None,
+        description="服务组备份策略摘要，运行时可由备份策略数据合并得到",
+    )
+
+
+class UserServiceDetailResponse(ApiSchema):
+    """普通用户可见的 `GET /services/{name}` 响应模型。"""
+
+    name: str = Field(description="服务组名称")
+    type: str = Field(description="服务组类型")
+    user: str | None = Field(default=None, description="服务组所属用户")
+    subsystem: str = Field(description="服务组所属子系统")
+    environment: str = Field(description="服务组所在环境，例如 prod、staging、dev、perf")
+    siteName: str = Field(description="服务组所属站点名称")
+    region: str = Field(description="服务组所在区域")
+    zone: str = Field(description="服务组所在可用区")
+    architecture: str | None = Field(default=None, description="服务组架构描述")
+    sharding: bool | None = Field(default=None, description="是否为分片结构")
+    healthStatus: str = Field(description="服务组健康状态，例如 HEALTHY、DEGRADED、UNHEALTHY")
+    network: UserServiceNetworkSpec = Field(description="服务组网络信息")
+    services: list[UserChildService] = Field(default_factory=list, description="服务组下的子服务列表")
     backupStrategy: BackupStrategySummary | None = Field(
         default=None,
         description="服务组备份策略摘要，运行时可由备份策略数据合并得到",

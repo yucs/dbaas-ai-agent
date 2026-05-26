@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "services.v1",
-  "title": "ServicesV1",
-  "description": "DBAAS 服务列表快照。结构必须与 dbaas-server GET /services 响应一致，顶层为服务组数组。",
+  "$id": "services.user.v1",
+  "title": "ServicesUserV1",
+  "description": "DBAAS 普通用户服务列表快照。该 schema 是管理员 services schema 的安全字段投影，只包含普通用户可见字段。",
   "type": "array",
   "items": {
     "$ref": "#/$defs/ServiceDetailResponse"
@@ -107,7 +107,6 @@
         "type",
         "subsystem",
         "environment",
-        "siteId",
         "siteName",
         "region",
         "zone",
@@ -135,10 +134,6 @@
         "environment": {
           "type": "string",
           "description": "服务组所在环境，例如 prod、staging、dev、perf"
-        },
-        "siteId": {
-          "type": "string",
-          "description": "服务组所属站点 ID"
         },
         "siteName": {
           "type": "string",
@@ -196,16 +191,8 @@
       "type": "object",
       "additionalProperties": false,
       "description": "服务组网络信息。",
-      "required": ["vpcId", "subnetId", "cidr", "gateway"],
+      "required": ["cidr", "gateway"],
       "properties": {
-        "vpcId": {
-          "type": "string",
-          "description": "服务组所在 VPC ID"
-        },
-        "subnetId": {
-          "type": "string",
-          "description": "服务组所在子网 ID"
-        },
         "cidr": {
           "type": "string",
           "description": "服务组所在子网网段"
@@ -237,23 +224,15 @@
       "additionalProperties": false,
       "description": "子服务下的单元信息。",
       "required": [
-        "id",
         "name",
         "type",
         "role",
         "healthStatus",
         "containerStatus",
-        "hostId",
-        "hostName",
-        "hostIp",
         "containerIp",
         "storage"
       ],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "单元唯一标识"
-        },
         "name": {
           "type": "string",
           "description": "单元名称"
@@ -284,18 +263,6 @@
           "type": "string",
           "description": "单元容器状态，例如 RUNNING、STOPPED、RESTARTING"
         },
-        "hostId": {
-          "type": "string",
-          "description": "单元所在主机 ID"
-        },
-        "hostName": {
-          "type": "string",
-          "description": "单元所在主机名称"
-        },
-        "hostIp": {
-          "type": "string",
-          "description": "单元所在主机 IP"
-        },
         "containerIp": {
           "type": "string",
           "description": "单元容器 IP"
@@ -320,16 +287,8 @@
       "type": "object",
       "additionalProperties": false,
       "description": "单元 volume 规格。",
-      "required": ["diskId", "diskName", "diskType", "mediaType", "mountPoint", "size"],
+      "required": ["diskType", "mediaType", "mountPoint", "size"],
       "properties": {
-        "diskId": {
-          "type": "string",
-          "description": "挂载目标主机磁盘 ID"
-        },
-        "diskName": {
-          "type": "string",
-          "description": "挂载目标主机磁盘名称"
-        },
         "diskType": {
           "type": "string",
           "description": "挂载目标主机磁盘用途，例如 data、log"

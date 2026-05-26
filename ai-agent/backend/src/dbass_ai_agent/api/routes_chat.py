@@ -27,6 +27,7 @@ from .deps import (
     get_operation_service,
     get_session_service,
     get_task_service,
+    renew_dbaas_user_lease,
 )
 from .schemas import SendMessageRequest, SendMessageResponse
 
@@ -70,6 +71,7 @@ def send_message(
         _assert_no_pending_approval(identity, session_id, approval_service)
         user_message = session_service.append_user_message(identity, session_id, content)
         session = session_service.get_session(identity, session_id).meta
+        renew_dbaas_user_lease(request, identity)
         with log_context(
             request_id=request_id,
             user_id=identity.user_id,
@@ -184,6 +186,7 @@ def stream_message(
             content,
         )
         session = session_service.get_session(identity, session_id).meta
+        renew_dbaas_user_lease(request, identity)
         request_id = getattr(request.state, "request_id", "-")
     except Exception:
         run_lock_context.__exit__(None, None, None)

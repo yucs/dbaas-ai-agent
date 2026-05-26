@@ -53,6 +53,8 @@ class Settings:
     dbaas_workspace_dir: Path = APP_ROOT / "data" / "runtime" / "dbaas_workspace"
     dbaas_sync_interval_seconds: int = 5
     dbaas_ttl_seconds: int = 30
+    dbaas_user_active_idle_timeout_seconds: int = 300
+    dbaas_user_snapshot_refresh_wait_seconds: int = 3
     dbaas_task_refresh_interval_seconds: int = 10
     dbaas_jq_timeout_seconds: int = 3
     dbaas_jq_max_preview_items: int = 50
@@ -168,6 +170,16 @@ class Settings:
                 5,
             ),
             dbaas_ttl_seconds=_get_positive_int(dbaas_workspace, "ttl_seconds", 30),
+            dbaas_user_active_idle_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "user_active_idle_timeout_seconds",
+                300,
+            ),
+            dbaas_user_snapshot_refresh_wait_seconds=_get_positive_int(
+                dbaas_workspace,
+                "user_snapshot_refresh_wait_seconds",
+                3,
+            ),
             dbaas_task_refresh_interval_seconds=_get_positive_int(
                 dbaas_workspace,
                 "task_refresh_interval_seconds",

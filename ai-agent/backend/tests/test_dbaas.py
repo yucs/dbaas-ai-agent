@@ -36,9 +36,20 @@ class DbaasSchemaTests(unittest.TestCase):
     def test_describe_schema_returns_top_level_summary(self) -> None:
         summary = describe_schema(SERVICES_KIND, app_root=APP_ROOT)
 
-        self.assertEqual(summary["schema_version"], "services.v1")
+        self.assertEqual(summary["schema_version"], "services.admin.v1")
         self.assertEqual(summary["top_level_type"], "array")
         self.assertTrue(any(field["name"] == "healthStatus" for field in summary["fields"]))
+
+    def test_describe_schema_returns_user_projection_for_regular_user(self) -> None:
+        summary = describe_schema(
+            SERVICES_KIND,
+            app_root=APP_ROOT,
+            identity=Identity(user_id="alice", role="user", user="payment-team"),
+        )
+
+        self.assertEqual(summary["schema_version"], "services.user.v1")
+        fields = {field["name"] for field in summary["fields"]}
+        self.assertNotIn("siteId", fields)
 
 
 class DbaasSyncTests(unittest.TestCase):
@@ -61,15 +72,15 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
     @unittest.skipUnless(shutil.which("jq"), "jq is required for DBAAS query tests")
-    def test_query_dbaas_data_filters_regular_user_with_jq_wrapper(self) -> None:
+    def test_query_dbaas_data_reads_regular_user_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
-            _write_fresh_admin_snapshot(
+            _write_fresh_user_snapshot(
                 config,
+                "payment-team",
                 [
                     _service("mysql-a", "payment-team", health_status="HEALTHY"),
                     _service("mysql-b", "payment-team", health_status="UNHEALTHY"),
-                    _service("mysql-c", "billing-team", health_status="UNHEALTHY"),
                 ],
             )
 
@@ -77,7 +88,7 @@ class DbaasSyncTests(unittest.TestCase):
                 config,
                 Identity(user_id="alice", role="user", user="payment-team"),
                 kind="services",
-                jq_filter='.[] | select(.healthStatus != "HEALTHY") | {name, healthStatus}',
+                jq_filter='[.[] | select(.healthStatus != "HEALTHY") | {name, healthStatus}]',
                 max_preview_items=10,
             )
 
@@ -107,7 +118,7 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(meta["status"], "error")
             self.assertEqual(meta["error_type"], "snapshot_unavailable")
             self.assertFalse(workspace.data_path(SERVICES_KIND).exists())
-            self.assertFalse(workspace.meta_path(SERVICES_KIND).exists())
+            self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
     @unittest.skipUnless(shutil.which("jq"), "jq is required for DBAAS query tests")
     def test_fresh_snapshot_remains_queryable_when_refresh_fails(self) -> None:
@@ -129,7 +140,8 @@ class DbaasSyncTests(unittest.TestCase):
             ):
                 meta = DbaasServiceSynchronizer(config).force_refresh_admin_services()
 
-            self.assertEqual(meta["status"], "error")
+            self.assertEqual(meta["status"], "fresh")
+            self.assertEqual(meta["last_refresh_status"], "error")
             self.assertTrue(workspace.data_path(SERVICES_KIND).exists())
             self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
@@ -157,6 +169,64 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["status"], "error")
             self.assertEqual(result["error_type"], "snapshot_unavailable")
             self.assertIsNone(result["data_path"])
+
+    def test_query_user_missing_snapshot_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+
+            def _refresh(user: str, *, timeout_seconds: int | None = None) -> dict:
+                _write_fresh_user_snapshot(
+                    config,
+                    user,
+                    [_service("mysql-a", user, health_status="UNHEALTHY")],
+                )
+                return {"status": "fresh"}
+
+            with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="alice", role="user", user="payment-team"),
+                    kind="services",
+                    jq_filter='[.[] | {name, healthStatus}]',
+                )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["scope"], "user")
+            refresh_user.assert_called_once()
+
+    def test_query_user_stale_snapshot_does_not_trigger_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_expired_user_snapshot(config, "payment-team", [_service("mysql-old", "payment-team")])
+
+            with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="alice", role="user", user="payment-team"),
+                    kind="services",
+                    jq_filter=".[]",
+                )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            refresh_user.assert_not_called()
+
+    def test_query_user_error_snapshot_does_not_trigger_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_error_user_snapshot(config, "payment-team", "upstream failed")
+
+            with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="alice", role="user", user="payment-team"),
+                    kind="services",
+                    jq_filter=".[]",
+                )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            refresh_user.assert_not_called()
 
     def test_query_does_not_trigger_sync_when_snapshot_is_expired(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -370,6 +440,8 @@ def _config(tmpdir: str) -> DbaasConfig:
         workspace_dir=Path(tmpdir) / "workspace",
         sync_interval_seconds=5,
         ttl_seconds=30,
+        user_active_idle_timeout_seconds=300,
+        user_snapshot_refresh_wait_seconds=3,
         jq_timeout_seconds=2,
         jq_max_preview_items=50,
         jq_max_output_bytes=1024 * 1024,
@@ -494,7 +566,8 @@ def _write_fresh_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> Non
             "bytes": bytes_written,
             "data_path": str(data_path),
             "meta_path": str(workspace.meta_path(SERVICES_KIND)),
-            "schema_version": "services.v1",
+            "schema_version": "services.admin.v1",
+            "schema_path": str(APP_ROOT / "config/schemas/services.admin.v1.schema.json"),
         },
     )
 
@@ -517,7 +590,85 @@ def _write_expired_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> N
             "bytes": bytes_written,
             "data_path": str(data_path),
             "meta_path": str(workspace.meta_path(SERVICES_KIND)),
-            "schema_version": "services.v1",
+            "schema_version": "services.admin.v1",
+            "schema_path": str(APP_ROOT / "config/schemas/services.admin.v1.schema.json"),
+        },
+    )
+
+
+def _write_fresh_user_snapshot(config: DbaasConfig, user: str, payload: list[dict]) -> None:
+    workspace = DbaasWorkspace(config)
+    paths = workspace.paths(SERVICES_KIND, scope="user", user=user)
+    bytes_written = write_json_atomic(paths.data_path, payload)
+    now = utcnow()
+    write_meta_atomic(
+        paths.meta_path,
+        {
+            "kind": SERVICES_KIND,
+            "scope": "user",
+            "user": user,
+            "status": "fresh",
+            "synced_at": isoformat(now),
+            "expires_at": isoformat(now + timedelta(seconds=config.ttl_seconds)),
+            "ttl_seconds": config.ttl_seconds,
+            "record_count": len(payload),
+            "bytes": bytes_written,
+            "data_path": str(paths.data_path),
+            "meta_path": str(paths.meta_path),
+            "schema_version": "services.user.v1",
+            "schema_path": str(APP_ROOT / "config/schemas/services.user.v1.schema.json"),
+        },
+    )
+
+
+def _write_expired_user_snapshot(config: DbaasConfig, user: str, payload: list[dict]) -> None:
+    workspace = DbaasWorkspace(config)
+    paths = workspace.paths(SERVICES_KIND, scope="user", user=user)
+    bytes_written = write_json_atomic(paths.data_path, payload)
+    now = utcnow()
+    write_meta_atomic(
+        paths.meta_path,
+        {
+            "kind": SERVICES_KIND,
+            "scope": "user",
+            "user": user,
+            "status": "fresh",
+            "synced_at": isoformat(now - timedelta(seconds=config.ttl_seconds * 2)),
+            "expires_at": isoformat(now - timedelta(seconds=1)),
+            "ttl_seconds": config.ttl_seconds,
+            "record_count": len(payload),
+            "bytes": bytes_written,
+            "data_path": str(paths.data_path),
+            "meta_path": str(paths.meta_path),
+            "schema_version": "services.user.v1",
+            "schema_path": str(APP_ROOT / "config/schemas/services.user.v1.schema.json"),
+        },
+    )
+
+
+def _write_error_user_snapshot(config: DbaasConfig, user: str, message: str) -> None:
+    workspace = DbaasWorkspace(config)
+    paths = workspace.paths(SERVICES_KIND, scope="user", user=user)
+    write_meta_atomic(
+        paths.meta_path,
+        {
+            "kind": SERVICES_KIND,
+            "scope": "user",
+            "user": user,
+            "status": "error",
+            "error_type": "snapshot_unavailable",
+            "synced_at": None,
+            "expires_at": None,
+            "ttl_seconds": config.ttl_seconds,
+            "record_count": 0,
+            "bytes": 0,
+            "data_path": None,
+            "meta_path": str(paths.meta_path),
+            "schema_version": "services.user.v1",
+            "schema_path": str(APP_ROOT / "config/schemas/services.user.v1.schema.json"),
+            "last_refresh_status": "error",
+            "last_error": message,
+            "message": message,
         },
     )
 

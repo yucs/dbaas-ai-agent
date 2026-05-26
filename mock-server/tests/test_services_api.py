@@ -478,6 +478,17 @@ def test_list_services_for_user_only_returns_user_services() -> None:
     payload = response.json()
     assert payload
     assert all(item["user"] == "payment-team-prod" for item in payload)
+    first = payload[0]
+    assert "siteId" not in first
+    assert "vpcId" not in first["network"]
+    assert "subnetId" not in first["network"]
+    first_unit = first["services"][0]["units"][0]
+    assert "id" not in first_unit
+    assert "hostId" not in first_unit
+    assert "hostName" not in first_unit
+    assert "hostIp" not in first_unit
+    assert "diskId" not in first_unit["storage"]["data"]
+    assert "diskName" not in first_unit["storage"]["data"]
 
 
 def test_user_cannot_query_other_user_services() -> None:
@@ -507,6 +518,17 @@ def test_user_can_only_access_user_service_detail() -> None:
 
     assert own_response.status_code == 200
     assert own_response.json()["user"] == "payment-team-prod"
+    own_payload = own_response.json()
+    assert "siteId" not in own_payload
+    assert "vpcId" not in own_payload["network"]
+    assert "subnetId" not in own_payload["network"]
+    own_unit = own_payload["services"][0]["units"][0]
+    assert "id" not in own_unit
+    assert "hostId" not in own_unit
+    assert "hostName" not in own_unit
+    assert "hostIp" not in own_unit
+    assert "diskId" not in own_unit["storage"]["data"]
+    assert "diskName" not in own_unit["storage"]["data"]
     assert forbidden_response.status_code == 403
     assert forbidden_response.json() == {
         "detail": "user 'payment-team-prod' cannot access service 'tidb-oltp'"

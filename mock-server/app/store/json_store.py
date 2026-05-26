@@ -962,6 +962,32 @@ class JsonDataStore:
 
         return public_service
 
+    def _public_service_detail_for_user(self, service: dict[str, Any]) -> dict[str, Any]:
+        """返回普通用户可见的服务组详情。"""
+
+        public_service = self._public_service_detail(service)
+        public_service.pop("siteId", None)
+        network = public_service.get("network")
+        if isinstance(network, dict):
+            network.pop("vpcId", None)
+            network.pop("subnetId", None)
+
+        for child_service in public_service.get("services", []):
+            for unit in child_service.get("units", []):
+                unit.pop("id", None)
+                unit.pop("hostId", None)
+                unit.pop("hostName", None)
+                unit.pop("hostIp", None)
+                storage = unit.get("storage")
+                if isinstance(storage, dict):
+                    for volume_name in ("data", "log"):
+                        volume = storage.get(volume_name)
+                        if isinstance(volume, dict):
+                            volume.pop("diskId", None)
+                            volume.pop("diskName", None)
+
+        return public_service
+
     def _public_user_summary(self, user: str) -> dict[str, Any]:
         """返回用户摘要。"""
 

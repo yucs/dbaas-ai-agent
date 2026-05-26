@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from dbass_ai_agent.agent.runtime import AgentInvocationError, DeepAgentRuntime
 from dbass_ai_agent.identity.models import Identity
@@ -15,6 +15,7 @@ from .deps import (
     get_current_identity,
     get_operation_service,
     get_task_service,
+    renew_dbaas_user_lease,
 )
 from .schemas import ApprovalDecisionRequest, ApprovalDecisionResponse, ApprovalsResponse
 
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/api/v1/sessions", tags=["approvals"])
 @router.get("/{session_id}/approvals", response_model=ApprovalsResponse)
 def get_approvals(
     session_id: str,
+    request: Request,
     identity: Identity = Depends(get_current_identity),
     approval_service: ApprovalService = Depends(get_approval_service),
     agent_runtime_factory=Depends(get_agent_runtime_factory),
@@ -38,6 +40,7 @@ def get_approvals(
         operation_service=operation_service,
         task_service=task_service,
     )
+    renew_dbaas_user_lease(request, identity)
     return ApprovalsResponse(items=approval_service.get_approvals(identity, session_id))
 
 
@@ -46,6 +49,7 @@ def decide_approval(
     session_id: str,
     approval_id: str,
     payload: ApprovalDecisionRequest,
+    request: Request,
     identity: Identity = Depends(get_current_identity),
     approval_service: ApprovalService = Depends(get_approval_service),
     agent_runtime: DeepAgentRuntime = Depends(get_agent_runtime),
@@ -73,6 +77,7 @@ def decide_approval(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    renew_dbaas_user_lease(request, identity)
     return ApprovalDecisionResponse(
         approval=result.approval,
         assistant_message=result.assistant_message,

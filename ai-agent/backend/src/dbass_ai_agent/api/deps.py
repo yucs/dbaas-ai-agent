@@ -29,6 +29,12 @@ def get_current_identity(request: Request) -> Identity:
     return resolve_identity(request)
 
 
+def renew_dbaas_user_lease(request: Request, identity: Identity) -> None:
+    background = getattr(request.app.state, "dbaas_background_sync", None)
+    if background is not None:
+        background.renew_user_lease(identity)
+
+
 @lru_cache
 def get_session_repository() -> SessionRepository:
     settings = get_settings()
