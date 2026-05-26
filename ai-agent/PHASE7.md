@@ -2794,8 +2794,9 @@ restart
 - `user`
 - `thread_id`
 - 角色扩展系统提示词
+- 角色工具集
 
-同一个 Session 生命周期内不得切换身份或角色扩展系统提示词。
+同一个 Session 生命周期内不得切换身份、角色扩展系统提示词或角色工具集。
 
 后续请求访问该 Session 时，当前请求身份必须与 `SessionMeta` 一致。
 如果 `user_id`、`role` 或普通用户的 `user` 发生变化，
@@ -2839,7 +2840,7 @@ critical
 - 生产环境停止操作要求二次确认
 - 大规格缩容要求先查询监控和健康状态
 
-## 13. Prompt 与后端职责
+## 13. Prompt、工具集与后端职责
 
 系统提示词采用 common + role extend 组合：
 
@@ -2856,8 +2857,8 @@ backend/prompts/system.md
 
 当前阶段采用双 DeepAgent 实例：
 
-- user DeepAgent 绑定 `system.md + user_extend_system_prompt.md`
-- admin DeepAgent 绑定 `system.md + admin_extend_system_prompt.md`
+- user DeepAgent 绑定 `system.md + user_extend_system_prompt.md` 和普通用户工具集
+- admin DeepAgent 绑定 `system.md + admin_extend_system_prompt.md` 和管理员工具集
 
 不采用单 DeepAgent + 每次请求注入角色说明的原因：
 
@@ -2865,15 +2866,31 @@ backend/prompts/system.md
 - user/admin 行为边界在同一个 Session/thread 生命周期内应保持稳定
 - 双 DeepAgent 能避免长会话中反复出现角色说明，降低摘要和历史上下文噪声
 - 当前只有 `user` 和 `admin` 两类角色，额外 runtime 复杂度和资源成本可控
+- 角色工具集在创建 Agent 时绑定，普通用户 Agent 不注册管理员专用工具，
+  可以减少模型误选不可用工具的概率
 
 角色扩展系统提示词只用于告诉模型当前身份下的行为边界、工具选择倾向和回答策略，
 不作为授权依据。
 
+角色工具集只用于收敛当前 Agent 可调用工具面，也不作为唯一授权依据。
+
 真实权限判断仍由 API 身份校验、DBAAS tool、approval service 和 DBAAS 控制面强制执行。
 
-同一个 Session/thread 生命周期内不得切换角色扩展系统提示词。
+同一个 Session/thread 生命周期内不得切换角色扩展系统提示词或角色工具集。
 如果当前请求身份与 Session 创建身份不一致，应拒绝继续使用该 Session/thread，
 由前端删除旧 Session 或创建新 Session。
+
+当前工具集分层：
+
+- common tools：服务查询、schema 描述、监控 catalog/latest/history 查询、当前时间、
+  服务变更预检、服务写操作、当前 Session 任务查询
+- admin-only tools：主机、集群、资源池、站点等平台级资源工具；
+  第一版可以先为空，后续新增平台级工具时只注册到 admin DeepAgent
+
+创建 DeepAgent 时，后端根据 `role` 构建对应工具集。
+`interrupt_on` 也应根据当前 Agent 实际注册的工具过滤，
+未注册到普通用户 Agent 的管理员专用写工具不应出现在普通用户 Agent 的
+`interrupt_on` 配置中。
 
 系统提示词只保留通用操作规则：
 
