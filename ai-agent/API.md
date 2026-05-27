@@ -166,6 +166,19 @@ Session 创建后身份不可变：
 - 不允许跨 `user_id` 访问他人的 Session
 - `archive` 负责可恢复，`delete` 负责真正删除
 - 写操作类 Agent 行为仍需审批机制控制
+- 会触发 DBAAS 用户快照续约的接口包括创建/查看 Session、发送消息、查询审批、审批决策、查询任务和订阅任务事件
+- 当前 Session 运行中、存在 pending approval 或存在非终态 task 时，相关接口会返回 `409 Conflict`
+
+常见 `409 Conflict` 响应中的 `detail.error_type`：
+
+- `session_run_locked`
+  - 当前 Session 正在执行 AI 请求，暂时不能发送消息、归档或删除
+- `session_has_pending_approval`
+  - 当前 Session 存在待确认审批，需先批准或拒绝
+- `session_has_running_tasks`
+  - 当前 Session 存在非终态 DBAAS 任务，需等待任务结束
+- `expired_approval_resume_failed`
+  - 过期审批的 DeepAgent 暂停点清理失败，需稍后重试
 
 ## 4. Session 相关接口
 
@@ -353,6 +366,7 @@ DELETE /api/v1/sessions/{session_id}
 - 删除 `data/users/<user_id>/sessions/<session_id>/` 目录
 - 同步删除该 Session 绑定的 `thread_id` 对应 DeepAgent checkpoint 数据
 - 默认不再出现在正常历史列表中
+- 如果当前请求身份与 Session 身份不一致，但 `user_id` 相同，可以清理旧身份 Session；该路径不会触发 DeepAgent resume，且仍要求没有 pending approval 或非终态 task
 
 #### 说明
 
@@ -411,12 +425,14 @@ POST /api/v1/sessions/{session_id}/messages
   "assistant_message": {
     "message_id": "msg_011",
     "role": "assistant",
-    "content": "当前阶段还未接通 DBAAS 实时查询能力。",
+    "content": "mysql-xf2 当前健康状态为 WARN，建议继续查看具体子服务和最近监控。",
     "created_at": "2026-04-22T12:10:02Z"
   },
   "run_id": "run_010",
   "mode": "deepagent",
-  "warning": "mock-server-disabled"
+  "warning": null,
+  "approval": null,
+  "paused": false
 }
 ```
 
@@ -456,9 +472,28 @@ Accept: text/event-stream
 - `run.paused`
   - 当前运行已经暂停，等待审批决策
 - `done`
-  - assistant 消息已经写入 `messages.jsonl`
+  - 本轮结束；普通完成时包含 assistant 消息，审批暂停时包含 approval 且 `paused=true`
 - `error`
   - 当前运行失败
+
+`approval.required` 和随后 `done` 中的 `approval` 都是当前 Session 下的审批记录。
+前端收到后应展示确认面板，并停止继续拼接 assistant 文本。
+
+#### `done` 事件示例
+
+普通完成：
+
+```text
+event: done
+data: {"session":{...},"user_message":{...},"assistant_message":{...},"run_id":"run_001","mode":"deepagent","warning":null}
+```
+
+审批暂停：
+
+```text
+event: done
+data: {"session":{...},"user_message":{...},"assistant_message":null,"approval":{...},"run_id":"run_002","mode":"deepagent","warning":null,"paused":true}
+```
 
 #### `error` 事件示例
 
@@ -535,7 +570,7 @@ DeepAgent 原生更偏运行时语义，例如：
 - 项目对外 SSE 流
   - 用于服务前端页面
 
-当前第四阶段实现仍然是一个轻量转换层：
+当前实现仍然是一个轻量转换层：
 
 - 从 DeepAgent `stream()` 中读取原始事件
 - 转换成项目定义的事件名
@@ -611,9 +646,86 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 - `run_id` / `mode`
   - 本次 resume 对应的运行信息
 
-## 7. 页面加载与接口关系
+## 7. 任务接口
 
-### 7.1 登录后进入页面
+### 7.1 查询 Session 下的任务
+
+```http
+GET /api/v1/sessions/{session_id}/tasks
+```
+
+#### 查询语义
+
+返回当前 Session 记录的全部 DBAAS task latest view。
+接口会对非终态任务做 lazy refresh；已经进入终态的任务直接返回本地 latest view。
+
+#### 返回示例
+
+```json
+{
+  "items": [
+    {
+      "task_id": "task-service-image-upgrade-mysql-xf2-mysql-a3f9c2",
+      "session_id": "sess_001",
+      "operation_id": "op_001",
+      "action": "service.image.upgrade",
+      "status": "running",
+      "source_status": "RUNNING",
+      "message": "DBAAS 任务正在执行。",
+      "created_at": "2026-04-22T12:10:10Z",
+      "updated_at": "2026-04-22T12:10:20Z"
+    }
+  ]
+}
+```
+
+#### 访问边界
+
+- 只能查询当前身份可访问的 Session
+- 不提供全局 task 查询接口
+- 不能通过本接口访问其他 Session 的 task，即使 DBAAS `task_id` 是全局唯一
+
+### 7.2 订阅 Session 任务事件
+
+```http
+GET /api/v1/sessions/{session_id}/tasks/events
+Accept: text/event-stream
+```
+
+#### 作用
+
+用于当前 Session 页面打开期间订阅任务状态变化。
+后端会按配置间隔 lazy refresh 非终态任务，并通过 SSE 推送变化。
+
+#### 当前事件类型
+
+- `task_status_changed`
+  - 某个 task 的状态、源状态、消息、结果或错误发生变化
+- `task_terminal_notice_emitted`
+  - 一组相关 task 全部进入终态，后端已写入一条 `role=system` 的终态提醒消息
+
+#### `task_status_changed` 示例
+
+```text
+event: task_status_changed
+data: {"session_id":"sess_001","task":{"task_id":"task_001","status":"succeeded","previous_status":"running"}}
+```
+
+#### `task_terminal_notice_emitted` 示例
+
+```text
+event: task_terminal_notice_emitted
+data: {"session_id":"sess_001","group_key":"approval:appr_001","tasks":[...],"system_message":{"role":"system","content":"本次审批确认关联的异步任务 task_001 已成功。"}}
+```
+
+#### 结束语义
+
+如果当前 Session 没有非终态任务，且没有待发送的终态提醒，SSE 流会自然结束。
+如果客户端断开连接，后端停止本次事件生成；下次打开页面可重新请求任务列表或重新订阅。
+
+## 8. 页面加载与接口关系
+
+### 8.1 登录后进入页面
 
 页面初始化建议调用：
 
@@ -623,7 +735,7 @@ GET /api/v1/sessions
 
 用于渲染左侧历史 Session 列表。
 
-### 7.2 用户点击某个历史 Session
+### 8.2 用户点击某个历史 Session
 
 页面建议调用：
 
@@ -632,8 +744,19 @@ GET /api/v1/sessions/{session_id}
 ```
 
 用于将该 Session 的消息加载到当前窗口。
+如果页面需要展示任务面板，应额外调用：
 
-### 7.3 用户继续发送消息
+```text
+GET /api/v1/sessions/{session_id}/tasks
+```
+
+如果存在非终态任务，可继续订阅：
+
+```text
+GET /api/v1/sessions/{session_id}/tasks/events
+```
+
+### 8.3 用户继续发送消息
 
 页面建议按以下顺序执行：
 
@@ -641,7 +764,7 @@ GET /api/v1/sessions/{session_id}
 2. 按 SSE 事件更新当前窗口
 3. 如果调用方不支持 SSE，可退回 `POST /api/v1/sessions/{session_id}/messages`
 
-### 7.4 用户归档或删除 Session
+### 8.4 用户归档或删除 Session
 
 页面调用：
 
@@ -649,17 +772,18 @@ GET /api/v1/sessions/{session_id}
 - `DELETE /api/v1/sessions/{session_id}`
 
 完成后刷新左侧 Session 列表。
+如果返回 `409 Conflict`，前端应根据 `detail.error_type` 提示用户先处理审批、等待任务结束或稍后重试。
 
-## 8. API 与本地存储映射
+## 9. API 与本地存储映射
 
-### 8.1 列表
+### 9.1 列表
 
 ```text
 GET /sessions
 -> data/users/<user_id>/sessions/index.json
 ```
 
-### 8.2 详情
+### 9.2 详情
 
 ```text
 GET /sessions/{session_id}
@@ -671,21 +795,21 @@ GET /sessions/{session_id}
 
 `tasks.jsonl` 不放入 Session 详情响应，统一通过任务接口读取。
 
-### 8.3 审批
+### 9.3 审批
 
 ```text
 GET /sessions/{session_id}/approvals
 -> data/users/<user_id>/sessions/<session_id>/approvals.jsonl
 ```
 
-### 8.4 任务
+### 9.4 任务
 
 ```text
 GET /sessions/{session_id}/tasks
 -> data/users/<user_id>/sessions/<session_id>/tasks.jsonl
 ```
 
-## 9. 当前代码目录映射
+## 10. 当前代码目录映射
 
 当前 API 相关代码主要分布在：
 
@@ -700,7 +824,49 @@ GET /sessions/{session_id}/tasks
 - `backend/src/dbass_ai_agent/infra/`
   - 路径拼装、ID 生成、时间和日志等基础设施
 
-## 10. 当前建议结论
+## 11. 联调测试建议
+
+API 单元测试和端到端联调建议分层维护。
+
+### 11.1 默认测试
+
+默认测试应保持快速、稳定、无需启动外部服务或调用真实 LLM，适合每次提交前执行。
+
+当前建议覆盖：
+
+- 身份解析和 DBAAS actor header 生成
+- mock-server 鉴权解析与资源可见性
+- DBAAS services、metrics、precheck、write client 的函数级行为
+- Session、approval、operation、task 的本地存储和状态折叠
+- API 路由的入参、出参和常见错误响应
+
+### 11.2 可选 smoke 联调
+
+需要验证真实链路时，建议使用单独脚本或可选 e2e 测试，不放入默认 pytest 必跑集合。
+原因是这类测试需要启动 mock-server 和 ai-agent 后端，部分场景还会调用真实 LLM。
+
+建议 smoke 分两档：
+
+- 不调用 LLM
+  - 启动 mock-server
+  - 验证 `Authorization: Bearer user` 搭配 `X-DBAAS-Actor-*` 返回当前用户数据
+  - 验证缺少 actor header 返回 401
+  - 验证 services 快照刷新、latest/history metric 请求和 task 查询
+- 调用真实 Agent
+  - 启动 mock-server 和 ai-agent
+  - 创建普通用户 Session
+  - 用自然语言询问 DBAAS 查询问题
+  - 验证返回 `assistant_message`，且后端没有 DBAAS 鉴权错误
+
+如果后续落脚本，建议放在 `scripts/` 或单独的 `backend/tests/test_*_smoke_e2e.py`，
+并通过环境变量显式启用，例如：
+
+```text
+DBAAS_SMOKE_ENABLED=true
+REAL_LLM_ENABLED=true
+```
+
+## 12. 当前建议结论
 
 当前 API 已收敛为：
 
