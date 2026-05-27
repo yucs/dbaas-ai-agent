@@ -213,6 +213,24 @@ Phase8 引入轻量 precheck tool 后，额外保持：
 - 必须可审计
 - 必须按用户和 Session 清晰隔离
 
+### 6.6 DBAAS HTTP 请求统一身份注入
+
+所有真正访问 DBAAS 控制面的 HTTP 请求，都必须由后端统一注入当前 request/session identity。
+
+前端和 AI tool 参数不得传入 `user_id`、`role` 或 `user` 来影响 DBAAS 调用身份。
+模型可以描述业务目标和过滤条件，但不能决定 DBAAS 请求使用哪个身份。
+
+产品侧 identity 转换为 DBAAS 身份时遵循：
+
+- `identity.role == "admin"` 使用 `Authorization: Bearer admin`
+- `identity.role == "user"` 使用 `Authorization: Bearer user`
+- 有当前 request/session identity 的请求统一追加 `X-DBAAS-Actor-User: {identity.user_id}`
+- 有当前 request/session identity 的请求统一追加 `X-DBAAS-Actor-Role: {identity.role}`
+- 后台系统任务使用 `X-DBAAS-Actor-User: dbaas-ai-agent` 和 `X-DBAAS-Actor-Role: system`
+
+资源归属、服务可见性、监控可见性、task 可见性和写操作权限，
+最终都以 DBAAS 控制面的鉴权结果为准；项目侧只做必要的入口校验、工具边界控制和审计记录。
+
 ## 7. 当前建议
 
 后续维护文档时建议保持这个分工：

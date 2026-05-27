@@ -11,11 +11,19 @@ def create_test_client() -> TestClient:
 
 
 def admin_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer admin"}
+    return {
+        "Authorization": "Bearer admin",
+        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-Role": "admin",
+    }
 
 
 def user_headers(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{user}"}
+    return {
+        "Authorization": "Bearer user",
+        "X-DBAAS-Actor-User": user,
+        "X-DBAAS-Actor-Role": "user",
+    }
 
 
 def test_seed_files_exist_with_normalized_platform_layout() -> None:

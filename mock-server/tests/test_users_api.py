@@ -9,11 +9,19 @@ def create_test_client() -> TestClient:
 
 
 def admin_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer admin"}
+    return {
+        "Authorization": "Bearer admin",
+        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-Role": "admin",
+    }
 
 
 def user_headers(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{user}"}
+    return {
+        "Authorization": "Bearer user",
+        "X-DBAAS-Actor-User": user,
+        "X-DBAAS-Actor-Role": "user",
+    }
 
 
 def test_user_endpoints_require_bearer_token() -> None:
@@ -24,6 +32,15 @@ def test_user_endpoints_require_bearer_token() -> None:
     assert response.status_code == 401
     assert response.json() == {"detail": "missing bearer token"}
     assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_user_token_requires_actor_headers() -> None:
+    client = create_test_client()
+
+    response = client.get("/users", headers={"Authorization": "Bearer user"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "missing X-DBAAS-Actor-User header"}
 
 
 def test_list_users_returns_all_known_users_for_admin() -> None:

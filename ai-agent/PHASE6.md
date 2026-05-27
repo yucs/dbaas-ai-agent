@@ -1119,17 +1119,23 @@ tool 调用 DBAAS 监控接口时必须携带用户身份，
 admin:
 GET /metrics/latest?metric_key=container.cpu.use
 Authorization: Bearer admin
+X-DBAAS-Actor-User: admin-001
+X-DBAAS-Actor-Role: admin
 
 user:
 GET /metrics/latest?metric_key=container.cpu.use
-Authorization: Bearer user:payment-platform-team
+Authorization: Bearer user
+X-DBAAS-Actor-User: payment-platform-team
+X-DBAAS-Actor-Role: user
 ```
 
 身份 header 生成规则：
 
 - `identity.role == "admin"` 时使用 `Authorization: Bearer admin`
-- `identity.role == "user"` 且 `identity.user` 非空时使用 `Authorization: Bearer user:{identity.user}`
-- 普通用户缺少 `identity.user` 时，tool 直接返回 `permission_denied`，不请求 DBAAS
+- `identity.role == "user"` 时使用 `Authorization: Bearer user`
+- 有当前 request/session identity 的请求统一追加 `X-DBAAS-Actor-User: {identity.user_id}`
+- 有当前 request/session identity 的请求统一追加 `X-DBAAS-Actor-Role: {identity.role}`
+- 后台系统任务使用 `X-DBAAS-Actor-User: dbaas-ai-agent` 和 `X-DBAAS-Actor-Role: system`
 - catalog 查询不请求 DBAAS 监控数据，但仍要求存在当前登录身份上下文
 
 ## 17. 后台快照清理任务

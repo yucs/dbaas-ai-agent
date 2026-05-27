@@ -12,11 +12,19 @@ def create_test_client(task_unit_interval_seconds: float = 0.01) -> TestClient:
 
 
 def admin_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer admin"}
+    return {
+        "Authorization": "Bearer admin",
+        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-Role": "admin",
+    }
 
 
 def user_headers(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{user}"}
+    return {
+        "Authorization": "Bearer user",
+        "X-DBAAS-Actor-User": user,
+        "X-DBAAS-Actor-Role": "user",
+    }
 
 
 def get_first_user_service(client: TestClient, user: str) -> dict:

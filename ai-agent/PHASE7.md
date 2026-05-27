@@ -2778,11 +2778,12 @@ restart
 - `required_role=admin` 表示只有管理员可以创建审批和执行工具
 - 创建 approval 前必须按当前 request identity 校验是否满足 `required_role`
 - 写工具真正执行前必须再次按当前 request identity 校验是否满足 `required_role`
-- 权限判断以 DBAAS 控制面返回为准，项目侧也应做基础校验
+- DBAAS HTTP 请求统一身份注入规则见 `DESIGN.md` 的核心原则
+- 权限判断最终以 DBAAS 控制面返回为准，项目侧也应做基础校验
 - `user_id`、`role` 不能作为 AI tool 参数暴露给模型填写
 - 写工具必须从 request/session identity 获取当前身份
 - `SessionMeta.role/user` 是创建 Session 时的身份快照，用于展示、审计和选择角色扩展系统提示词；写操作实时权限判断仍以当前 request identity、工具校验和 DBAAS 控制面为准
-- DBAAS 写接口调用时必须携带当前身份，由 DBAAS 再次校验目标资源是否允许操作
+- 所有 DBAAS HTTP 请求都必须由后端携带当前身份，由 DBAAS 再次校验目标资源或数据是否允许访问
 - 所有写操作必须审批
 
 ### 12.1 Session 身份不可变

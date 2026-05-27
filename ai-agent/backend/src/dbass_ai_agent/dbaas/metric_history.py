@@ -10,10 +10,10 @@ import httpx
 from dbass_ai_agent.config import APP_ROOT
 from dbass_ai_agent.identity.models import Identity
 
+from .auth import dbaas_identity_headers
 from .config import DbaasConfig
 from .metric_catalog import get_metric_catalog_entry
 from .metric_models import MetricSnapshotPaths
-from .metric_sync import _identity_headers
 from .metric_workspace import MetricWorkspace, MetricWorkspaceError
 from .sync import delete_if_exists, isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import replace_file_atomic, write_json_temp
@@ -83,7 +83,7 @@ def _refresh_history(
     params = {"metric_key": metric_key, "start_ts": start_ts, "end_ts": end_ts}
     try:
         with httpx.Client(timeout=config.request_timeout_seconds, trust_env=False) as client:
-            response = client.get(url, params=params, headers=_identity_headers(identity))
+            response = client.get(url, params=params, headers=dbaas_identity_headers(identity))
     except httpx.HTTPError as exc:
         logger.exception("dbaas history metric request failed metric_key=%s unit_name=%s", metric_key, unit_name)
         return _error(metric_key, "dbaas_request_failed", f"请求 DBAAS 历史监控接口失败：{exc}")

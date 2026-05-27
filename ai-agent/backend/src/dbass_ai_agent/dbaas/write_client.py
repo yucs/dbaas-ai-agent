@@ -6,6 +6,7 @@ import httpx
 
 from dbass_ai_agent.identity.models import Identity
 
+from .auth import DbaasAuthError, dbaas_identity_headers
 from .config import DbaasConfig
 
 
@@ -247,9 +248,14 @@ class DbaasWriteClient:
                 response = client.request(
                     method,
                     f"{self.config.server_base_url}{path}",
-                    headers=_identity_headers(identity),
+                    headers=dbaas_identity_headers(identity),
                     json=json,
                 )
+        except DbaasAuthError as exc:
+            raise DbaasWriteClientError(
+                f"当前用户身份无法生成 DBAAS 请求身份：{exc}",
+                error_type="permission_identity_missing",
+            ) from exc
         except httpx.TimeoutException as exc:
             raise DbaasWriteTimeout(timeout) from exc
         except httpx.HTTPError as exc:
@@ -278,17 +284,6 @@ class DbaasWriteClient:
                 status_code=response.status_code,
             )
         return payload
-
-
-def _identity_headers(identity: Identity) -> dict[str, str]:
-    if identity.role == "admin":
-        return {"Authorization": "Bearer admin"}
-    if not identity.user:
-        raise DbaasWriteClientError(
-            "当前用户身份缺少 DBAAS 用户范围，无法执行 DBAAS 操作。",
-            error_type="permission_identity_missing",
-        )
-    return {"Authorization": f"Bearer user:{identity.user}"}
 
 
 def _validate_precheck_response(

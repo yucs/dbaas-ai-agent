@@ -16,6 +16,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from dbass_ai_agent.config import APP_ROOT, Settings  # noqa: E402
+from dbass_ai_agent.dbaas.auth import dbaas_identity_headers, dbaas_system_headers  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
 from dbass_ai_agent.dbaas.query import query_dbaas_data  # noqa: E402
@@ -53,6 +54,32 @@ class DbaasSchemaTests(unittest.TestCase):
 
 
 class DbaasSyncTests(unittest.TestCase):
+    def test_dbaas_identity_headers_include_actor_for_admin_user_and_system(self) -> None:
+        self.assertEqual(
+            dbaas_identity_headers(Identity(user_id="ops-admin", role="admin", user=None)),
+            {
+                "Authorization": "Bearer admin",
+                "X-DBAAS-Actor-User": "ops-admin",
+                "X-DBAAS-Actor-Role": "admin",
+            },
+        )
+        self.assertEqual(
+            dbaas_identity_headers(Identity(user_id="payment-team", role="user", user="payment-team")),
+            {
+                "Authorization": "Bearer user",
+                "X-DBAAS-Actor-User": "payment-team",
+                "X-DBAAS-Actor-Role": "user",
+            },
+        )
+        self.assertEqual(
+            dbaas_system_headers(),
+            {
+                "Authorization": "Bearer admin",
+                "X-DBAAS-Actor-User": "dbaas-ai-agent",
+                "X-DBAAS-Actor-Role": "system",
+            },
+        )
+
     def test_refresh_admin_services_writes_snapshot_and_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
@@ -174,7 +201,9 @@ class DbaasSyncTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
 
-            def _refresh(user: str, *, timeout_seconds: int | None = None) -> dict:
+            def _refresh(identity: Identity, *, timeout_seconds: int | None = None) -> dict:
+                user = identity.user
+                assert user is not None
                 _write_fresh_user_snapshot(
                     config,
                     user,
@@ -288,7 +317,14 @@ class DbaasPrecheckToolTests(unittest.TestCase):
         self.assertEqual(result["blocking_errors"], [])
         self.assertEqual(fake_client.last_method, "POST")
         self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-resource-update"))
-        self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer admin"})
+        self.assertEqual(
+            fake_client.last_headers,
+            {
+                "Authorization": "Bearer admin",
+                "X-DBAAS-Actor-User": "admin",
+                "X-DBAAS-Actor-Role": "admin",
+            },
+        )
         self.assertEqual(
             fake_client.last_json,
             {
@@ -330,7 +366,14 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         self.assertEqual(result["blocking_errors"][0]["code"], "insufficient_capacity")
         self.assertTrue(fake_client.last_url.endswith("/api/v1/prechecks/service-storage-update"))
-        self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer user:payment-team-prod"})
+        self.assertEqual(
+            fake_client.last_headers,
+            {
+                "Authorization": "Bearer user",
+                "X-DBAAS-Actor-User": "alice",
+                "X-DBAAS-Actor-Role": "user",
+            },
+        )
         self.assertEqual(
             fake_client.last_json,
             {

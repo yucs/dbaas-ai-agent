@@ -112,7 +112,14 @@ class MetricQueryTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["scope"], "user")
             self.assertEqual(result["preview"][0]["unit_name"], "mysql-0")
-            self.assertEqual(fake_client.last_headers, {"Authorization": "Bearer user:payment-team"})
+            self.assertEqual(
+                fake_client.last_headers,
+                {
+                    "Authorization": "Bearer user",
+                    "X-DBAAS-Actor-User": "alice",
+                    "X-DBAAS-Actor-Role": "user",
+                },
+            )
             self.assertEqual(fake_client.last_params, {"metric_key": "container.cpu.use"})
 
     def test_history_404_maps_to_resource_not_found(self) -> None:

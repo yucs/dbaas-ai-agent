@@ -49,7 +49,7 @@ def query_dbaas_data(
         and identity.user
     ):
         DbaasServiceSynchronizer(config).force_refresh_user_services(
-            identity.user,
+            identity,
             timeout_seconds=config.user_snapshot_refresh_wait_seconds,
         )
         visible = _current_services_snapshot(config, identity)

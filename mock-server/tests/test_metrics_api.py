@@ -11,11 +11,19 @@ def create_test_client(task_unit_interval_seconds: float = 0.01) -> TestClient:
 
 
 def admin_headers() -> dict[str, str]:
-    return {"Authorization": "Bearer admin"}
+    return {
+        "Authorization": "Bearer admin",
+        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-Role": "admin",
+    }
 
 
 def user_headers(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer user:{user}"}
+    return {
+        "Authorization": "Bearer user",
+        "X-DBAAS-Actor-User": user,
+        "X-DBAAS-Actor-Role": "user",
+    }
 
 
 def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None:

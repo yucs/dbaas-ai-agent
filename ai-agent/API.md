@@ -92,15 +92,32 @@ DeepAgent 原生支持：
 - `user`
   - 仅在普通用户场景下使用
 
-对应到 `mock-server`：
+对应到 DBAAS 或当前 `mock-server`：
 
 - 管理员
   - 使用 `Authorization: Bearer admin`
   - 可访问全部资源
-  - 可选地按 `user` 过滤服务
 - 普通用户
-  - 使用 `Authorization: Bearer user:<user>`
-  - 第一阶段可简化为 `user = user_id`
+  - 使用 `Authorization: Bearer user`
+  - DBAAS 根据 actor user 判断普通用户可见范围
+
+所有有当前 request/session identity 的 DBAAS HTTP 请求都追加：
+
+```text
+X-DBAAS-Actor-User: {identity.user_id}
+X-DBAAS-Actor-Role: {identity.role}
+```
+
+后台系统任务使用：
+
+```text
+X-DBAAS-Actor-User: dbaas-ai-agent
+X-DBAAS-Actor-Role: system
+```
+
+所有 DBAAS HTTP 请求都由后端根据当前 request/session identity 统一注入上述身份。
+前端请求体、AI tool 参数和模型输出不得传入 `user_id`、`role` 或 `user`
+来影响 DBAAS 调用身份。
 
 因此在当前实现中：
 

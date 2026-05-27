@@ -163,13 +163,17 @@ data/runtime/dbaas_workspace/users/{safe_user}/services.meta.json
 普通用户刷新应使用当前用户身份调用 DBAAS：
 
 ```text
-Authorization: Bearer user:{identity.user}
+Authorization: Bearer user
+X-DBAAS-Actor-User: {identity.user_id}
+X-DBAAS-Actor-Role: user
 ```
 
-管理员刷新使用：
+管理员或后台系统刷新使用：
 
 ```text
 Authorization: Bearer admin
+X-DBAAS-Actor-User: {identity.user_id 或 dbaas-ai-agent}
+X-DBAAS-Actor-Role: {admin 或 system}
 ```
 
 admin 和普通用户应复用同一套 services snapshot refresh 状态机。
@@ -638,17 +642,18 @@ tool 必须以后端 session / request identity 为准，
 普通用户可见范围由 DBAAS 按身份返回的数据和 `users/{safe_user}` 快照隔离保证，
 而不是让模型自行拼接权限条件。
 
-ai-agent 调用 DBAAS services 接口时，应将产品侧 identity 转换为 DBAAS Bearer 身份：
+ai-agent 调用 DBAAS services 接口时，应将产品侧 identity 转换为 DBAAS 请求身份：
 
 ```text
 identity.role == "admin" -> Authorization: Bearer admin
-identity.role == "user"  -> Authorization: Bearer user:{identity.user}
+identity.role == "user"  -> Authorization: Bearer user
+所有 request/session 请求 -> X-DBAAS-Actor-User: {identity.user_id}
+所有 request/session 请求 -> X-DBAAS-Actor-Role: {identity.role}
+后台系统任务 -> X-DBAAS-Actor-User: dbaas-ai-agent
+后台系统任务 -> X-DBAAS-Actor-Role: system
 ```
 
-普通用户缺少 `identity.user` 时，tool 应直接返回 `permission_denied`，
-不请求 DBAAS。
-
-mock-server 当前已经支持 `Bearer user:{user}` 并按用户过滤 `/services`。
+mock-server 当前支持 `Bearer user` 搭配 `X-DBAAS-Actor-User` 过滤 `/services`。
 mock-server / 真实 DBAAS 在普通用户身份下返回的 `/services`
 必须直接符合 `services.user.v1`，
 不能返回 user schema 之外的敏感字段。

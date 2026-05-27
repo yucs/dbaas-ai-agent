@@ -9,7 +9,9 @@ from typing import Any
 import httpx
 
 from dbass_ai_agent.config import APP_ROOT
+from dbass_ai_agent.identity.models import Identity
 
+from .auth import dbaas_identity_headers, dbaas_system_headers, dbaas_user_headers
 from .config import DbaasConfig
 from .constants import ADMIN_SCOPE, SERVICES_ENDPOINT, SERVICES_KIND, USER_SCOPE
 from .schema import DbaasSchemaError, schema_path, schema_version, validate_payload
@@ -78,7 +80,13 @@ class DbaasServiceSynchronizer:
         paths = self.workspace.paths(SERVICES_KIND, scope=ADMIN_SCOPE)
         return self._refresh_services(paths)
 
-    def force_refresh_user_services(self, user: str, *, timeout_seconds: int | None = None) -> dict[str, Any]:
+    def force_refresh_user_services(
+        self,
+        user_or_identity: str | Identity,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        user, identity = _user_and_identity(user_or_identity)
         paths = self.workspace.paths(SERVICES_KIND, scope=USER_SCOPE, user=user)
         lock = _user_lock_for(paths.key)
         timeout = self.config.user_snapshot_refresh_wait_seconds if timeout_seconds is None else timeout_seconds
@@ -86,15 +94,16 @@ class DbaasServiceSynchronizer:
         if not acquired:
             return self._snapshot_unavailable_meta(paths, "当前用户服务列表快照正在刷新，等待超时。")
         try:
-            return self._force_refresh_services(paths)
+            return self._force_refresh_services(paths, identity=identity)
         finally:
             lock.release()
 
-    def refresh_user_services(self, user: str) -> dict[str, Any]:
+    def refresh_user_services(self, user_or_identity: str | Identity) -> dict[str, Any]:
+        user, identity = _user_and_identity(user_or_identity)
         paths = self.workspace.paths(SERVICES_KIND, scope=USER_SCOPE, user=user)
         lock = _user_lock_for(paths.key)
         with lock:
-            return self._refresh_services(paths)
+            return self._refresh_services(paths, identity=identity)
 
     def delete_user_services_snapshot(self, user: str) -> None:
         paths = self.workspace.paths(SERVICES_KIND, scope=USER_SCOPE, user=user)
@@ -102,11 +111,16 @@ class DbaasServiceSynchronizer:
         with lock:
             self._delete_files(paths)
 
-    def _force_refresh_services(self, paths: DbaasSnapshotPaths) -> dict[str, Any]:
+    def _force_refresh_services(
+        self,
+        paths: DbaasSnapshotPaths,
+        *,
+        identity: Identity | None = None,
+    ) -> dict[str, Any]:
         current = read_meta(paths.meta_path)
         has_fresh = self._is_snapshot_fresh(paths, current)
         try:
-            return self._refresh_services(paths)
+            return self._refresh_services(paths, identity=identity)
         except Exception as exc:  # noqa: BLE001
             logger.exception("dbaas services refresh failed scope=%s user=%s", paths.scope, paths.user)
             message = str(exc)
@@ -115,8 +129,13 @@ class DbaasServiceSynchronizer:
             delete_if_exists(paths.data_path)
             return self._write_unavailable_meta(paths, message)
 
-    def _refresh_services(self, paths: DbaasSnapshotPaths) -> dict[str, Any]:
-        payload = self._fetch_services(paths)
+    def _refresh_services(
+        self,
+        paths: DbaasSnapshotPaths,
+        *,
+        identity: Identity | None = None,
+    ) -> dict[str, Any]:
+        payload = self._fetch_services(paths, identity=identity)
         try:
             validate_payload(SERVICES_KIND, payload, app_root=self.app_root, scope=paths.scope)
         except DbaasSchemaError:
@@ -167,10 +186,10 @@ class DbaasServiceSynchronizer:
         )
         return meta
 
-    def _fetch_services(self, paths: DbaasSnapshotPaths) -> Any:
+    def _fetch_services(self, paths: DbaasSnapshotPaths, *, identity: Identity | None = None) -> Any:
         url = f"{self.config.server_base_url}{SERVICES_ENDPOINT}"
         with httpx.Client(timeout=self.config.request_timeout_seconds, trust_env=False) as client:
-            response = client.get(url, headers=_identity_headers(paths))
+            response = client.get(url, headers=_headers_for_paths(paths, identity=identity))
             response.raise_for_status()
             return response.json()
 
@@ -244,12 +263,22 @@ class DbaasServiceSynchronizer:
             raise
 
 
-def _identity_headers(paths: DbaasSnapshotPaths) -> dict[str, str]:
+def _headers_for_paths(paths: DbaasSnapshotPaths, *, identity: Identity | None = None) -> dict[str, str]:
+    if identity is not None:
+        return dbaas_identity_headers(identity)
     if paths.scope == ADMIN_SCOPE:
-        return {"Authorization": "Bearer admin"}
+        return dbaas_system_headers()
     if not paths.user:
         raise ValueError("ordinary user services refresh requires user identity")
-    return {"Authorization": f"Bearer user:{paths.user}"}
+    return dbaas_user_headers(paths.user)
+
+
+def _user_and_identity(user_or_identity: str | Identity) -> tuple[str, Identity | None]:
+    if isinstance(user_or_identity, Identity):
+        if not user_or_identity.user:
+            raise ValueError("ordinary user services refresh requires user identity")
+        return user_or_identity.user, user_or_identity
+    return user_or_identity, None
 
 
 def _user_lock_for(key: str) -> threading.Lock:

@@ -16,6 +16,8 @@ class CurrentUser:
 
     role: str
     user: str | None = None
+    actor_user: str | None = None
+    actor_role: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -24,7 +26,11 @@ class CurrentUser:
         return self.role == "admin"
 
 
-def get_current_user(authorization: str | None = Header(default=None)) -> CurrentUser:
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    actor_user: str | None = Header(default=None, alias="X-DBAAS-Actor-User"),
+    actor_role: str | None = Header(default=None, alias="X-DBAAS-Actor-Role"),
+) -> CurrentUser:
     """从 Bearer token 解析当前用户。"""
 
     if authorization is None:
@@ -36,12 +42,37 @@ def get_current_user(authorization: str | None = Header(default=None)) -> Curren
 
     token = token.strip()
     if token == "admin":
-        return CurrentUser(role="admin")
+        actor_user_value, actor_role_value = _require_actor(actor_user, actor_role)
+        if actor_role_value not in {"admin", "system"}:
+            _raise_unauthorized("invalid actor role for admin token")
+        return CurrentUser(
+            role="admin",
+            actor_user=actor_user_value,
+            actor_role=actor_role_value,
+        )
+
+    if token == "user":
+        actor_user_value, actor_role_value = _require_actor(actor_user, actor_role)
+        if actor_role_value != "user":
+            _raise_unauthorized("invalid actor role for user token")
+        return CurrentUser(
+            role="user",
+            user=actor_user_value,
+            actor_user=actor_user_value,
+            actor_role=actor_role_value,
+        )
 
     if token.startswith("user:"):
         user = token.removeprefix("user:").strip()
         if user:
-            return CurrentUser(role="user", user=user)
+            actor_user_value = actor_user.strip() if actor_user else user
+            actor_role_value = actor_role.strip().lower() if actor_role else "user"
+            return CurrentUser(
+                role="user",
+                user=user,
+                actor_user=actor_user_value,
+                actor_role=actor_role_value,
+            )
 
     _raise_unauthorized("invalid bearer token")
 
@@ -127,6 +158,18 @@ def ensure_user_access(current_user: CurrentUser, user: str) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"user '{current_user.user}' cannot access user '{user}'",
     )
+
+
+def _require_actor(actor_user: str | None, actor_role: str | None) -> tuple[str, str]:
+    """校验并返回 DBAAS 调用发起者。"""
+
+    actor_user_value = actor_user.strip() if actor_user else ""
+    actor_role_value = actor_role.strip().lower() if actor_role else ""
+    if not actor_user_value:
+        _raise_unauthorized("missing X-DBAAS-Actor-User header")
+    if not actor_role_value:
+        _raise_unauthorized("missing X-DBAAS-Actor-Role header")
+    return actor_user_value, actor_role_value
 
 
 def _raise_unauthorized(detail: str) -> None:

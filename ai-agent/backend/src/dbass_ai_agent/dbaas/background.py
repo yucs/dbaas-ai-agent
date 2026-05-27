@@ -25,7 +25,7 @@ class DbaasBackgroundSync:
         self._admin_task: asyncio.Task[None] | None = None
         self._user_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._leases: dict[str, datetime] = {}
+        self._leases: dict[str, tuple[Identity, datetime]] = {}
         self._leases_guard = threading.Lock()
 
     def start(self) -> None:
@@ -51,11 +51,11 @@ class DbaasBackgroundSync:
             return
         user = identity.user
         with self._leases_guard:
-            self._leases[user] = _utcnow()
+            self._leases[user] = (identity, _utcnow())
         loop = self._loop
         if loop is None or not loop.is_running():
             return
-        loop.call_soon_threadsafe(lambda: asyncio.create_task(self._prewarm_user(user)))
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(self._prewarm_user(identity)))
 
     async def _run_admin(self) -> None:
         logger.info("dbaas background sync started interval_seconds=%s", self.config.sync_interval_seconds)
@@ -77,47 +77,47 @@ class DbaasBackgroundSync:
         try:
             while True:
                 await asyncio.sleep(self.config.sync_interval_seconds)
-                active_users, expired_users = self._active_and_expired_users()
+                active_identities, expired_users = self._active_and_expired_users()
                 for user in expired_users:
                     try:
                         await asyncio.to_thread(self.synchronizer.delete_user_services_snapshot, user)
                     except Exception:
                         logger.exception("dbaas user services snapshot delete failed user=%s", user)
-                for user in active_users:
+                for identity in active_identities:
                     try:
                         await asyncio.to_thread(
                             self.synchronizer.force_refresh_user_services,
-                            user,
+                            identity,
                             timeout_seconds=0,
                         )
                     except Exception:
-                        logger.exception("dbaas user services sync failed user=%s", user)
+                        logger.exception("dbaas user services sync failed user=%s", identity.user)
         finally:
             logger.info("dbaas user services sync stopped")
 
-    async def _prewarm_user(self, user: str) -> None:
+    async def _prewarm_user(self, identity: Identity) -> None:
         try:
             await asyncio.to_thread(
                 self.synchronizer.force_refresh_user_services,
-                user,
+                identity,
                 timeout_seconds=self.config.user_snapshot_refresh_wait_seconds,
             )
         except Exception:
-            logger.exception("dbaas user services prewarm failed user=%s", user)
+            logger.exception("dbaas user services prewarm failed user=%s", identity.user)
 
-    def _active_and_expired_users(self) -> tuple[list[str], list[str]]:
+    def _active_and_expired_users(self) -> tuple[list[Identity], list[str]]:
         now = _utcnow()
-        active_users: list[str] = []
+        active_identities: list[Identity] = []
         expired_users: list[str] = []
         with self._leases_guard:
-            for user, renewed_at in list(self._leases.items()):
+            for user, (identity, renewed_at) in list(self._leases.items()):
                 idle_seconds = (now - renewed_at).total_seconds()
                 if idle_seconds > self.config.user_active_idle_timeout_seconds:
                     expired_users.append(user)
                     self._leases.pop(user, None)
                 else:
-                    active_users.append(user)
-        return active_users, expired_users
+                    active_identities.append(identity)
+        return active_identities, expired_users
 
 
 def _utcnow() -> datetime:

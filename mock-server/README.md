@@ -45,7 +45,8 @@
 - `GET /healthz` 保持免鉴权
 - 其他业务接口都需要 `Authorization: Bearer <token>`
 - `Bearer admin` 表示管理员，可访问全部接口和全部资源
-- `Bearer user:<user>` 表示普通用户，只能访问自己 user 下的服务和对应任务
+- `Bearer user` 表示普通用户，只能访问 `X-DBAAS-Actor-User` 对应用户下的服务和对应任务
+- 所有业务接口都需要 `X-DBAAS-Actor-User` 和 `X-DBAAS-Actor-Role`
 - `GET /users` 和 `GET /users/{user}` 中的 `user` 直接等于服务组 `user`
 - 管理员可查看全部用户；普通用户只能查看自己
 - 普通用户无权访问 `sites`、`clusters`、`hosts` 相关平台资源接口
@@ -58,21 +59,27 @@
 
 ```bash
 curl http://127.0.0.1:8000/services/mysql-xf2 \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 普通用户查询自己的服务：
 
 ```bash
 curl http://127.0.0.1:8000/services \
-  -H 'Authorization: Bearer user:payment-team-prod'
+  -H 'Authorization: Bearer user' \
+  -H 'X-DBAAS-Actor-User: payment-team-prod' \
+  -H 'X-DBAAS-Actor-Role: user'
 ```
 
 普通用户访问平台资源会被拒绝：
 
 ```bash
 curl http://127.0.0.1:8000/hosts \
-  -H 'Authorization: Bearer user:payment-team-prod'
+  -H 'Authorization: Bearer user' \
+  -H 'X-DBAAS-Actor-User: payment-team-prod' \
+  -H 'X-DBAAS-Actor-Role: user'
 ```
 
 示例返回：
@@ -167,56 +174,72 @@ curl http://127.0.0.1:8000/healthz
 
 ```bash
 curl http://127.0.0.1:8000/services/mysql-xf2 \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 查询站点：
 
 ```bash
 curl http://127.0.0.1:8000/sites \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 查询主机：
 
 ```bash
 curl http://127.0.0.1:8000/hosts/host-01-01 \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 查询全部服务组：
 
 ```bash
 curl http://127.0.0.1:8000/services \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 查询全部用户：
 
 ```bash
 curl http://127.0.0.1:8000/users \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 查询单个用户：
 
 ```bash
 curl http://127.0.0.1:8000/users/payment-team-prod \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 按 user 查询服务组：
 
 ```bash
 curl 'http://127.0.0.1:8000/services?user=payment-team-prod' \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 普通用户查询自己的服务组：
 
 ```bash
 curl http://127.0.0.1:8000/services \
-  -H 'Authorization: Bearer user:payment-team-prod'
+  -H 'Authorization: Bearer user' \
+  -H 'X-DBAAS-Actor-User: payment-team-prod' \
+  -H 'X-DBAAS-Actor-Role: user'
 ```
 
 资源规格预检：
@@ -224,6 +247,8 @@ curl http://127.0.0.1:8000/services \
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
   -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "service_name": "mysql-xf2",
@@ -238,6 +263,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-storage-update \
   -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "service_name": "mysql-xf2",
@@ -260,6 +287,8 @@ precheck 联调触发 `blocking_errors` 的固定阈值：
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
   -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -274,6 +303,8 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
   -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -290,6 +321,8 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
 ```bash
 curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
   -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
     "childServiceType": "mysql",
@@ -303,35 +336,45 @@ curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
 
 ```bash
 curl http://127.0.0.1:8000/tasks/task-service-image-upgrade-mysql-xf2-mysql-a3f9c2 \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 管理员查询全量最新监控：
 
 ```bash
 curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 普通用户查询自己服务的最新监控：
 
 ```bash
 curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.mem.usagePercent&service_name=mysql-xf2' \
-  -H 'Authorization: Bearer user:payment-platform-team'
+  -H 'Authorization: Bearer user' \
+  -H 'X-DBAAS-Actor-User: payment-platform-team' \
+  -H 'X-DBAAS-Actor-Role: user'
 ```
 
 普通用户查询自己全部服务的最新监控：
 
 ```bash
 curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
-  -H 'Authorization: Bearer user:payment-platform-team'
+  -H 'Authorization: Bearer user' \
+  -H 'X-DBAAS-Actor-User: payment-platform-team' \
+  -H 'X-DBAAS-Actor-Role: user'
 ```
 
 查询真实单元历史监控：
 
 ```bash
 curl 'http://127.0.0.1:8000/units/mysql-primary-01/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200' \
-  -H 'Authorization: Bearer admin'
+  -H 'Authorization: Bearer admin' \
+  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-Role: admin'
 ```
 
 ## 可选启动参数

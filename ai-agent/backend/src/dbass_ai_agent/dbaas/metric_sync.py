@@ -10,6 +10,7 @@ import httpx
 from dbass_ai_agent.config import APP_ROOT
 from dbass_ai_agent.identity.models import Identity
 
+from .auth import dbaas_identity_headers
 from .config import DbaasConfig
 from .metric_catalog import get_metric_catalog_entry
 from .metric_models import MetricSnapshotPaths
@@ -64,7 +65,7 @@ def _refresh_latest(
     params = {"metric_key": metric_key}
     try:
         with httpx.Client(timeout=config.request_timeout_seconds, trust_env=False) as client:
-            response = client.get(url, params=params, headers=_identity_headers(identity))
+            response = client.get(url, params=params, headers=dbaas_identity_headers(identity))
     except httpx.HTTPError as exc:
         logger.exception("dbaas latest metric request failed metric_key=%s", metric_key)
         return _error(metric_key, "dbaas_request_failed", f"请求 DBAAS 监控接口失败：{exc}")
@@ -155,12 +156,6 @@ def _lock_for(key: str) -> threading.Lock:
             lock = threading.Lock()
             _latest_locks[key] = lock
         return lock
-
-
-def _identity_headers(identity: Identity) -> dict[str, str]:
-    if identity.role == "admin":
-        return {"Authorization": "Bearer admin"}
-    return {"Authorization": f"Bearer user:{identity.user}"}
 
 
 def _error(metric_key: str, error_type: str, message: str) -> dict[str, Any]:
