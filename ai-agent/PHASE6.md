@@ -1,4 +1,12 @@
-# DBAAS 智能助手第六阶段设计讨论
+# DBAAS 智能助手第六阶段当前状态与监控查询实现
+
+## 0. 当前状态
+
+- 状态：已实现第一版
+- 当前代码状态：metric catalog、latest/history 快照、受控 jq 查询、当前时间工具和 metric cleanup 后台任务已落地
+- 本文档作用：说明 DBAAS 单元监控查询的工具链、快照缓存、权限边界和历史查询规则
+- 仍有效内容：模型先查 catalog 再生成 jq，latest/history 都按当前身份快照隔离，history 必须指定真实单元和时间范围
+- 后续关注：公共 jq runner、catalog JSON Schema、跨进程 single-flight、本地索引/分片和真实 DBAAS endpoint 兼容层仍可后续推进
 
 ## 1. 当前阶段目标
 
@@ -17,7 +25,7 @@
 
 ## 2. 核心结论
 
-单元监控数据建议以监控项为维度查询。
+单元监控数据按监控项维度查询。
 
 例如用户问：
 
@@ -37,8 +45,34 @@ container.mem.usagePercent
 
 监控项 catalog 是生成 jq 的依据，
 不应把完整 catalog 写入 system prompt 或 tool 描述。
-后续应由专门工具按关键词、服务类型或监控项 key 搜索 catalog，
+当前已由专门工具按关键词、服务类型或监控项 key 搜索 catalog，
 只把相关监控项元数据返回给大模型。
+
+## 2.1 当前实现状态
+
+截至当前主干，Phase6 第一版已经从设计推进到实现状态。
+
+已经落地的主路径包括：
+
+- `config/dbaas_metric_catalog.json` 静态 catalog
+- `metric_catalog.py` 懒加载、校验、缓存和搜索 catalog
+- `metric_workspace.py` 按身份生成 latest/history 快照路径
+- `metric_sync.py` 按 `metric_key` 刷新 latest 监控快照
+- `metric_history.py` 按真实单元和时间范围下载 history 监控快照
+- `metric_query.py` 对 latest/history 快照执行受控 jq 查询
+- `metric_cleanup.py` 后台清理过期、坏 meta 和孤儿 metric 快照
+- `time_tools.py` 提供相对时间换算所需的当前时间工具
+- `metric_tools.py` 注册 Phase6 的 catalog、latest、history 和 time tools
+- `build_dbaas_tools(...)` 已组合 services、metric、precheck 和写操作工具
+- FastAPI startup/shutdown 已启动和停止 metric cleanup 后台任务
+- `config/config.toml` 已包含 metric TTL、cleanup interval 和刷新锁超时配置
+
+当前实现仍保留的优化边界：
+
+- catalog 目前通过 `lru_cache` 在首次查询时懒加载，不在 FastAPI startup 主动加载
+- latest 刷新使用单进程内 per-snapshot lock，不提供跨进程 single-flight
+- services 和 metric 的 jq runner 仍分别实现，尚未抽取公共 `dbaas/jq.py`
+- catalog 暂未维护独立 JSON Schema
 
 ## 3. 代码目录结构
 
@@ -46,7 +80,7 @@ Phase6 第一版不重构现有 `query.py` 的 services 查询逻辑。
 监控查询使用独立 metric 查询链路，
 降低对 Phase5 已有服务查询链路的影响。
 
-建议新增：
+当前已经新增：
 
 ```text
 backend/src/dbass_ai_agent/dbaas/
@@ -62,7 +96,7 @@ backend/src/dbass_ai_agent/dbaas/
   tools.py              # 保留现有 services tool 注册
 ```
 
-其中 `metric_query.py` 第一版可以独立实现 jq 处理，
+其中 `metric_query.py` 当前独立实现 jq 处理，
 并被 latest metric 查询和 history metric 查询复用。
 后续如果 services 和 metric 的 jq 处理稳定一致，
 再考虑抽取公共 `dbaas/jq.py`。
@@ -135,17 +169,17 @@ metric_tools.py
 tools.py
   - 保留现有 services 查询相关 tool 注册
   - 保持 Phase5 services tool 入口稳定
-  - build_dbaas_tools(settings) 可以组合 services tools 和 metric_tools.py 返回的工具列表
+  - build_dbaas_tools(settings) 已组合 services tools 和 metric_tools.py 返回的工具列表
 ```
 
 后端启动和关闭接入：
 
-- 在 FastAPI lifespan/startup 中加载 metric catalog
-- 在 FastAPI lifespan/startup 中启动 metric cleanup background task
+- 当前 `metric_catalog.py` 使用 `lru_cache` 在首次查询时懒加载 catalog，并在加载时校验 JSON 格式、必填字段、`metric_key` 字符集、`value_type` 和 enum 字段
+- 在 FastAPI startup 中启动 metric cleanup background task
 - 在 shutdown 中取消 cleanup task，并等待其退出
 - 不在 route handler 或 tool 调用时临时启动 cleanup
 
-Phase6 需要在 `config/config.toml` 的 `[dbaas_workspace]` 下新增 metric 配置：
+Phase6 已经在 `config/config.toml` 的 `[dbaas_workspace]` 下新增 metric 配置：
 
 ```toml
 [dbaas_workspace]
@@ -159,7 +193,7 @@ metric_snapshot_cleanup_interval_seconds = 600
 metric_refresh_lock_timeout_seconds = 10
 ```
 
-metric query 第一版复用 services 已有 jq 配置：
+metric query 当前复用 services 已有 jq 配置：
 
 - `jq_timeout_seconds`
 - `jq_max_preview_items`
@@ -167,21 +201,21 @@ metric query 第一版复用 services 已有 jq 配置：
 
 暂不新增 metric 专属 jq 配置。
 
-`metric_refresh_lock_timeout_seconds` 第一版作为独立配置项新增。
+`metric_refresh_lock_timeout_seconds` 当前作为独立配置项存在。
 它表示等待同一 snapshot key 刷新锁的最长时间，
 不同于 DBAAS HTTP 请求超时和 jq 执行超时。
 
 Catalog 加载策略：
 
-- 服务启动时加载一次 `config/dbaas_metric_catalog.json`
-- 启动时校验 JSON 格式、必填字段、`metric_key` 字符集、`value_type` 和 enum 字段
-- 加载后放入进程内只读缓存
+- 首次 catalog 搜索或 metric_key 校验时加载 `config/dbaas_metric_catalog.json`
+- 加载时校验 JSON 格式、必填字段、`metric_key` 字符集、`value_type` 和 enum 字段
+- 加载后通过 `lru_cache` 放入进程内缓存
 - `describe_unit_metric_catalog_tool` 查询内存缓存
-- 修改 catalog 后重启服务生效
+- 修改 catalog 后重启服务生效；测试中可通过 `clear_metric_catalog_cache()` 清理缓存
 
 ## 4. Catalog 存放位置
 
-监控项 catalog 建议作为静态业务配置文件维护：
+监控项 catalog 当前作为静态业务配置文件维护：
 
 ```text
 config/dbaas_metric_catalog.json
@@ -223,7 +257,7 @@ instance.mysql.version
 - `instance.redis.*`
   - Redis 实例级监控项
 
-后续查询 tool 应使用唯一 `metric_key`，
+metric 查询 tool 使用唯一 `metric_key`，
 不要只使用 `replicationStatus` 这种可能在不同服务类型中重复的短名称。
 
 `metric_key` 只能包含以下字符：
@@ -238,10 +272,10 @@ instance.mysql.version
 
 ## 6. Catalog 字段
 
-第一版 catalog 条目应尽量精简，
+当前 catalog 条目保持精简，
 只保留模型定位监控项和生成 jq 所需的信息。
 
-必填字段建议为：
+当前必填字段为：
 
 ```json
 {
@@ -280,7 +314,7 @@ instance.mysql.version
 - `abnormal_values`
   - `value_type=enum` 时表示异常状态的枚举值
 
-第一版暂不在每个 catalog 条目中维护：
+当前暂不在每个 catalog 条目中维护：
 
 - `scope`
   - 可从 `metric_key` 前缀或 `service_types` 推断
@@ -293,14 +327,14 @@ instance.mysql.version
 - `supports_history`
   - Phase6 第一版默认 catalog 条目可作为 history 查询的元数据依据
 
-也就是说，第一版不在 catalog 条目中单独维护 `supports_latest` 或 `supports_history`，
+也就是说，当前不在 catalog 条目中单独维护 `supports_latest` 或 `supports_history`，
 避免模型误以为某个指标只能用于其中一种查询。
 
 ## 7. Value Type
 
 监控值 `value` 不应假设全是数字。
 
-第一版建议支持：
+当前支持：
 
 ```text
 number
@@ -321,7 +355,7 @@ boolean
 ## 8. 监控数据记录字段
 
 按某个监控项查询到的单条监控数据，
-第一版可以保持扁平结构：
+当前保持扁平结构：
 
 ```json
 {
@@ -539,14 +573,13 @@ Catalog：
 
 ## 12. 大模型使用流程
 
-建议后续新增 catalog 查询工具，
-例如：
+当前已经新增 catalog 查询工具：
 
 ```text
 describe_unit_metric_catalog_tool(query, service_type, limit)
 ```
 
-第一版参数建议：
+当前工具签名：
 
 ```python
 describe_unit_metric_catalog_tool(
@@ -580,7 +613,7 @@ describe_unit_metric_catalog_tool(
 - `abnormal_values`
 
 英文匹配应大小写不敏感。
-实现时可以对 `query`、`metric_key`、`display_name`、`aliases`、`service_type` 等使用 `casefold()` 归一化后匹配，
+当前对 `query`、`metric_key`、`display_name`、`aliases`、`service_type` 等使用 `casefold()` 归一化后匹配，
 但返回结果保留 catalog 中的原始写法。
 
 `aliases` 是重要匹配来源，
@@ -610,7 +643,7 @@ describe_unit_metric_catalog_tool(
 }
 ```
 
-Catalog 搜索第一版可以使用简单打分规则，
+Catalog 搜索当前使用简单打分规则，
 不需要 embedding。
 
 打分规则是 tool 内部用于搜索排序的实现细节，
@@ -618,7 +651,7 @@ Catalog 搜索第一版可以使用简单打分规则，
 把更可能符合用户意图的监控项排在前面。
 分数不需要返回给大模型。
 
-建议匹配优先级：
+当前匹配优先级：
 
 1. `metric_key` 精确匹配
 2. `display_name` 精确匹配
@@ -649,7 +682,7 @@ Catalog 搜索第一版可以使用简单打分规则，
 4. 模型选择唯一监控项
 5. 如果存在多个候选且上下文无法确定，模型应向用户澄清服务类型或监控项
 6. 模型根据 catalog 元数据生成 jq
-7. 模型调用后续监控数据查询工具执行 jq
+7. 模型调用对应监控数据查询工具执行 jq
 
 示例：
 
@@ -694,7 +727,7 @@ instance.redis.replicationStatus
 
 ## 13. 监控数据快照与刷新锁
 
-监控数据查询 tool 可以按当前身份和 `metric_key` 将最新监控值下载到本地短 TTL 快照。
+监控数据查询 tool 会按当前身份和 `metric_key` 将最新监控值下载到本地短 TTL 快照。
 
 示例文件：
 
@@ -727,7 +760,7 @@ runtime/dbaas_workspace/users/payment-platform-team/metrics_latest/container.cpu
 runtime/dbaas_workspace/users/payment-platform-team/metrics_latest/container.cpu.use.meta.json
 ```
 
-第一版监控数据查询工具签名建议为：
+当前 latest 监控数据查询工具签名为：
 
 ```python
 query_unit_latest_metric_data_tool(
@@ -746,14 +779,14 @@ query_unit_latest_metric_data_tool(
 - `max_preview_items`
   - 可选，用于覆盖默认预览条数
 
-第一版不额外传 `service_type`。
+当前不额外传 `service_type`。
 如果需要按服务类型过滤，
 应在 `jq_filter` 中使用监控数据记录里的 `service_type`。
-第一版也不额外传 `service_name`。
+当前也不额外传 `service_name`。
 如果用户指定服务或单元，
 仍通过 `jq_filter` 在当前身份可见的 latest 快照中筛选。
 
-DBAAS 最新监控接口第一版可以约定为：
+当前 latest 刷新调用的 DBAAS 监控接口为：
 
 ```text
 GET /metrics/latest?metric_key=container.cpu.use
@@ -777,7 +810,7 @@ tool 调用该接口时必须携带当前用户身份。
 
 `value` 的具体类型由 catalog 中的 `value_type` 决定。
 
-Metric meta 建议字段。
+Metric meta 当前字段。
 
 管理员 meta 示例：
 
@@ -823,7 +856,7 @@ Metric meta 建议字段。
 }
 ```
 
-Metric query tool 返回结构第一版对齐 services 查询。
+Metric query tool 返回结构当前对齐 services 查询。
 tool 不单独保存每次 jq 查询结果，
 只保存当前身份可见的原始 latest 快照和 meta。
 
@@ -912,7 +945,7 @@ tool 返回中的 `preview` 可以是数字：
 }
 ```
 
-建议第一版统一使用以下 `error_type`：
+当前统一使用以下 `error_type`：
 
 - `metric_not_found`
   - catalog 中不存在指定 `metric_key`
@@ -931,7 +964,7 @@ tool 返回中的 `preview` 可以是数字：
 - `dbaas_request_failed`
   - 请求 DBAAS 监控接口失败或返回非 2xx
 
-错误映射建议：
+当前错误映射：
 
 - DBAAS 返回 401/403
   - `permission_denied`
@@ -974,7 +1007,7 @@ container.mem.usedBytes 和 instance.mysql.replicationStatus 可以同时刷新�
 因此不同监控项、不同用户 scope 不会互相锁住。
 锁的作用只是防止同一个 snapshot key 在同一进程内被并发重复下载。
 
-第一版只保证单进程内同一 snapshot key 的刷新 single-flight。
+当前只保证单进程内同一 snapshot key 的刷新 single-flight。
 多进程或多实例部署下可能重复刷新，
 但依赖临时文件和 `os.replace` 保证不会读到半截 JSON。
 如果后续需要跨进程 single-flight，
@@ -984,7 +1017,7 @@ container.mem.usedBytes 和 instance.mysql.replicationStatus 可以同时刷新�
 
 监控快照过期后的刷新失败策略沿用 Phase5 services 快照逻辑。
 
-建议规则：
+当前规则：
 
 - metric 快照 fresh 时，直接执行 jq
 - metric 快照缺失或过期时，tool 触发刷新
@@ -1014,11 +1047,11 @@ container.mem.usedBytes 和 instance.mysql.replicationStatus 可以同时刷新�
 ## 15. 大规模 jq 约束
 
 单个监控项可能返回 10w 个单元。
-第一版 metric query 的 jq 输出预算复用 services 现有配置。
+当前 metric query 的 jq 输出预算复用 services 现有配置。
 这不是模型最终回答长度限制，
 而是限制单次 jq 原始输出中可能进入 tool 返回、进而进入大模型上下文的数据量。
 
-metric query 第一版复用现有 services jq 配置：
+metric query 当前复用现有 services jq 配置：
 
 - `jq_timeout_seconds`
   - 单次 jq 查询最多运行多久
@@ -1030,7 +1063,7 @@ metric query 第一版复用现有 services jq 配置：
 tool 返回必须包含截断标记，
 让大模型知道当前结果是否只是预览。
 
-建议至少包含：
+当前返回至少包含：
 
 - `truncated`
   - 结果条数超过 `max_preview_items`，只返回部分预览
@@ -1047,7 +1080,7 @@ tool 返回必须包含截断标记，
 如果后续 metric 查询明显比 services 更重，
 再考虑增加 metric 专属 jq 配置。
 
-第一版为了保持实现简单，
+当前为了保持实现简单，
 指定单元、指定服务和条件过滤都仍然通过 jq 扫描当前 `metric_key` 的 latest 快照完成。
 即使单个监控项有 10w 条记录，
 也先不为指定单元或指定服务增加额外接口、本地索引或分片文件。
@@ -1100,7 +1133,7 @@ tool 调用 DBAAS 监控接口时必须携带用户身份，
 不建议通过 services 快照 join 出用户可见 unit 集合。
 原因：
 
-- 第一版监控数据记录只包含 `service_name`、`unit_name`、`service_type`、`value`
+- 当前监控数据记录只包含 `service_name`、`unit_name`、`service_type`、`value`
 - 记录中没有 `user`
 - 基于 services 做 join 会增加查询复杂度
 - 监控查询要求最新状态，和 services 快照 TTL 的组合会让权限判断更复杂
@@ -1163,7 +1196,7 @@ query tool 只负责：
 
 data/meta 必须作为一对文件维护和清理。
 
-建议规则：
+当前 cleanup 规则：
 
 - 扫描 `*.meta.json`，如果 meta 中的 `expires_at` 早于当前时间，删除对应 `.json` 和 `.meta.json`
 - 如果 `.meta.json` 解析失败、字段缺失或 `data_path` 不合法，删除该 `.meta.json`，并尝试删除同名 data 文件
@@ -1181,8 +1214,8 @@ meta: users/payment-platform-team/metrics_latest/container.cpu.use.meta.json
 
 - 后端启动时注册一个独立 metric cleanup background task
 - 一个进程内只启动一个 cleanup loop
-- 第一版可以用单线程或单协程周期性执行
-- 第一版采用最简接入方式：后端启动时创建一个 metric cleanup 单协程任务，周期性 sleep + cleanup；服务关闭时取消该任务
+- 当前采用单协程周期性执行
+- 当前接入方式：后端启动时创建一个 metric cleanup 单协程任务，周期性 sleep + cleanup；服务关闭时取消该任务
 - 按 `metric_snapshot_cleanup_interval_seconds` 间隔扫描 metrics 目录
 - cleanup 不参与 per-snapshot refresh lock
 - query tool 每次仍然自己检查 data/meta 是否存在和 fresh
@@ -1213,7 +1246,7 @@ history 查询边界：
 - 普通用户只能查询自己可见的真实单元
 - ai-agent 不做 unit 归属 join，由 DBAAS 根据当前身份校验权限
 
-第一版工具签名建议：
+当前 history 监控查询工具签名：
 
 ```python
 query_unit_metric_history_tool(
@@ -1254,7 +1287,7 @@ query_unit_metric_history_tool(
 模型不应依赖自身上下文猜测当前时间，
 而应先调用当前时间工具获取准确 `now_ts`。
 
-第一版只需要新增一个通用当前时间工具：
+当前已经新增一个通用当前时间工具：
 
 ```python
 get_current_time_tool() -> dict
@@ -1297,7 +1330,7 @@ get_current_time_tool() -> dict
 因此查询结果也需要落盘成运行时缓存文件，
 再通过 jq 处理。
 
-历史数据结构建议为：
+历史数据当前按点位数组处理，典型结构为：
 
 ```json
 [
@@ -1309,7 +1342,7 @@ get_current_time_tool() -> dict
 `value` 的具体类型同样由 catalog 中的 `value_type` 决定，
 可能是数字、普通字符串、枚举字符串或布尔值。
 
-DBAAS 历史监控接口第一版可以约定为：
+当前 history 刷新调用的 DBAAS 监控接口为：
 
 ```text
 GET /units/{unit_name}/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200
@@ -1329,7 +1362,7 @@ DBAAS 应根据身份判断当前用户是否可访问该真实单元。
 ]
 ```
 
-历史缓存文件名建议直接使用可读 scope key，
+历史缓存文件名当前使用可读 scope key，
 便于调试时从路径看出身份、单元、监控项和时间范围。
 
 路径格式：
@@ -1385,11 +1418,18 @@ max_by(.value)
 历史监控也应使用 jq timeout、preview 和输出字节限制，
 避免大结果进入工具返回和模型上下文。
 
-历史缓存清理可以复用 metric cleanup background task，
+历史缓存清理当前复用 metric cleanup background task，
 扫描 `runtime/dbaas_workspace/admin/metrics_history/` 和 `runtime/dbaas_workspace/users/*/metrics_history/` 并删除过期历史缓存。
 历史缓存过期策略复用 `metric_snapshot_ttl_seconds`。
 
 ## 19. 本阶段暂不决定的内容
 
-Phase6 第一版设计已收敛。
-后续进入实现时，可以根据 mock-server 和真实 DBAAS 接口细节再微调。
+Phase6 第一版实现已落地，当前仍暂不决定或暂不展开的内容包括：
+
+- 是否把 services 与 metric 的 jq runner 抽成公共 `dbaas/jq.py`
+- 是否为 catalog 增加独立 JSON Schema 和 CI 校验
+- 是否为 latest/history 刷新增加跨进程 single-flight
+- 是否为大规模 metric 快照增加本地索引、分片或指定服务/单元查询优化
+- 真实 DBAAS 控制面如果调整 metric endpoint 或响应结构，是否需要额外兼容层
+
+这些内容可以在当前 latest/history 查询链路稳定后再单独进入后续阶段。

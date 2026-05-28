@@ -1,5 +1,13 @@
 # DBAAS 智能助手第八阶段：轻量 Precheck Tool
 
+## 0. 当前状态
+
+- 状态：已实现 v1 工具主路径
+- 当前代码状态：资源规格和存储规格两个 precheck tools 已注册到 DBAAS tool 集合，并通过 DBAAS precheck HTTP 接口获取只读事实
+- 本文档作用：说明写操作前轻量只读 precheck 的边界、工具参数、DBAAS 接口和模型行为规则
+- 仍有效内容：precheck 不调用写工具、不创建 approval、不替代 Phase7 确认卡；用户明确继续执行后才回到 Phase7 写工具链路
+- 后续关注：统一 precheck 平台、前端 precheck 卡片、precheck 持久化和更多操作类型的 precheck 当前不做
+
 ## 1. Phase8 v1 结论
 
 第一版支持两个轻量 precheck tools：
@@ -60,7 +68,7 @@ Tool 名称：
 precheck_service_resource_update_tool
 ```
 
-建议 tool 描述：
+当前 tool 描述要点：
 
 ```text
 只读工具，用于获取服务 CPU/内存资源调整前的预检事实。
@@ -87,7 +95,7 @@ Tool 名称：
 precheck_service_storage_update_tool
 ```
 
-建议 tool 描述：
+当前 tool 描述要点：
 
 ```text
 只读工具，用于获取服务 data/log 卷容量调整前的预检事实。

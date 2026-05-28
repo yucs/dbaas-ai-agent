@@ -1,4 +1,12 @@
-# DBAAS 智能助手第五阶段设计讨论
+# DBAAS 智能助手第五阶段当前状态与服务快照实现
+
+## 0. 当前状态
+
+- 状态：已实现第一版，后续扩展未做
+- 当前代码状态：services 快照、admin/user 身份隔离、schema 校验、后台同步、普通用户 prewarm/lease 和受控 jq 查询工具已落地
+- 本文档作用：说明 DBAAS services 快照机制、身份隔离、schema 和 `query_dbaas_data_tool` 的设计与实现边界
+- 仍有效内容：原始 DBAAS 数据不直接进模型上下文，查询走当前身份快照和 jq，普通用户不能 fallback 到 admin 快照，过期快照不能用于回答
+- 后续关注：hosts、clusters、realtime_status 等 kind 仍是后续扩展；services 与 metric jq 公共抽象可在稳定后再做
 
 ## 1. 当前阶段目标
 
@@ -7,7 +15,7 @@
 本阶段优先解决的问题不是让大模型直接读取完整 DBAAS 数据，
 而是建立一套可复用、可隔离、可验证的数据快照机制。
 
-当前设计目标：
+当前目标：
 
 - 服务列表、主机、集群、实时状态等数据可以落盘到会话或运行沙箱
 - 原始接口数据不直接进入大模型上下文
@@ -17,7 +25,7 @@
 
 ## 2. 当前核心结论
 
-第五阶段当前倾向采用：
+第五阶段当前采用：
 
 - 管理员 services 快照保持后台常驻同步
 - 普通用户 services 快照按用户身份独立保存
@@ -832,12 +840,12 @@ Phase5 第一版只实现 `services`。
 应复用 services 的 workspace 路径计算、schema 选择、refresh 状态机、error meta 和启动临时文件清理能力，
 不另行设计一套快照生命周期。
 
-## 14. 代码组织建议
+## 14. 代码组织
 
-第五阶段建议新增独立 DBAAS 模块目录，
+第五阶段已经新增独立 DBAAS 模块目录，
 避免把同步、快照、tool 和后台任务逻辑塞进 `main.py` 或 `factory.py`。
 
-建议目录：
+当前目录：
 
 ```text
 backend/src/dbass_ai_agent/dbaas/
@@ -856,7 +864,7 @@ config/schemas/
   services.user.v1.schema.json
 ```
 
-职责建议：
+职责划分：
 
 - `dbaas/config.py`
   - DBAAS 配置模型，例如 `base_url`、`workspace_dir`、`sync_interval_seconds`、`ttl_seconds`、普通用户 active lease 超时
@@ -881,7 +889,7 @@ FastAPI 侧负责在应用生命周期中启动和停止 admin 后台同步任�
 
 DeepAgent 侧只负责在现有 tool 注册链路里挂接查询和 schema 工具。
 
-建议实现顺序：
+第一版落地顺序记录：
 
 1. 将 `config/schemas/services.v1.schema.json` 改名为 `services.admin.v1.schema.json`，新增 `services.user.v1.schema.json`
 2. 扩展 workspace 路径能力，支持 `admin/` 和 `users/{safe_user}/`

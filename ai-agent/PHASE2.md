@@ -1,5 +1,13 @@
 # DBAAS 智能助手第二阶段说明
 
+## 0. 当前状态
+
+- 状态：部分完成，部分已被后续阶段覆盖
+- 当前代码状态：`P2A` 真实 DeepAgent runtime、OpenAI-compatible 模型接入和 SQLite checkpoint 已完成；`P2B` Session Store 抽象仍未实现；第二阶段未完成的 SSE、DBAAS tools 和审批闭环已分别在 Phase4、Phase5、Phase7、Phase8 继续落地
+- 本文档作用：记录第二阶段 runtime 升级成果、当时边界，以及哪些内容后来被后续阶段接住
+- 仍有效内容：DeepAgent 作为运行时、`thread_id` checkpoint、产品 Session 与运行时 Thread 分层、模型接入配置
+- 后续关注：如确有需要，再单独推进 Session Store 抽象、SQLite Session Store 或独立 run event stream
+
 ## 1. 文档目的
 
 本文档根据当前仓库的实际代码实现，更新第二阶段内容，重点说明：
@@ -29,12 +37,12 @@
 - 保留第一阶段 Session 文件投影
 - 保持原有前端与 Session API 不被推翻
 
-当前代码更准确的阶段状态是：
+从第二阶段自身范围看，当前代码更准确的阶段状态是：
 
 - `P2A`：已完成
 - `P2B`：未完成
-- `P2C`：未完成
-- `P2D`：未完成
+- `P2C`：第二阶段内未完成；当前主对话流式能力已由 Phase4 的 `/messages/stream` 覆盖
+- `P2D`：第二阶段内未完成；DBAAS tools、审批、任务和 precheck 已在 Phase5、Phase7、Phase8 持续落地
 
 也就是说，第二阶段的主成果已经不再是“设计准备”，而是“真实 runtime 已经接通并运行”。
 
@@ -191,23 +199,21 @@
 
 同时，主应用在返回静态文件时增加了禁止缓存头，减少联调时前端缓存问题。
 
-## 4. 第二阶段当前仍保留的边界
+## 4. 第二阶段边界与当前覆盖关系
 
-虽然 P2A 已完成，但当前代码仍然明确保留了第二阶段边界：
+虽然 P2A 已完成，但第二阶段当时仍然保留了这些边界：
 
-- 还没有接通 `mock-server` 实时查询
-- 还没有接通 `mock-server` 变更操作
-- 还没有接通审批中断恢复闭环
-- SSE 流式返回未在第二阶段完成，已在第四阶段通过消息流接口补齐
-- 还没有引入子 agent
-- 还没有引入长期记忆
+- `mock-server` 实时查询未在第二阶段接通，后续已在 Phase5 services 查询和 Phase6 metric 查询中继续落地
+- `mock-server` 变更操作未在第二阶段接通，后续已在 Phase7 写工具与审批闭环中继续落地
+- 审批中断恢复闭环未在第二阶段接通，后续已在 Phase7 通过 DeepAgent `interrupt_on` 和 approval decision API 继续落地
+- SSE 流式返回未在第二阶段完成，后续已在 Phase4 通过消息流接口补齐
+- 子 agent 仍未作为当前主线引入
+- 长期记忆仍未引入；当前只有运行时上下文压缩，没有独立 facts store
 
-当前系统的真实能力边界应该描述为：
+因此阅读本节时应注意：
 
-- 普通问答：可用
-- DBAAS 概念解释：可用
-- DBAAS 实时数据查询：未启用
-- DBAAS 写操作：未启用
+- 本节描述的是第二阶段交付时的边界
+- 当前主干的真实 DBAAS 查询、写操作、审批和任务能力，以 Phase5、Phase6、Phase7、Phase8 和 [API.md](./API.md) 为准
 
 ## 5. 第二阶段未完成项
 
@@ -256,9 +262,9 @@
 
 ### 5.3 `P2D`：DBAAS tools 与审批闭环
 
-当前还没有进入真正的 DBAAS agent 阶段。
+`P2D` 在第二阶段内没有落地。
 
-尚未落地的内容包括：
+它当时包含的方向包括：
 
 - 对接 `mock-server` 只读查询 tools
 - 对接 `mock-server` 写操作 tools
@@ -266,7 +272,14 @@
 - 审批记录驱动的恢复执行
 - 异步任务跟踪
 
-因此第二阶段当前只能算“runtime 升级完成”，还不能算“DBAAS agent 能力完成”。
+这些能力后来拆分到后续阶段持续推进：
+
+- Phase5：services 快照、schema 和只读 jq 查询工具
+- Phase6：metric catalog、latest/history 监控查询工具
+- Phase7：写工具、审批闭环、operation/task 和任务 SSE
+- Phase8：资源与存储调整前的轻量 precheck tools
+
+因此第二阶段本身只能算“runtime 升级完成”，DBAAS agent 能力以 Phase5 之后的文档为准。
 
 ### 5.4 上下文压缩能力已在后续阶段接入
 
@@ -296,21 +309,21 @@
 未完成：
 
 - Session 主存储切换到 SQLite
-- SSE 流式事件
-- DBAAS tools
-- 审批闭环
+- 第二阶段范围内的 SSE 流式事件；当前已由 Phase4 补齐主路径
+- 第二阶段范围内的 DBAAS tools；当前已由 Phase5、Phase6、Phase7、Phase8 持续落地
+- 第二阶段范围内的审批闭环；当前已由 Phase7 补齐主路径
 
 因此当前最准确的验收结论是：
 
 - 第二阶段核心 runtime 升级目标已完成
-- 后续剩余的是 tools、审批、异步任务和流式链路等后半段能力
+- 第二阶段未完成的流式链路、tools、审批和异步任务已经成为后续阶段主线
 
 ## 7. 当前建议结论
 
 第二阶段文档现在应该明确表达成下面这句话：
 
 - 当前仓库已经完成第二阶段 `P2A`
-- 当前最稳妥的后续推进顺序是先做 `P2B` 或 `P2C`
-- 不建议在还未收敛 Session 存储和流式链路前，就同时把 DBAAS tools、审批、异步任务全部并进
+- `P2B` 仍未实现，后续如果需要数据库化 Session Store，可以单独设计
+- `P2C`、`P2D` 在第二阶段内未完成，但当前主干已经通过 Phase4、Phase5、Phase6、Phase7、Phase8 接上主要能力
 
-换句话说，第二阶段不再是“准备接 DeepAgent”，而是“已经接上真实 DeepAgent，接下来要继续把运行链路做厚”。
+换句话说，第二阶段不再是“准备接 DeepAgent”，而是“已经接上真实 DeepAgent”；后续文档记录的是在这条运行时主线上继续把 DBAAS 能力做厚。

@@ -1,4 +1,12 @@
-# DBAAS 智能助手第七阶段设计讨论
+# DBAAS 智能助手第七阶段当前状态与写操作审批实现
+
+## 0. 当前状态
+
+- 状态：已实现主路径，部分扩展预留
+- 当前代码状态：写工具审批中断/恢复、session-scoped approval API、operation/task 持久化、任务查询、`tasks/events` SSE 和前端审批/任务展示已落地
+- 本文档作用：说明 DBAAS 写操作、审批、operation/task 和异步任务追踪的统一操作模型
+- 仍有效内容：写操作必须走 DeepAgent `interrupt_on` 和人工确认，审批/operation/task append-only 审计，pending approval/running task/session run lock 保护 Session 生命周期
+- 后续关注：生命周期启停工具、高风险策略、二次确认和更复杂审批流仍可作为后续扩展
 
 ## 1. 当前阶段目标
 
