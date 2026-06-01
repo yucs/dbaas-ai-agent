@@ -1,5 +1,6 @@
 """HTTP 接口级 schema 定义。"""
 
+from .backup import BackupRecord
 from .platform import (
     ClusterDetailResponse,
     ClusterSummary,
@@ -50,6 +51,7 @@ from .task import CreateTaskResponse, Task
 from .user import UserDetailResponse, UserSummary
 
 __all__ = [
+    "BackupRecord",
     "BackupStrategySummary",
     "ChildService",
     "ClusterDetailResponse",

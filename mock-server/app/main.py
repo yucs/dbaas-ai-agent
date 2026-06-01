@@ -4,7 +4,15 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from app.api import health_router, metrics_router, platform_router, services_router, tasks_router, users_router
+from app.api import (
+    backups_router,
+    health_router,
+    metrics_router,
+    platform_router,
+    services_router,
+    tasks_router,
+    users_router,
+)
 from app.store import JsonDataStore
 
 
@@ -17,6 +25,7 @@ def create_app(task_unit_interval_seconds: float = 3.0) -> FastAPI:
         data_dir=data_dir,
         task_unit_interval_seconds=task_unit_interval_seconds,
     )
+    app.include_router(backups_router)
     app.include_router(health_router)
     app.include_router(metrics_router)
     app.include_router(platform_router)

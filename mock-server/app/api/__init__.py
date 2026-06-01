@@ -1,5 +1,6 @@
 """HTTP 路由定义。"""
 
+from .backups import router as backups_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 from .platform import router as platform_router
@@ -8,6 +9,7 @@ from .tasks import router as tasks_router
 from .users import router as users_router
 
 __all__ = [
+    "backups_router",
     "health_router",
     "metrics_router",
     "platform_router",

@@ -10,8 +10,9 @@ from langchain_core.tools import tool
 from dbass_ai_agent.config import APP_ROOT, Settings
 from dbass_ai_agent.identity.models import Identity, UserRole
 
+from .backup_tools import build_backup_tools
 from .config import DbaasConfig, dbaas_config_from_settings
-from .constants import SERVICES_KIND
+from .constants import BACKUPS_KIND, SERVICES_KIND
 from .metric_tools import build_metric_tools
 from .precheck_tools import build_precheck_tools
 from .query import query_dbaas_data
@@ -41,6 +42,7 @@ def dbaas_tool_identity(
 def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
     tools = [
         *build_service_tools(settings),
+        *build_backup_tools(settings, _require_identity),
         *build_metric_tools(settings, _require_identity),
         *build_precheck_tools(settings, _require_identity),
         *build_write_tools(settings),
@@ -83,10 +85,10 @@ def build_service_tools(settings: Settings) -> list[Any]:
 
     @tool("describe_dbaas_schema_tool")
     def describe_dbaas_schema_tool(kind: str = SERVICES_KIND) -> dict[str, Any]:
-        """返回 DBAAS services schema 字段说明。
+        """返回 DBAAS schema 字段说明。
 
-        当前仅支持 kind=services。
-        上下文已有可用 services schema 时复用；仅在缺失、不足、字段不确定、jq 字段错误或用户要求时再次调用。
+        当前支持 kind=services 和 kind=backups。
+        用于确认 DBAAS 字段含义、可用字段和 jq 查询路径。
         """
 
         return describe_schema(kind, app_root=APP_ROOT, identity=_require_identity())

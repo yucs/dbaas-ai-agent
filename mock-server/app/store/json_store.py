@@ -66,6 +66,7 @@ class JsonDataStore:
     def __init__(self, data_dir: Path, task_unit_interval_seconds: float = 3.0) -> None:
         self.data_dir = data_dir
         self.task_unit_interval_seconds = task_unit_interval_seconds
+        self._backups: list[dict[str, Any]] = []
         self._services_by_name: dict[str, dict[str, Any]] = {}
         self._sites_by_id: dict[str, dict[str, Any]] = {}
         self._clusters_by_id: dict[str, dict[str, Any]] = {}
@@ -84,6 +85,7 @@ class JsonDataStore:
             self._clusters_by_id = self._load_clusters()
             self._hosts_by_id = self._load_hosts()
             self._services_by_name = self._load_services()
+            self._backups = self._load_backups()
             self._metric_catalog_by_key = self._load_metric_catalog()
             self._validate_relationships()
             self._refresh_platform_aggregates()
@@ -125,6 +127,20 @@ class JsonDataStore:
                 if user is None or service_user == user
             ]
             return [self._public_user_summary(service_user) for service_user in users]
+
+    def list_backups(self, *, owner_user: str | None = None) -> list[dict[str, Any]]:
+        """返回当前仍存在的备份记录，可按所属用户过滤。"""
+
+        with self._lock:
+            items: list[dict[str, Any]] = []
+            for backup in self._backups:
+                if backup.get("deleted") is True:
+                    continue
+                backup_owner = self._backup_owner_user(backup)
+                if owner_user is not None and backup_owner != owner_user:
+                    continue
+                items.append(self._public_backup_record(backup))
+            return items
 
     def precheck_service_resource_update(
         self,
@@ -612,6 +628,51 @@ class JsonDataStore:
             catalog_by_key[metric_key] = deepcopy(item)
         return catalog_by_key
 
+    def _load_backups(self) -> list[dict[str, Any]]:
+        """加载备份 seed 数据。"""
+
+        backups = self._load_array_file(self.data_dir / "backups.json", resource_name="backups")
+        normalized: list[dict[str, Any]] = []
+        required_fields = {
+            "backup_id",
+            "task_id",
+            "service_name",
+            "service_type",
+            "child_service_name",
+            "child_service_type",
+            "unit_name",
+            "backup_type",
+            "backup_path",
+            "size_bytes",
+            "storage_type",
+            "compress_mode",
+            "started_at",
+            "finished_at",
+            "expires_at",
+            "duration_seconds",
+            "task_status",
+            "task_error",
+            "valid_status",
+            "remark",
+        }
+        seen_ids: set[str] = set()
+        for item in backups:
+            if not isinstance(item, dict):
+                raise DataValidationError("backups.json items must be objects")
+            backup_id = item.get("backup_id")
+            if not isinstance(backup_id, str) or not backup_id:
+                raise DataValidationError("each backup item must have a non-empty 'backup_id'")
+            if backup_id in seen_ids:
+                raise DataValidationError(f"duplicate backup_id '{backup_id}' in backups.json")
+            missing = [field for field in required_fields if field not in item]
+            if missing:
+                raise DataValidationError(
+                    f"backup_id '{backup_id}' is missing required fields: {', '.join(sorted(missing))}"
+                )
+            seen_ids.add(backup_id)
+            normalized.append(deepcopy(item))
+        return normalized
+
     def _load_array_file(self, file_path: Path, *, resource_name: str) -> list[Any]:
         """从 JSON 文件中读取数组。"""
 
@@ -680,6 +741,52 @@ class JsonDataStore:
                 unit["storage"] = self._normalize_unit_storage_seed(unit.get("storage"))
 
         return normalized_service
+
+    def _public_backup_record(self, backup: dict[str, Any]) -> dict[str, Any]:
+        """返回对外可见的备份记录。"""
+
+        public_fields = {
+            "backup_id",
+            "task_id",
+            "service_name",
+            "service_type",
+            "child_service_name",
+            "child_service_type",
+            "unit_name",
+            "backup_type",
+            "backup_path",
+            "size_bytes",
+            "storage_type",
+            "compress_mode",
+            "started_at",
+            "finished_at",
+            "expires_at",
+            "duration_seconds",
+            "task_status",
+            "task_error",
+            "valid_status",
+            "remark",
+        }
+        return {
+            key: deepcopy(value)
+            for key, value in backup.items()
+            if key in public_fields
+        }
+
+    def _backup_owner_user(self, backup: dict[str, Any]) -> str | None:
+        """返回备份记录所属用户。"""
+
+        owner_user = backup.get("owner_user")
+        if isinstance(owner_user, str) and owner_user:
+            return owner_user
+        service_name = backup.get("service_name")
+        if not isinstance(service_name, str) or not service_name:
+            return None
+        service = self._services_by_name.get(service_name)
+        if service is None:
+            return None
+        user = service.get("user")
+        return user if isinstance(user, str) and user else None
 
     def _normalize_unit_storage_seed(self, storage: Any) -> dict[str, Any]:
         """规范化 seed 中的 unit 存储结构。"""

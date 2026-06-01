@@ -82,7 +82,11 @@ class DbaasWorkspace:
             return 0
         now = datetime.now(tz=UTC)
         deleted = 0
-        for pattern in (".services.json.*.tmp", ".services.meta.json.*.tmp"):
+        patterns = [
+            f".{file_name}.*.tmp"
+            for file_name in (*DATA_FILE_NAMES.values(), *META_FILE_NAMES.values())
+        ]
+        for pattern in patterns:
             for path in self.root.rglob(pattern):
                 try:
                     modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)

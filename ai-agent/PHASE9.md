@@ -33,7 +33,7 @@ Phase9 第一版实现 DBAAS 备份文件查询能力。
 
 ## 2. 核心结论
 
-备份查询第一版只面向 DBAAS 当前仍保留、当前身份可见的备份文件。
+备份查询第一版只面向 DBAAS 当前仍存在、当前身份可见的备份文件。
 
 `backups.json` 是当前 DBAAS 返回的可见备份集合，不是审计历史。
 
@@ -43,7 +43,8 @@ Phase9 第一版实现 DBAAS 备份文件查询能力。
 - 每次刷新都全量覆盖本地 `backups.json`
 - 不 append
 - 不做增量 merge
-- 不保留已过期、已删除或当前用户无权访问的备份
+- 已过期但尚未删除的备份也保留在快照中
+- 不保留已删除或当前用户无权访问的备份
 - 查询为空只能说明当前可见备份快照中没有，不能证明历史上从未存在
 
 DBAAS 需要直接返回适合大模型使用的备份记录。
@@ -272,6 +273,7 @@ YYYY-MM-DD HH:mm:ss
 - jq 可以直接用字符串比较做时间范围筛选
 - 涉及“今天”“昨天”“前 3 天”“最近 7 天”等相对时间时，可复用 Phase6 已有 `get_current_time_tool`
 - 优先使用 time tool 返回的 `local_datetime` 或 `local_date` 生成绝对时间边界，不依赖模型自行把 Unix timestamp 转成时间字符串
+- `expires_at` 可直接用于判断备份是否已过期；过期不等于已删除
 - 如果时间未知或任务未完成，对应字段返回 `null`
 
 时间范围查询示例：
@@ -319,6 +321,7 @@ DBAAS 负责按身份过滤返回结果：
 
 - admin 返回当前存在的全量备份
 - 普通用户返回当前用户可见且仍存在的备份
+- 已过期但尚未删除的备份也应返回；只有删除后或当前不可见时才不返回
 
 `backups.meta.json` 应固定包含以下字段，查询工具必须校验 `scope`、`user`、`schema_version`、`schema_path`、`data_path` 与当前身份和当前 workspace 一致。
 
@@ -536,7 +539,7 @@ query_dbaas_backup_data_tool(
 
 - 字段改名
 - 状态映射
-- 过滤已删除或已过期备份
+- 基于 `expires_at` 主动过滤备份
 - 单条 `backup_id` 详情查询
 - 发起备份
 
@@ -619,6 +622,7 @@ create_service_backup_task_tool(...)
 - 子服务或分片问题应结合 `child_service_name` 和 `child_service_type`
 - 单元问题应使用 `unit_name`
 - 时间范围查询使用 `started_at`、`finished_at` 或 `expires_at` 字符串比较
+- 判断备份是否已过期时，直接比较 `expires_at`；不要把“已过期”误当成“已删除”
 - 涉及相对时间时，先调用 `get_current_time_tool`，优先使用 `local_datetime` 或 `local_date` 生成绝对时间边界，再生成 jq
 - 耗时问题使用 `duration_seconds`
 - 查询不到记录时，应说明“当前可见备份快照中没有”，不要断言历史上从未存在
@@ -639,7 +643,8 @@ GET /backups
 - 返回顶层 JSON 数组
 - 按 DBAAS 身份头做权限过滤
 - 只返回当前仍存在的备份
-- 不返回已删除或已过期清理的备份
+- 已过期但尚未删除的备份也返回
+- 不返回已删除的备份
 - 直接返回本文定义的字段名
 - 直接返回字符串枚举状态
 - 直接返回 `duration_seconds`

@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 
 from dbass_ai_agent.identity.models import Identity
 
-from .constants import ADMIN_SCOPE, SCHEMA_FILES, SCHEMA_VERSIONS, SUPPORTED_KINDS, USER_SCOPE
+from .constants import ADMIN_SCOPE, BACKUPS_KIND, SCHEMA_FILES, SCHEMA_VERSIONS, SERVICES_KIND, SUPPORTED_KINDS, USER_SCOPE
 from .workspace import read_json_file
 
 
@@ -65,23 +65,63 @@ def describe_schema(kind: str, *, app_root: Path, identity: Identity | None = No
         "title": schema.get("title"),
         "description": schema.get("description"),
         "top_level_type": schema.get("type"),
-        "fields": _service_fields(schema) if kind == "services" else [],
+        "fields": _schema_fields(kind, schema),
     }
 
 
-def _service_fields(schema: dict[str, Any]) -> list[dict[str, str]]:
-    service_schema = schema.get("$defs", {}).get("ServiceDetailResponse", {})
-    properties = service_schema.get("properties", {})
+def _schema_fields(kind: str, schema: dict[str, Any]) -> list[dict[str, Any]]:
+    if kind == SERVICES_KIND:
+        service_schema = schema.get("$defs", {}).get("ServiceDetailResponse", {})
+        properties = service_schema.get("properties", {})
+        return _field_summaries(properties)
+    if kind == BACKUPS_KIND:
+        item_schema = schema.get("$defs", {}).get("BackupRecord", {})
+        properties = item_schema.get("properties", {})
+        return _field_summaries(properties)
+    return []
+
+
+def _field_summaries(properties: Any) -> list[dict[str, Any]]:
     if not isinstance(properties, dict):
         return []
-    return [
-        {
+    fields: list[dict[str, Any]] = []
+    for name, value in properties.items():
+        if not isinstance(value, dict):
+            continue
+        field = {
             "name": name,
             "description": str(value.get("description", "")),
         }
-        for name, value in properties.items()
-        if isinstance(value, dict)
-    ]
+        type_info = _field_type_summary(value)
+        if type_info is not None:
+            field["type"] = type_info["type"]
+            field["nullable"] = type_info["nullable"]
+        enum_values = _field_enum_summary(value)
+        if enum_values:
+            field["enum_values"] = enum_values
+        fields.append(field)
+    return fields
+
+
+def _field_type_summary(field_schema: dict[str, Any]) -> dict[str, Any] | None:
+    raw_type = field_schema.get("type")
+    if isinstance(raw_type, str):
+        return {"type": raw_type, "nullable": False}
+    if isinstance(raw_type, list):
+        types = [value for value in raw_type if isinstance(value, str)]
+        non_null_types = [value for value in types if value != "null"]
+        return {
+            "type": non_null_types[0] if len(non_null_types) == 1 else non_null_types,
+            "nullable": "null" in types,
+        }
+    return None
+
+
+def _field_enum_summary(field_schema: dict[str, Any]) -> list[Any]:
+    enum_values = field_schema.get("enum")
+    if not isinstance(enum_values, list):
+        return []
+    return enum_values
 
 
 def _require_supported_kind(kind: str) -> None:
