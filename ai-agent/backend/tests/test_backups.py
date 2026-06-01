@@ -268,6 +268,25 @@ class BackupQueryTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipUnless(shutil.which("jq"), "jq is required for backup query tests")
+    def test_query_large_backup_result_is_preview_truncated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_fresh_admin_snapshot(config, _many_backup_records())
+
+            result = query_dbaas_backup_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                jq_filter='[.[] | select(.service_name == "mysql-xf2") | {backup_id, started_at}] | sort_by(.started_at)',
+                max_preview_items=5,
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(result["truncated"])
+            self.assertEqual(result["preview_count"], 5)
+            self.assertEqual(result["preview"][0]["backup_id"], "backup-mysql-xf2-bulk-000")
+            self.assertEqual(result["preview"][-1]["backup_id"], "backup-mysql-xf2-bulk-004")
+
 
 class BackupToolTests(unittest.TestCase):
     def test_build_dbaas_tools_includes_backup_query_tool(self) -> None:
@@ -440,6 +459,25 @@ def _mysql_xf2_backup_records() -> list[dict]:
             duration_seconds=60,
         ),
     ]
+
+
+def _many_backup_records() -> list[dict]:
+    records: list[dict] = []
+    for index in range(75):
+        day = 1 + index // 24
+        hour = index % 24
+        records.append(
+            _backup(
+                f"backup-mysql-xf2-bulk-{index:03d}",
+                "mysql-xf2",
+                started_at=f"2026-05-{day:02d} {hour:02d}:00:00",
+                finished_at=f"2026-05-{day:02d} {hour:02d}:02:00",
+                expires_at=f"2026-06-{min(day, 28):02d} {hour:02d}:02:00",
+                duration_seconds=120,
+                size_bytes=2_000_000 + index * 2048,
+            )
+        )
+    return records
 
 
 def _config(tmpdir: str) -> DbaasConfig:

@@ -16,7 +16,6 @@ class BackupRecord(ApiSchema):
     child_service_type: str = Field(description="子服务类型，例如 mysql、tidb、tikv")
     unit_name: str = Field(description="备份所属或执行的单元名称")
     backup_type: str = Field(description="备份类型，例如 full、incremental、ddl、table")
-    backup_path: str = Field(description="备份文件路径")
     size_bytes: int = Field(description="备份文件大小，单位 byte")
     storage_type: str | None = Field(default=None, description="存储类型，例如 NAS、S3")
     compress_mode: str | None = Field(default=None, description="压缩模式，例如 none、gzip、zstd")

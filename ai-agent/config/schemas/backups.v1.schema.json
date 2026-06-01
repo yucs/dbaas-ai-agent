@@ -20,7 +20,6 @@
         "child_service_type",
         "unit_name",
         "backup_type",
-        "backup_path",
         "size_bytes",
         "storage_type",
         "compress_mode",
@@ -67,10 +66,6 @@
           "type": "string",
           "enum": ["full", "incremental", "ddl", "snapshot", "rdb", "table", "encrypt"],
           "description": "备份类型枚举"
-        },
-        "backup_path": {
-          "type": "string",
-          "description": "备份文件路径"
         },
         "size_bytes": {
           "type": "integer",

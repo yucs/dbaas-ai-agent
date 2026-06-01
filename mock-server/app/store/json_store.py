@@ -754,7 +754,6 @@ class JsonDataStore:
             "child_service_type",
             "unit_name",
             "backup_type",
-            "backup_path",
             "size_bytes",
             "storage_type",
             "compress_mode",

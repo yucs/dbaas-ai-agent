@@ -67,7 +67,6 @@ DBAAS `/backups` 应直接返回 agent-facing backup record 数组。
     "child_service_type": "mysql",
     "unit_name": "mysql-primary-01",
     "backup_type": "ddl",
-    "backup_path": "/BACKUP/33c50c42_uosbf001/ddlbackup/33c50c42_uosbf001_20260601T073006",
     "size_bytes": 2269646,
     "storage_type": "NAS",
     "compress_mode": "none",
@@ -104,8 +103,6 @@ DBAAS `/backups` 应直接返回 agent-facing backup record 数组。
   - 第一版不暴露 `unit_id`
 - `backup_type`
   - 备份类型枚举
-- `backup_path`
-  - 备份文件路径
 - `size_bytes`
   - 备份文件大小，单位 byte
 - `storage_type`
@@ -163,7 +160,7 @@ NAS
 S3
 ```
 
-模型应使用 `storage_type` 做存储类型过滤，不应从 `backup_path` 推断存储类型。
+模型应使用 `storage_type` 做存储类型过滤，不应从路径字符串推断存储类型。
 
 ### 4.3 compress_mode
 
@@ -396,7 +393,6 @@ child_service_name
 child_service_type
 unit_name
 backup_type
-backup_path
 size_bytes
 storage_type
 compress_mode
@@ -617,7 +613,7 @@ create_service_backup_task_tool(...)
 模型查询备份时应遵守：
 
 - 生成 jq 前先调用 `describe_dbaas_schema_tool(kind="backups")`，确认字段名、枚举值和 nullable 规则
-- 使用结构化字段过滤，不要从 `backup_path` 推断服务、时间、类型或存储类型
+- 使用结构化字段过滤，不要从路径字符串推断服务、时间、类型或存储类型
 - 服务级问题应先按 `service_name` 过滤
 - 子服务或分片问题应结合 `child_service_name` 和 `child_service_type`
 - 单元问题应使用 `unit_name`
@@ -655,6 +651,7 @@ GET /backups
 - 不要求返回 `version`
 - 不要求返回 `backup_type_display_name`
 - 不要求返回 `compress_mode_display_name`
+- 不要求返回 `backup_path`
 
 ai-agent 第一版使用统一 `backups.v1` schema 向模型描述字段。
 落盘前只做轻量 JSON 结构检查，不做严格 schema 校验。
