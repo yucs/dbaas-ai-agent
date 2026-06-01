@@ -13,7 +13,7 @@ MetricValueType = Literal["number", "string", "enum", "boolean"]
 class MetricCatalogEntry:
     metric_key: str
     display_name: str
-    service_types: tuple[str, ...]
+    service_type: str
     value_type: MetricValueType
     unit: str | None
     aliases: tuple[str, ...]
@@ -26,7 +26,7 @@ class MetricCatalogEntry:
         payload: dict[str, Any] = {
             "metric_key": self.metric_key,
             "display_name": self.display_name,
-            "service_types": list(self.service_types),
+            "service_type": self.service_type,
             "value_type": self.value_type,
             "unit": self.unit,
             "aliases": list(self.aliases),
@@ -59,4 +59,3 @@ class MetricSnapshotRef:
     data_path: Path
     meta_path: Path
     meta: dict[str, Any]
-

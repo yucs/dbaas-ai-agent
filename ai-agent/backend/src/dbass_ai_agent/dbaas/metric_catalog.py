@@ -44,17 +44,18 @@ def describe_unit_metric_catalog(
         }
 
     effective_limit = 10 if limit is None else max(1, min(limit, 50))
+    service_type_filter = service_type.strip() if service_type and service_type.strip() else None
     scored = [
         (score, entry)
         for entry in entries
-        if (score := _score_entry(entry, query_text, service_type=service_type)) > 0
+        if (score := _score_entry(entry, query_text, service_type=service_type_filter)) > 0
     ]
     scored.sort(key=lambda item: (-item[0], item[1].metric_key))
     items = [entry.compact() for _, entry in scored[:effective_limit]]
     return {
         "status": "success",
         "query": query_text,
-        "service_type": service_type,
+        "service_type": service_type_filter,
         "items": items,
         "count": len(items),
         "truncated": len(scored) > effective_limit,
@@ -103,13 +104,13 @@ def _entry_from_raw(raw: Any, index: int) -> MetricCatalogEntry:
     value_type = _required_string(raw, "value_type", index)
     if value_type not in SUPPORTED_VALUE_TYPES:
         raise MetricCatalogError(f"metric_key '{metric_key}' 的 value_type 不支持：{value_type}")
-    service_types = _string_list(raw, "service_types", index, required=True)
+    service_type = _required_string(raw, "service_type", index)
     aliases = _string_list(raw, "aliases", index, required=True)
     enum_values = _string_list(raw, "enum_values", index, required=value_type == "enum")
     return MetricCatalogEntry(
         metric_key=metric_key,
         display_name=display_name,
-        service_types=tuple(service_types),
+        service_type=service_type,
         value_type=value_type,  # type: ignore[arg-type]
         unit=_optional_string(raw, "unit", index),
         aliases=tuple(aliases),
@@ -148,7 +149,11 @@ def _string_list(raw: dict[str, Any], field: str, index: int, *, required: bool)
 
 
 def _score_entry(entry: MetricCatalogEntry, query: str, *, service_type: str | None) -> int:
-    if service_type is not None and service_type not in entry.service_types and "container" not in entry.service_types:
+    if (
+        service_type is not None
+        and service_type.casefold() != entry.service_type.casefold()
+        and entry.service_type.casefold() != "container"
+    ):
         return 0
     query_cf = query.casefold()
     aliases = [alias.casefold() for alias in entry.aliases]

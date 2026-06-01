@@ -36,7 +36,16 @@ class MetricCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(result["count"], 1)
         first = result["items"][0]
         self.assertEqual(first["metric_key"], "container.cpu.use")
+        self.assertEqual(first["service_type"], "container")
+        self.assertNotIn("service_types", first)
         self.assertNotIn("score", first)
+
+    def test_catalog_search_filters_by_single_service_type(self) -> None:
+        result = describe_unit_metric_catalog("复制状态", service_type="mysql", app_root=APP_ROOT)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([item["metric_key"] for item in result["items"]], ["instance.mysql.replicationStatus"])
+        self.assertEqual(result["items"][0]["service_type"], "mysql")
 
 
 class MetricWorkspaceTests(unittest.TestCase):

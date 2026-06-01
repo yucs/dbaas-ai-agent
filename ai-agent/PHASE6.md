@@ -281,7 +281,7 @@ metric 查询 tool 使用唯一 `metric_key`，
 {
   "metric_key": "container.mem.usagePercent",
   "display_name": "容器内存使用率",
-  "service_types": ["container"],
+  "service_type": "container",
   "value_type": "number",
   "unit": "%",
   "aliases": ["内存使用率", "内存", "memory", "mem"]
@@ -294,8 +294,9 @@ metric 查询 tool 使用唯一 `metric_key`，
   - 全局唯一监控项 key
 - `display_name`
   - 面向用户展示的中文名称
-- `service_types`
+- `service_type`
   - 适用服务类型或监控域，例如 `container`、`host`、`mysql`、`redis`
+  - 一个 `metric_key` 只归属一个 `service_type`
 - `value_type`
   - 监控值类型
 - `unit`
@@ -317,7 +318,7 @@ metric 查询 tool 使用唯一 `metric_key`，
 当前暂不在每个 catalog 条目中维护：
 
 - `scope`
-  - 可从 `metric_key` 前缀或 `service_types` 推断
+  - 可从 `metric_key` 前缀或 `service_type` 推断
 - `operators`
   - 可由 `value_type` 推导
 - `sortable`
@@ -390,7 +391,7 @@ boolean
 也不要做服务名模糊匹配。
 
 同时保留 `service_type`，
-用于服务类型过滤、指标消歧，以及和 catalog 中的 `service_types` 对齐。
+用于服务类型过滤、指标消歧，以及和 catalog 中的 `service_type` 对齐。
 
 例如用户问：
 
@@ -528,12 +529,12 @@ Catalog：
 {
   "metric_key": "instance.mysql.replicationStatus",
   "display_name": "MySQL 复制状态",
+  "service_type": "mysql",
   "value_type": "enum",
   "unit": null,
   "enum_values": ["passing", "warning", "critical", "unknown"],
   "normal_values": ["passing"],
   "abnormal_values": ["warning", "critical", "unknown"],
-  "service_types": ["mysql"],
   "aliases": ["MySQL 复制状态", "MySQL 同步状态", "复制状态"]
 }
 ```
@@ -662,7 +663,7 @@ Catalog 搜索当前使用简单打分规则，
 7. `enum_values`、`normal_values`、`abnormal_values` 命中
 
 如果传入 `service_type`，
-应优先返回 `service_types` 包含该值的条目。
+应优先返回 `service_type` 等于该值的条目。
 不匹配的服务类型可以过滤掉。
 
 对于可能在多个服务类型中重复出现的监控项语义，
