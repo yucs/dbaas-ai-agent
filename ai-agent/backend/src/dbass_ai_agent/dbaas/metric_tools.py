@@ -76,7 +76,10 @@ def build_metric_tools(settings: Settings, require_identity: Callable[[], Identi
 
     @tool("get_current_time_tool")
     def get_current_time_tool() -> dict[str, Any]:
-        """返回当前 Unix timestamp 秒数和 UTC/本地时间，用于换算相对 history 时间范围。"""
+        """返回当前 Unix timestamp 秒数，以及 UTC、本地 ISO 时间和本地格式化日期时间。
+
+        可用于相对时间换算和生成时间范围查询边界。
+        """
 
         require_identity()
         return get_current_time()

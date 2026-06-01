@@ -606,9 +606,9 @@ class JsonDataStore:
                 enum_values = item.get("enum_values")
                 if not isinstance(enum_values, list) or not enum_values or not all(isinstance(value, str) for value in enum_values):
                     raise DataValidationError(f"metric_key '{metric_key}' must define non-empty string enum_values")
-            service_types = item.get("service_types")
-            if not isinstance(service_types, list) or not all(isinstance(value, str) and value for value in service_types):
-                raise DataValidationError(f"metric_key '{metric_key}' must define service_types")
+            service_type = item.get("service_type")
+            if not isinstance(service_type, str) or not service_type:
+                raise DataValidationError(f"metric_key '{metric_key}' must define service_type")
             catalog_by_key[metric_key] = deepcopy(item)
         return catalog_by_key
 
@@ -1084,12 +1084,12 @@ class JsonDataStore:
                 if service.get("user") == owner_user
             ]
 
-        metric_service_types = set(metric["service_types"])
+        metric_service_type = metric["service_type"]
         items: list[dict[str, Any]] = []
         for service in services:
             for child_service in service.get("services", []):
                 service_type = child_service["type"]
-                if "container" not in metric_service_types and service_type not in metric_service_types:
+                if metric_service_type != "container" and service_type != metric_service_type:
                     continue
                 for unit in child_service.get("units", []):
                     items.append(
@@ -1123,11 +1123,11 @@ class JsonDataStore:
         if not matches:
             raise ServiceUnitNotFoundError(unit_name)
 
-        metric_service_types = set(metric["service_types"])
-        if "container" in metric_service_types:
+        metric_service_type = metric["service_type"]
+        if metric_service_type == "container":
             return matches[0]
         for item in matches:
-            if item["service_type"] in metric_service_types:
+            if item["service_type"] == metric_service_type:
                 return item
         return matches[0]
 
@@ -1140,7 +1140,7 @@ class JsonDataStore:
     ) -> list[str]:
         """返回伪造监控单元可使用的服务类型。"""
 
-        metric_service_types = [value for value in metric["service_types"] if value != "container"]
+        metric_service_type = metric["service_type"]
         if service_name is not None:
             service = self._services_by_name.get(service_name)
             if service is None:
@@ -1148,23 +1148,29 @@ class JsonDataStore:
             child_service_types = [
                 child_service["type"]
                 for child_service in service.get("services", [])
-                if "container" in metric["service_types"] or child_service["type"] in metric_service_types
+                if metric_service_type == "container" or child_service["type"] == metric_service_type
             ]
             if child_service_types:
                 return child_service_types
-            return metric_service_types or [service["type"]]
+            if metric_service_type == "container":
+                return [service["type"]]
+            return [metric_service_type]
         if owner_user is not None:
             child_service_types = [
                 child_service["type"]
                 for service in self._services_by_name.values()
                 if service.get("user") == owner_user
                 for child_service in service.get("services", [])
-                if "container" in metric["service_types"] or child_service["type"] in metric_service_types
+                if metric_service_type == "container" or child_service["type"] == metric_service_type
             ]
             if child_service_types:
                 return sorted(set(child_service_types))
-            return metric_service_types or ["mysql", "redis", "proxy"]
-        return metric_service_types or ["mysql", "redis", "proxy", "tidb", "tikv", "pd"]
+            if metric_service_type == "container":
+                return ["mysql", "redis", "proxy"]
+            return [metric_service_type]
+        if metric_service_type == "container":
+            return ["mysql", "redis", "proxy", "tidb", "tikv", "pd"]
+        return [metric_service_type]
 
     def _fake_metric_unit(
         self,

@@ -157,7 +157,7 @@ metric_cleanup.py
 
 time_tools.py
   - 实现 get_current_time_tool
-  - 返回 now_ts、iso_utc、iso_local、timezone
+  - 返回 now_ts、iso_utc、iso_local、local_datetime、local_date、timezone
   - Phase6 内用于 history 相对时间换算
 
 metric_tools.py
@@ -1302,11 +1302,16 @@ get_current_time_tool() -> dict
   "now_ts": 1777441200,
   "iso_utc": "2026-04-29T04:00:00Z",
   "iso_local": "2026-04-29T12:00:00+08:00",
+  "local_datetime": "2026-04-29 12:00:00",
+  "local_date": "2026-04-29",
   "timezone": "Asia/Shanghai"
 }
 ```
 
-`get_current_time_tool` 只负责返回当前 Unix timestamp 秒数和辅助展示时间。
+`get_current_time_tool` 负责返回当前 Unix timestamp 秒数和辅助展示时间。
+Phase6 history 相对时间换算仍优先使用 `now_ts`；
+新增 `local_datetime` 和 `local_date` 便于其他 DBAAS 查询场景复用，
+不改变监控 history 仍使用 Unix timestamp 秒数作为时间参数的约定。
 模型根据用户表达计算 `start_ts` 和 `end_ts`，
 例如：
 
