@@ -2,11 +2,29 @@
 
 ## 0. 当前状态
 
-- 状态：设计草案
-- 当前代码状态：尚未实现 Phase9
+- 状态：Phase9 第一版备份查询主链路已实现，本文档继续用于实现对齐和后续扩展说明
+- 当前代码状态：已实现 `/backups` 快照拉取、按身份落盘、统一 schema、jq 查询、lazy refresh/显式 refresh 和 mock-server `/backups`
 - 本文档作用：定义 DBAAS 备份查询第一版的字段结构、同步方式、查询工具和模型行为规则
 - 核心边界：Phase9 第一版只做备份查询，不做发起备份、恢复、删除或备份策略修改
 - 后续关注：发起备份任务、指定备份详情接口、备份恢复、备份删除、后台预热同步和更完整的备份策略查询可后续推进
+
+### 当前已实现
+
+- `query_dbaas_backup_data_tool`：支持对本地 `backups.json` 执行 jq 查询
+- `GET /backups` 备份快照同步：按当前身份全量拉取并覆盖落盘
+- 备份 workspace 隔离：admin 和普通用户分别维护各自快照与 `backups.meta.json`
+- `refresh=true` 强制刷新与默认 lazy refresh 行为
+- `config/schemas/backups.v1.schema.json` 统一 schema 描述
+- mock-server `/backups` 接口与大体量 `backups.json` 种子数据
+- 返回规则：删除备份不返回；已过期但尚未删除的备份继续返回
+
+### 当前未实现
+
+- 发起备份
+- 查询单个 `backup_id` 详情
+- 恢复或删除备份
+- 后台定时预热/周期性同步
+- 更完整的备份任务联动查询与策略类操作
 
 ## 1. Phase9 v1 目标
 
@@ -660,8 +678,8 @@ ai-agent 第一版使用统一 `backups.v1` schema 向模型描述字段。
 
 可后续推进：
 
+- 备份发起设计与实现，见 `PHASE10.md`，包含 `create_service_backup_task_tool(...)`
 - `get_dbaas_backup_tool(backup_id)` 直接查询单个备份详情，不落盘
-- `create_service_backup_task_tool(...)` 发起备份，并接入 Phase7 approval/task
 - 备份恢复
 - 备份删除
 - 备份策略查询或修改

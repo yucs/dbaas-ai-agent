@@ -14,6 +14,9 @@ from .platform import (
 )
 from .metric import HistoryMetricPoint, LatestMetricPoint
 from .service_detail import (
+    BackupCapabilityField,
+    BackupCapabilityResponse,
+    BackupRuntimeHints,
     BackupStrategySummary,
     ChildService,
     BlockingError,
@@ -31,6 +34,7 @@ from .service_detail import (
     PrecheckStorageMetrics,
     PrecheckStorageSpec,
     PrecheckStorageUnitMetric,
+    ServiceBackupRequest,
     ServiceNetworkSpec,
     ServiceDetailResponse,
     ServiceImageUpgradeRequest,
@@ -52,6 +56,9 @@ from .user import UserDetailResponse, UserSummary
 
 __all__ = [
     "BackupRecord",
+    "BackupCapabilityField",
+    "BackupCapabilityResponse",
+    "BackupRuntimeHints",
     "BackupStrategySummary",
     "ChildService",
     "ClusterDetailResponse",
@@ -82,6 +89,7 @@ __all__ = [
     "ServiceDetailResponse",
     "ServiceImageUpgradeRequest",
     "ServiceNetworkSpec",
+    "ServiceBackupRequest",
     "ServiceStorageSpec",
     "ServiceUnit",
     "ServiceVolumeSpec",

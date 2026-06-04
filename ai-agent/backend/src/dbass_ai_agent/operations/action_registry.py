@@ -48,6 +48,15 @@ WRITE_ACTIONS: dict[str, ActionConfig] = {
         timeout_seconds=30,
         risk_notes=("会创建镜像升级任务，任务完成前服务可能处于变更中。",),
     ),
+    "create_service_backup_task_tool": ActionConfig(
+        tool_name="create_service_backup_task_tool",
+        action="service.backup.create",
+        execution_mode="async",
+        risk_level="medium",
+        required_role="user",
+        timeout_seconds=30,
+        risk_notes=("会创建手动备份任务，备份完成前目标可能已有 running backup records。",),
+    ),
 }
 
 
@@ -77,5 +86,9 @@ def format_operation_approval(tool_call: ToolCall, state: Any, runtime: Any) -> 
     config = require_action_config(tool_call["name"])
     args = tool_call.get("args") or {}
     service_name = args.get("service_name") or args.get("name") or "-"
+    if config.action == "service.backup.create":
+        scope = args.get("scope") or "service"
+        target = args.get("unit_name") or service_name
+        return f"{config.action}: {service_name}/{scope}/{target} 需要人工确认。"
     child_type = args.get("child_service_type") or "-"
     return f"{config.action}: {service_name}/{child_type} 需要人工确认。"

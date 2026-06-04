@@ -14,9 +14,10 @@ from dbass_ai_agent.identity.models import Identity
 from dbass_ai_agent.infra.clock import utc_now
 from dbass_ai_agent.infra.ids import new_approval_id
 from dbass_ai_agent.operations.action_registry import require_action_config
-from dbass_ai_agent.operations.models import InterruptedToolCall, OperationRecord, OperationTarget, TaskRecord
+from dbass_ai_agent.operations.models import InterruptedToolCall, OperationRecord, TaskRecord
 from dbass_ai_agent.operations.proposal_builder import build_batch_operation_proposal
 from dbass_ai_agent.operations.task_service import TaskConflictError, build_operation_conflict_key
+from dbass_ai_agent.operations.targets import target_from_tool_call
 from dbass_ai_agent.sessions.models import ApprovalRecord, ChatMessage, SessionMeta
 from dbass_ai_agent.sessions.repository import SessionRepository
 from dbass_ai_agent.sessions.run_lock import session_locks
@@ -765,7 +766,7 @@ class ApprovalService:
             config = require_action_config(tool_call.tool_name)
             if config.execution_mode != "async":
                 continue
-            target = _service_target(tool_call.tool_args)
+            target = target_from_tool_call(tool_call.tool_name, tool_call.tool_args)
             conflict_key = build_operation_conflict_key(config.action, [target])
             if conflict_key in seen_conflict_keys:
                 raise HTTPException(
@@ -864,18 +865,4 @@ def _build_task_creation_notice(tasks: list[TaskRecord]) -> str:
     return (
         f"本次审批确认已创建 {len(sorted_tasks)} 个异步任务，"
         "系统会在任务结束后继续提醒最终执行结果。"
-    )
-
-
-def _service_target(tool_args: dict[str, Any]) -> OperationTarget:
-    service_name = str(tool_args.get("service_name") or "")
-    child_service_type = str(tool_args.get("child_service_type") or "")
-    qualifiers: dict[str, Any] = {}
-    if child_service_type:
-        qualifiers["child_service_type"] = child_service_type
-    return OperationTarget(
-        kind="service",
-        id=service_name,
-        name=service_name or None,
-        qualifiers=qualifiers,
     )

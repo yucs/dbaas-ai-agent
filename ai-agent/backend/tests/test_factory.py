@@ -108,6 +108,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             expected_common_tools = {
                 "query_dbaas_data_tool",
                 "describe_dbaas_schema_tool",
+                "describe_service_backup_capability_tool",
                 "describe_unit_metric_catalog_tool",
                 "query_unit_latest_metric_data_tool",
                 "query_unit_metric_history_tool",
@@ -117,6 +118,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 "update_service_resource_tool",
                 "update_service_storage_tool",
                 "create_service_image_upgrade_task_tool",
+                "create_service_backup_task_tool",
                 "get_dbaas_task_tool",
                 "list_current_session_tasks_tool",
             }
@@ -134,6 +136,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                     "update_service_resource_tool",
                     "update_service_storage_tool",
                     "create_service_image_upgrade_task_tool",
+                    "create_service_backup_task_tool",
                 },
             )
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)

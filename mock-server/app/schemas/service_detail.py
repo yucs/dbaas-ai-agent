@@ -309,6 +309,48 @@ class ServiceImageUpgradeRequest(ApiSchema):
     )
 
 
+class ServiceBackupRequest(ApiSchema):
+    """`POST /services/{name}/backup` 的请求模型。"""
+
+    scope: str = Field(description="备份范围：service 或 unit")
+    backupType: str = Field(description="备份类型，例如 full")
+    retentionDays: int = Field(gt=0, description="备份保留天数")
+    unitName: str | None = Field(default=None, description="目标 unit 名称")
+    options: dict[str, object] | None = Field(default=None, description="服务类别相关备份参数")
+    remark: str | None = Field(default=None, description="备份备注")
+
+
+class BackupCapabilityField(ApiSchema):
+    """备份发起参数字段描述。"""
+
+    name: str = Field(description="DBAAS 接口字段名")
+    type: str = Field(description="字段类型")
+    required: bool = Field(default=False, description="是否必填")
+    enumValues: list[str] | None = Field(default=None, description="可选枚举值")
+    min: int | None = Field(default=None, description="最小值")
+    max: int | None = Field(default=None, description="最大值")
+    description: str | None = Field(default=None, description="字段说明")
+    requiresUserInput: bool = Field(default=False, description="是否需要用户补充")
+
+
+class BackupRuntimeHints(ApiSchema):
+    """备份发起运行提示，不作为 precheck 阻断。"""
+
+    backupRunning: bool = Field(default=False, description="当前目标是否已有备份执行中")
+    runningBackups: list[dict[str, object]] = Field(default_factory=list, description="正在执行的备份摘要")
+
+
+class BackupCapabilityResponse(ApiSchema):
+    """`GET /backup-task-capabilities` 的响应模型。"""
+
+    supported: bool = Field(description="是否支持发起备份")
+    serviceType: str | None = Field(default=None, description="服务类型")
+    scopeValues: list[str] = Field(default_factory=list, description="支持的备份范围")
+    fields: list[BackupCapabilityField] = Field(default_factory=list, description="参数字段")
+    resolvedTarget: dict[str, object] | None = Field(default=None, description="按名称解析出的目标")
+    runtimeHints: BackupRuntimeHints | None = Field(default=None, description="运行提示")
+
+
 class BackupStrategySummary(ApiSchema):
     """服务组对应的备份策略摘要。"""
 

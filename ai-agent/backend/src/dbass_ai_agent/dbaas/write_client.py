@@ -219,6 +219,62 @@ class DbaasWriteClient:
             timeout_seconds=timeout_seconds,
         )
 
+    def describe_service_backup_capability(
+        self,
+        identity: Identity,
+        *,
+        service_type: str | None = None,
+        service_name: str | None = None,
+        unit_name: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if service_type is not None:
+            params["serviceType"] = service_type
+        if service_name is not None:
+            params["serviceName"] = service_name
+        if unit_name is not None:
+            params["unitName"] = unit_name
+        return self._request_json(
+            identity,
+            "GET",
+            "/backup-task-capabilities",
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def create_service_backup_task(
+        self,
+        identity: Identity,
+        service_name: str,
+        *,
+        scope: str,
+        backup_type: str,
+        retention_days: int,
+        unit_name: str | None = None,
+        options: dict[str, Any] | None = None,
+        remark: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "scope": scope,
+            "backupType": backup_type,
+            "retentionDays": retention_days,
+        }
+        if unit_name is not None:
+            payload["unitName"] = unit_name
+        if options is not None:
+            payload["options"] = options
+        if remark is not None:
+            payload["remark"] = remark
+        return self._request_json(
+            identity,
+            "POST",
+            f"/services/{service_name}/backup",
+            json=payload,
+            timeout_seconds=timeout_seconds,
+        )
+
     def get_task(
         self,
         identity: Identity,
@@ -240,6 +296,7 @@ class DbaasWriteClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         timeout = timeout_seconds or self.config.request_timeout_seconds
@@ -250,6 +307,7 @@ class DbaasWriteClient:
                     f"{self.config.server_base_url}{path}",
                     headers=dbaas_identity_headers(identity),
                     json=json,
+                    params=params,
                 )
         except DbaasAuthError as exc:
             raise DbaasWriteClientError(

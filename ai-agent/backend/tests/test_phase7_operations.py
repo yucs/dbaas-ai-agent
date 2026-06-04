@@ -32,11 +32,14 @@ from dbass_ai_agent.api.routes_sessions import router as sessions_router  # noqa
 from dbass_ai_agent.api.routes_tasks import router as tasks_router  # noqa: E402
 from dbass_ai_agent.config import Settings  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
+from dbass_ai_agent.dbaas.write_tools import build_write_tools  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.infra.clock import utc_now  # noqa: E402
+from dbass_ai_agent.operations.context import OperationRunContext, operation_run_context  # noqa: E402
 from dbass_ai_agent.operations.approval_service import ApprovalInterrupt, ApprovalService  # noqa: E402
 from dbass_ai_agent.operations.models import OperationResult, OperationTarget, OperationTaskRef, TaskRecord  # noqa: E402
 from dbass_ai_agent.operations.operation_service import OperationService  # noqa: E402
+from dbass_ai_agent.operations.proposal_builder import build_operation_proposal  # noqa: E402
 from dbass_ai_agent.operations.task_service import TaskService  # noqa: E402
 from dbass_ai_agent.sessions.approval_store import ApprovalStore  # noqa: E402
 from dbass_ai_agent.sessions.index_store import IndexStore  # noqa: E402
@@ -1268,6 +1271,75 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(current.approvals[-1].status, "pending")
             self.assertEqual(task_service.list_tasks(detail.meta), [])
 
+    def test_batch_backup_approval_rejects_duplicate_unit_conflict_key_before_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user="Admin")
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase10 duplicate backup batch")
+            approval = ApprovalService(service.repository, service).create_approval(
+                identity,
+                detail.meta,
+                run_id="run_phase10_duplicate_backup_batch",
+                request_message_id="msg_request",
+                interrupt=ApprovalInterrupt(
+                    action_requests=[
+                        {
+                            "name": "create_service_backup_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "scope": "unit",
+                                "backup_type": "full",
+                                "retention_days": 7,
+                                "unit_name": "mysql-primary-01",
+                            },
+                        },
+                        {
+                            "name": "create_service_backup_task_tool",
+                            "args": {
+                                "service_name": "mysql-xf2",
+                                "scope": "unit",
+                                "backup_type": "full",
+                                "retention_days": 14,
+                                "unit_name": "mysql-primary-01",
+                            },
+                        },
+                    ],
+                    review_configs=[
+                        {
+                            "action_name": "create_service_backup_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                        {
+                            "action_name": "create_service_backup_task_tool",
+                            "allowed_decisions": ["approve", "reject"],
+                        },
+                    ],
+                    tool_call_ids=["call_phase10_backup_001", "call_phase10_backup_002"],
+                ),
+            )
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            app = FastAPI()
+            app.include_router(approvals_router)
+            app.dependency_overrides[get_current_identity] = lambda: identity
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: AsyncTaskResumeRuntime()
+            app.dependency_overrides[get_task_service] = lambda: task_service
+
+            with TestClient(app) as client:
+                response = client.post(
+                    f"/api/v1/sessions/{detail.meta.session_id}/approvals/{approval.approval_id}/decision",
+                    json={"decision": "approved"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            payload = response.json()
+            self.assertEqual(payload["detail"]["error_type"], "task_conflict")
+            self.assertEqual(
+                payload["detail"]["operation_conflict_key"],
+                "service.backup.create|unit:mysql-primary-01:scope=unit,service_name=mysql-xf2",
+            )
+            self.assertEqual(task_service.list_tasks(detail.meta), [])
+
     def test_approval_decision_rechecks_expiration_after_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user="Admin")
@@ -1497,6 +1569,108 @@ class Phase7ApprovalApiTests(unittest.TestCase):
             self.assertEqual(approvals[0].status, "expired")
             self.assertFalse(approvals[0].resume_failed)
             self.assertEqual(service.get_session(identity, detail.meta.session_id).messages, [])
+
+
+class Phase10BackupCreateToolTests(unittest.TestCase):
+    def test_backup_proposal_skips_empty_options_but_keeps_non_empty_options(self) -> None:
+        base_args = {
+            "service_name": "mysql-xf2",
+            "scope": "service",
+            "backup_type": "full",
+            "retention_days": 7,
+        }
+
+        empty_options = build_operation_proposal(
+            "create_service_backup_task_tool",
+            {**base_args, "options": {}},
+        )
+        empty_keys = [param.key for param in empty_options.items[0].parameters]
+
+        self.assertNotIn("options", empty_keys)
+
+        non_empty_options = build_operation_proposal(
+            "create_service_backup_task_tool",
+            {**base_args, "options": {"compress_mode": "gzip"}},
+        )
+        options_param = next(
+            param for param in non_empty_options.items[0].parameters if param.key == "options"
+        )
+
+        self.assertEqual(options_param.label, "备份参数")
+        self.assertEqual(options_param.value, {"compress_mode": "gzip"})
+
+    def test_create_service_backup_task_tool_requires_user_selected_parameters(self) -> None:
+        tools = {tool.name: tool for tool in build_write_tools(Settings())}
+        schema = tools["create_service_backup_task_tool"].args_schema.model_json_schema()
+
+        self.assertTrue(
+            {
+                "service_name",
+                "scope",
+                "backup_type",
+                "retention_days",
+            }.issubset(set(schema["required"]))
+        )
+
+    def test_create_service_backup_task_tool_creates_unified_task_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase10 backup create")
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+            fake_client = FakeBackupCreateClient()
+
+            with patch("dbass_ai_agent.dbaas.write_tools.DbaasWriteClient", return_value=fake_client):
+                tools = {tool.name: tool for tool in build_write_tools(Settings())}
+
+            with operation_run_context(
+                OperationRunContext(
+                    identity=identity,
+                    session=detail.meta,
+                    run_id="run_phase10_backup_create",
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
+            ):
+                result = tools["create_service_backup_task_tool"].invoke(
+                    {
+                        "service_name": "mysql-xf2",
+                        "scope": "unit",
+                        "backup_type": "full",
+                        "retention_days": 7,
+                        "unit_name": "mysql-primary-01",
+                        "options": {"compress_mode": "gzip"},
+                        "remark": "manual backup",
+                    }
+                )
+
+            self.assertEqual(result["status"], "task_created")
+            self.assertEqual(result["task"]["task_id"], "task-backup-001")
+            self.assertEqual(fake_client.calls[0]["service_name"], "mysql-xf2")
+            self.assertEqual(
+                fake_client.calls[0]["kwargs"],
+                {
+                    "scope": "unit",
+                    "backup_type": "full",
+                    "retention_days": 7,
+                    "unit_name": "mysql-primary-01",
+                    "options": {"compress_mode": "gzip"},
+                    "remark": "manual backup",
+                    "timeout_seconds": 30,
+                },
+            )
+            tasks = task_service.list_tasks(detail.meta)
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].task_id, "task-backup-001")
+            self.assertEqual(tasks[0].dbaas_type, "service.backup.create")
+            self.assertEqual(tasks[0].status, "running")
+            self.assertEqual(
+                tasks[0].operation_conflict_key,
+                "service.backup.create|unit:mysql-primary-01:scope=unit,service_name=mysql-xf2",
+            )
+            self.assertEqual(tasks[0].targets[0].kind, "unit")
+            self.assertEqual(tasks[0].targets[0].id, "mysql-primary-01")
 
 
 class TaskLazyRefreshTests(unittest.TestCase):
@@ -1884,6 +2058,21 @@ class FakeTaskClient:
             "createdAt": "2026-05-08T00:00:00Z",
             "updatedAt": "2026-05-08T00:00:02Z",
         }
+
+
+class FakeBackupCreateClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create_service_backup_task(self, identity, service_name, **kwargs):
+        self.calls.append(
+            {
+                "identity": identity,
+                "service_name": service_name,
+                "kwargs": kwargs,
+            }
+        )
+        return {"taskId": "task-backup-001"}
 
 
 class FakeCurrentValueClient:

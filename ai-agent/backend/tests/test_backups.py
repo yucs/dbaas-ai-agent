@@ -19,7 +19,7 @@ from dbass_ai_agent.dbaas.backup_query import query_dbaas_backup_data  # noqa: E
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import BACKUPS_KIND  # noqa: E402
 from dbass_ai_agent.dbaas.schema import describe_schema  # noqa: E402
-from dbass_ai_agent.dbaas.tools import build_dbaas_tools  # noqa: E402
+from dbass_ai_agent.dbaas.tools import build_dbaas_tools, dbaas_tool_identity  # noqa: E402
 from dbass_ai_agent.dbaas.workspace import DbaasWorkspace, write_json_atomic, write_meta_atomic  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 
@@ -38,6 +38,58 @@ class BackupSchemaTests(unittest.TestCase):
 
 
 class BackupQueryTests(unittest.TestCase):
+    def test_describe_backup_capability_tool_calls_dbaas_with_target_params(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                dbaas_server_base_url="http://127.0.0.1:9000",
+                dbaas_workspace_dir=Path(tmpdir) / "workspace",
+            )
+            identity = Identity(user_id="admin", role="admin", user=None)
+            fake_client = _FakeClient(
+                _FakeResponse(
+                    200,
+                    {
+                        "supported": True,
+                        "serviceType": "upsql",
+                        "fields": [
+                            {"name": "backupType", "required": True},
+                            {"name": "retentionDays", "required": True},
+                        ],
+                    },
+                )
+            )
+
+            with patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client):
+                tools = {tool.name: tool for tool in build_dbaas_tools(settings, role="admin")}
+                with dbaas_tool_identity(identity):
+                    result = tools["describe_service_backup_capability_tool"].invoke(
+                        {
+                            "service_name": "mysql-xf2",
+                            "unit_name": "mysql-primary-01",
+                        }
+                    )
+
+            self.assertTrue(result["supported"])
+            self.assertEqual(fake_client.last_method, "GET")
+            self.assertEqual(fake_client.last_url, "http://127.0.0.1:9000/backup-task-capabilities")
+            self.assertEqual(
+                fake_client.last_params,
+                {
+                    "serviceName": "mysql-xf2",
+                    "unitName": "mysql-primary-01",
+                },
+            )
+            self.assertEqual(fake_client.last_headers["X-DBAAS-Actor-Role"], "admin")
+
+    def test_describe_backup_capability_tool_requires_target(self) -> None:
+        tools = {tool.name: tool for tool in build_dbaas_tools(Settings(), role="admin")}
+
+        with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+            result = tools["describe_service_backup_capability_tool"].invoke({})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "missing_target")
+
     @unittest.skipUnless(shutil.which("jq"), "jq is required for backup query tests")
     def test_query_fetches_snapshot_with_identity_and_runs_jq(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -319,6 +371,10 @@ class _FakeClient:
     def __init__(self, response: _FakeResponse) -> None:
         self.response = response
         self.last_headers: dict | None = None
+        self.last_method: str | None = None
+        self.last_url: str | None = None
+        self.last_params: dict | None = None
+        self.last_json: dict | None = None
 
     def __enter__(self) -> "_FakeClient":
         return self
@@ -328,6 +384,14 @@ class _FakeClient:
 
     def get(self, url: str, *, headers: dict[str, str]):
         self.last_headers = headers
+        return self.response
+
+    def request(self, method: str, url: str, *, headers: dict[str, str], json=None, params=None):
+        self.last_method = method
+        self.last_url = url
+        self.last_headers = headers
+        self.last_json = json
+        self.last_params = params
         return self.response
 
 

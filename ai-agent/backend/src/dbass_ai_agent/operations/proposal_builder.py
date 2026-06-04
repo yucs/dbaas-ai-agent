@@ -9,11 +9,11 @@ from .models import (
     OperationParameter,
     OperationProposal,
     OperationProposalItem,
-    OperationTarget,
     ProposalExecutionMode,
     RequiredRole,
     RiskLevel,
 )
+from .targets import target_from_tool_call
 
 
 _RISK_ORDER: dict[RiskLevel, int] = {
@@ -68,7 +68,7 @@ def build_operation_proposal_item(
     current_service: dict[str, Any] | None = None,
 ) -> OperationProposalItem:
     config = require_action_config(tool_name)
-    target = _service_target(tool_args)
+    target = target_from_tool_call(tool_name, tool_args)
     return OperationProposalItem(
         action=config.action,
         targets=[target],
@@ -96,20 +96,6 @@ def _aggregate_execution_mode(values: list[ExecutionMode]) -> ProposalExecutionM
     if len(modes) == 1:
         return values[0]
     return "mixed"
-
-
-def _service_target(tool_args: dict[str, Any]) -> OperationTarget:
-    service_name = str(tool_args.get("service_name") or "")
-    child_service_type = tool_args.get("child_service_type")
-    qualifiers: dict[str, Any] = {}
-    if child_service_type:
-        qualifiers["child_service_type"] = child_service_type
-    return OperationTarget(
-        kind="service",
-        id=service_name,
-        name=service_name or None,
-        qualifiers=qualifiers,
-    )
 
 
 def _summary(action: str, tool_args: dict[str, Any]) -> str:
@@ -140,6 +126,13 @@ def _summary(action: str, tool_args: dict[str, Any]) -> str:
         scope = "全部 unit" if not unit_ids else f"指定 unit {unit_ids}"
         version_text = f"，版本 {version}" if version else ""
         return f"将 {service_name}/{child_type} 镜像升级为 {image}{version_text}，范围：{scope}"
+    if action == "service.backup.create":
+        scope = tool_args.get("scope") or "service"
+        backup_type = tool_args.get("backup_type") or "full"
+        retention_days = tool_args.get("retention_days")
+        target = tool_args.get("unit_name") or service_name
+        retention_text = f"，保留 {retention_days} 天" if retention_days is not None else ""
+        return f"为 {service_name}/{scope}/{target} 创建 {backup_type} 备份{retention_text}"
     return f"执行 {action}"
 
 
@@ -195,6 +188,14 @@ def _parameters(
         _append_if_present(parameters, tool_args, "image", "镜像", None)
         _append_if_present(parameters, tool_args, "version", "版本", None)
         _append_if_present(parameters, tool_args, "unit_ids", "升级 unit", None)
+    elif action == "service.backup.create":
+        _append_if_present(parameters, tool_args, "scope", "备份范围", None)
+        _append_if_present(parameters, tool_args, "backup_type", "备份类型", None)
+        _append_if_present(parameters, tool_args, "retention_days", "保留天数", "天")
+        _append_if_present(parameters, tool_args, "unit_name", "Unit 名称", None)
+        if tool_args.get("options"):
+            _append_if_present(parameters, tool_args, "options", "备份参数", None)
+        _append_if_present(parameters, tool_args, "remark", "备注", None)
     return parameters
 
 

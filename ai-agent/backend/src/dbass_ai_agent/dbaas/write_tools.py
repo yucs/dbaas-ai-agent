@@ -22,6 +22,7 @@ from dbass_ai_agent.operations.models import (
 )
 from dbass_ai_agent.operations.operation_service import operation_result_payload
 from dbass_ai_agent.operations.task_service import TaskConflictError, build_operation_conflict_key
+from dbass_ai_agent.operations.targets import backup_target, service_child_target
 
 
 def build_write_tools(settings: Settings) -> list[Any]:
@@ -428,6 +429,176 @@ def build_write_tools(settings: Settings) -> list[Any]:
             )
             return operation_result_payload(result)
 
+    @tool("create_service_backup_task_tool")
+    def create_service_backup_task_tool(
+        service_name: str,
+        scope: str,
+        backup_type: str,
+        retention_days: int,
+        unit_name: str | None = None,
+        options: dict[str, Any] | None = None,
+        remark: str | None = None,
+    ) -> dict[str, Any]:
+        """创建 DBAAS 服务手动备份异步任务。写操作必须先经过人工确认。"""
+
+        tool_name = "create_service_backup_task_tool"
+        config = require_action_config(tool_name)
+        context = require_operation_context()
+        _assert_required_role(context.identity.role, config.required_role)
+        target = backup_target(
+            service_name,
+            scope=scope,
+            unit_name=unit_name,
+        )
+        tool_args = _compact_tool_args(
+            service_name=service_name,
+            scope=scope,
+            backup_type=backup_type,
+            retention_days=retention_days,
+            unit_name=unit_name,
+            options=options,
+            remark=remark,
+        )
+        existing_operation = context.operation_service.find_existing(
+            context.session,
+            approval=context.approval,
+            action=config.action,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
+        )
+        if existing_operation is not None:
+            existing = context.operation_service.result_from_existing(existing_operation)
+            if existing is not None:
+                return operation_result_payload(existing)
+            unknown = context.operation_service.mark_started_unknown(
+                context.session,
+                existing_operation,
+                targets=[target],
+            )
+            return operation_result_payload(unknown.result)
+        operation = context.operation_service.start_operation(
+            context.session,
+            approval=context.approval,
+            run_id=context.run_id,
+            action=config.action,
+            execution_mode=config.execution_mode,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            targets=[target],
+        )
+
+        try:
+            conflict_key = build_operation_conflict_key(config.action, [target])
+            context.task_service.ensure_no_conflicting_task(context.session, conflict_key)
+            payload = client.create_service_backup_task(
+                context.identity,
+                service_name,
+                scope=scope,
+                backup_type=backup_type,
+                retention_days=retention_days,
+                unit_name=unit_name,
+                options=options,
+                remark=remark,
+                timeout_seconds=config.timeout_seconds,
+            )
+            task_id = str(payload.get("taskId") or "")
+            if not task_id:
+                raise DbaasWriteClientError(
+                    "DBAAS 控制面未返回 taskId。",
+                    error_type="dbaas_invalid_response",
+                )
+            task = context.task_service.create_task_record(
+                context.session,
+                task_id=task_id,
+                operation_id=operation.operation_id,
+                action=config.action,
+                targets=[target],
+                dbaas_type=config.action,
+                source_status="RUNNING",
+                message="backup task created",
+            )
+            result = OperationResult(
+                operation_id=operation.operation_id,
+                approval_id=operation.approval_id,
+                action=config.action,
+                targets=[target],
+                execution_mode="async",
+                status="task_created",
+                summary=f"已创建 {service_name} {_backup_scope_label(scope, unit_name)}备份任务 {task_id}。",
+                task=OperationTaskRef(
+                    task_id=task.task_id,
+                    type=task.dbaas_type,
+                    status=task.status,
+                ),
+                details={
+                    "task": task.model_dump(mode="json"),
+                    "backup_request": tool_args,
+                    "dbaas_response": payload,
+                },
+            )
+            context.operation_service.complete_operation(
+                context.session,
+                operation,
+                status="task_created",
+                result=result,
+            )
+            return operation_result_payload(result)
+        except DbaasWriteTimeout as exc:
+            result = _timeout_result(
+                operation.operation_id,
+                operation.approval_id,
+                config.action,
+                config.execution_mode,
+                [target],
+                exc,
+            )
+            context.operation_service.complete_operation(
+                context.session,
+                operation,
+                status="timeout",
+                result=result,
+            )
+            return operation_result_payload(result)
+        except DbaasWriteClientError as exc:
+            result = _failed_result(
+                operation.operation_id,
+                operation.approval_id,
+                config.action,
+                config.execution_mode,
+                [target],
+                exc,
+            )
+            context.operation_service.complete_operation(
+                context.session,
+                operation,
+                status="failed",
+                result=result,
+            )
+            return operation_result_payload(result)
+        except TaskConflictError as exc:
+            result = OperationResult(
+                operation_id=operation.operation_id,
+                approval_id=operation.approval_id,
+                action=config.action,
+                targets=[target],
+                execution_mode="async",
+                status="failed",
+                summary="当前 Session 已存在同类未结束任务，未创建新的备份任务。",
+                error=OperationError(
+                    error_type="task_conflict",
+                    message=f"已有未结束任务：{exc.task.task_id}",
+                ),
+                details={"existing_task": exc.task.model_dump(mode="json")},
+            )
+            context.operation_service.complete_operation(
+                context.session,
+                operation,
+                status="failed",
+                result=result,
+            )
+            return operation_result_payload(result)
+
     @tool("get_dbaas_task_tool")
     def get_dbaas_task_tool(task_id: str) -> dict[str, Any]:
         """查询当前 Session 已记录的 DBAAS 异步任务状态。"""
@@ -470,6 +641,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
         update_service_resource_tool,
         update_service_storage_tool,
         create_service_image_upgrade_task_tool,
+        create_service_backup_task_tool,
         get_dbaas_task_tool,
         list_current_session_tasks_tool,
     ]
@@ -481,12 +653,16 @@ def _assert_required_role(role: str, required_role: str) -> None:
 
 
 def _service_target(service_name: str, child_service_type: str) -> OperationTarget:
-    return OperationTarget(
-        kind="service",
-        id=service_name,
-        name=service_name,
-        qualifiers={"child_service_type": child_service_type},
-    )
+    return service_child_target(service_name, child_service_type)
+
+
+def _backup_scope_label(
+    scope: str,
+    unit_name: str | None,
+) -> str:
+    if scope == "unit":
+        return f"unit {unit_name or '-'} "
+    return "服务级 "
 
 
 def _compact_tool_args(**values: Any) -> dict[str, Any]:

@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import CurrentUser, ensure_service_access, get_current_user, resolve_service_user_filter
 from app.schemas import (
+    BackupCapabilityResponse,
     CreateTaskResponse,
     PrecheckServiceResourceUpdateRequest,
     PrecheckServiceResourceUpdateResponse,
     PrecheckServiceStorageUpdateRequest,
     PrecheckServiceStorageUpdateResponse,
+    ServiceBackupRequest,
     ServiceDetailResponse,
     ServiceImageUpgradeRequest,
     UserServiceDetailResponse,
@@ -66,6 +68,40 @@ def list_services(
         UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
         for service_detail in store.list_service_details(user=effective_user)
     ]
+
+
+@router.get("/backup-task-capabilities", response_model=BackupCapabilityResponse)
+def describe_backup_task_capabilities(
+    request: Request,
+    serviceType: str | None = Query(default=None, description="服务类别"),
+    serviceName: str | None = Query(default=None, description="服务名称"),
+    unitName: str | None = Query(default=None, description="unit 名称"),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> BackupCapabilityResponse:
+    """返回手动备份发起能力和轻量运行提示。"""
+
+    if not any([serviceType, serviceName, unitName]):
+        raise HTTPException(status_code=400, detail="at least one target query parameter is required")
+    store = get_store(request)
+    try:
+        result = store.describe_backup_task_capabilities(
+            service_type=serviceType,
+            service_name=serviceName,
+            unit_name=unitName,
+        )
+    except ServiceNotFoundError as error:
+        raise HTTPException(status_code=404, detail=f"service '{error.args[0]}' not found") from None
+    except ChildServiceTypeNotFoundError as error:
+        raise HTTPException(status_code=502, detail=f"child service '{error.args[0]}' not found") from None
+    except ServiceUnitNotFoundError as error:
+        raise HTTPException(status_code=404, detail=f"unit '{error.args[0]}' not found") from None
+
+    resolved = result.get("resolvedTarget")
+    if isinstance(resolved, dict):
+        resolved_service_name = resolved.get("serviceName")
+        if isinstance(resolved_service_name, str) and resolved_service_name:
+            ensure_service_access(store, current_user, resolved_service_name)
+    return BackupCapabilityResponse.model_validate(result)
 
 
 @router.post("/api/v1/prechecks/service-resource-update", response_model=PrecheckServiceResourceUpdateResponse)
@@ -183,6 +219,38 @@ def update_service_storage(
     if current_user.is_admin:
         return ServiceDetailResponse.model_validate(service_detail)
     return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
+
+
+@router.post("/services/{name}/backup", response_model=CreateTaskResponse)
+def create_service_backup_task(
+    name: str,
+    payload: ServiceBackupRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CreateTaskResponse:
+    """创建手动备份异步任务，并返回统一 taskId。"""
+
+    store = get_store(request)
+    ensure_service_access(store, current_user, name)
+    try:
+        task = store.create_service_backup_task(
+            name,
+            scope=payload.scope,
+            backup_type=payload.backupType,
+            retention_days=payload.retentionDays,
+            unit_name=payload.unitName,
+            options=payload.options,
+            remark=payload.remark,
+        )
+    except ServiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"service '{name}' not found") from None
+    except ChildServiceTypeNotFoundError as error:
+        raise HTTPException(status_code=502, detail=f"service '{name}' has no child service '{error.args[0]}'") from None
+    except ServiceUnitNotFoundError as error:
+        raise HTTPException(status_code=400, detail=f"service '{name}' has no unit '{error.args[0]}'") from None
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    return CreateTaskResponse(taskId=task["taskId"])
 
 
 @router.post("/services/{name}/image-upgrade", response_model=CreateTaskResponse)

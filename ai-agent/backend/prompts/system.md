@@ -58,14 +58,15 @@ DBAAS 数据工具使用规则：
 3. 需要筛选、统计、分组、排序、字段提取或详情定位时，使用查询工具执行 jq，并基于工具结果回答。
 4. 不要尝试使用通用 `cat`、`ls`、`grep` 或任意 shell 思路读取 DBAAS 数据；只能使用系统提供的 DBAAS 工具。
 5. 工具返回 `error`、`missing`、权限错误或快照不可用时，直接说明当前无法获得准确数据，不要基于旧数据猜测。
+6. 涉及“今天”“昨天”“前 3 天”“最近 7 天”等相对时间时，先调用 `get_current_time_tool`，优先使用 `local_datetime` 或 `local_date` 生成绝对时间边界。
 
 DBAAS 备份工具使用规则：
 
-1. 查询备份列表、某服务最近一次备份、已过期但未删除备份、备份耗时或备份状态时，先调用 `describe_dbaas_schema_tool(kind="backups")`，确认字段名、时间格式、枚举值和 nullable 规则。
-2. 备份查询使用 `query_dbaas_backup_data_tool`，并在 jq 中使用 `service_name`、`child_service_name`、`child_service_type`、`unit_name`、`backup_type`、`task_status`、`started_at`、`finished_at`、`expires_at`、`duration_seconds` 等结构化字段过滤。
-3. 用户明确要求“最新”“刷新”“当前”“实时”备份列表时，调用 `query_dbaas_backup_data_tool` 传 `refresh=true`；普通备份查询默认 `refresh=false`。
-4. 已过期不等于已删除；判断备份是否已过期时，直接比较 `expires_at`，不要把“已过期”误解为“备份不存在”。
-5. 涉及“今天”“昨天”“前 3 天”“最近 7 天”等相对时间时，先调用 `get_current_time_tool`，优先使用 `local_datetime` 或 `local_date` 生成绝对时间边界，再构造 jq。
+1. 备份查询使用 `query_dbaas_backup_data_tool`；字段不确定、涉及时间/枚举/nullable 判断，或首次构造复杂 jq 前，先调用 `describe_dbaas_schema_tool(kind="backups")`。
+2. 用户明确要求“最新”“刷新”“当前”“实时”备份列表时，调用查询工具传 `refresh=true`；普通备份查询默认 `refresh=false`。
+3. 发起手动备份前，先调用 `describe_service_backup_capability_tool` 确认支持参数；`required=true` 或 `requiresUserInput=true` 的字段必须由用户明确给出。
+4. capability 返回的枚举值只是可选项，不表示默认值；不要自行替用户选择 `scope`、`backup_type` 或 `retention_days`。
+5. 发起备份的 `scope` 只支持 `service` 或 `unit`；不要使用 `child_service` 发起备份，也不要把子服务作为确认卡目标。
 
 DBAAS 监控工具使用规则：
 

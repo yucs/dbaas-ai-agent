@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import math
@@ -401,6 +401,133 @@ class JsonDataStore:
                     "unitIds": selected_unit_ids,
                 },
             }
+            self._tasks_by_id[task_id] = task
+        self._start_task_worker(task_id)
+        return self._public_task(task)
+
+    def describe_backup_task_capabilities(
+        self,
+        *,
+        service_type: str | None = None,
+        service_name: str | None = None,
+        unit_name: str | None = None,
+    ) -> dict[str, Any]:
+        """返回备份任务能力描述和轻量运行提示。"""
+
+        with self._lock:
+            resolved = self._resolve_backup_target(
+                service_type=service_type,
+                service_name=service_name,
+                unit_name=unit_name,
+                scope=None,
+            )
+            effective_service_type = resolved.get("serviceType") or service_type
+            fields = self._backup_capability_fields(str(effective_service_type or "generic"))
+            running = self._running_backups_for_resolved_target(resolved)
+            result = {
+                "supported": True,
+                "serviceType": effective_service_type,
+                "scopeValues": ["service", "unit"],
+                "fields": fields,
+            }
+            if resolved:
+                result["resolvedTarget"] = resolved
+                result["runtimeHints"] = {
+                    "backupRunning": bool(running),
+                    "runningBackups": running,
+                }
+            return result
+
+    def create_service_backup_task(
+        self,
+        name: str,
+        *,
+        scope: str,
+        backup_type: str,
+        retention_days: int,
+        unit_name: str | None = None,
+        options: dict[str, Any] | None = None,
+        remark: str | None = None,
+    ) -> dict[str, Any]:
+        """创建手动备份异步任务并立即生成 running backup records。"""
+
+        normalized_scope = (scope or "service").strip().lower()
+        if normalized_scope not in {"service", "unit"}:
+            raise ValueError("scope must be one of service, unit")
+
+        with self._lock:
+            service = self._services_by_name.get(name)
+            if service is None:
+                raise ServiceNotFoundError(name)
+            resolved = self._resolve_backup_target(
+                service_name=name,
+                unit_name=unit_name,
+                scope=normalized_scope,
+            )
+            target_units = self._backup_target_units(
+                service,
+                scope=normalized_scope,
+                unit_name=unit_name,
+            )
+            now = self._utcnow()
+            task_id = self._next_task_id(
+                action="service.backup.create",
+                service_name=name,
+                child_service_type=normalized_scope,
+            )
+            task = {
+                "taskId": task_id,
+                "type": "service.backup.create",
+                "status": "RUNNING",
+                "message": "backup running",
+                "reason": None,
+                "resourceType": "service",
+                "resourceName": name,
+                "result": None,
+                "createdAt": now,
+                "updatedAt": now,
+                "_operation": {
+                    "kind": "service.backup.create",
+                    "scope": normalized_scope,
+                    "backupType": backup_type,
+                    "retentionDays": retention_days,
+                    "unitName": unit_name,
+                    "options": deepcopy(options or {}),
+                    "remark": remark,
+                    "resolvedTarget": deepcopy(resolved),
+                    "backupIds": [],
+                },
+            }
+            compress_mode = str((options or {}).get("compressMode") or (options or {}).get("compress_mode") or "gzip")
+            for index, item in enumerate(target_units, start=1):
+                backup_id = f"backup-{self._slug(name)}-{self._slug(item['unit']['name'])}-{secrets.token_hex(3)}"
+                task["_operation"]["backupIds"].append(backup_id)
+                self._backups.append(
+                    {
+                        "backup_id": backup_id,
+                        "task_id": task_id,
+                        "service_name": name,
+                        "service_type": service["type"],
+                        "child_service_name": item["child_service"].get("name") or item["child_service"].get("type"),
+                        "child_service_type": item["child_service"].get("type"),
+                        "unit_name": item["unit"]["name"],
+                        "backup_type": backup_type,
+                        "backup_path": None,
+                        "size_bytes": 0,
+                        "storage_type": None,
+                        "compress_mode": compress_mode,
+                        "started_at": self._format_backup_time(self._utcnow_datetime()),
+                        "finished_at": None,
+                        "expires_at": None,
+                        "duration_seconds": 0,
+                        "task_status": "running",
+                        "task_error": None,
+                        "valid_status": "valid",
+                        "remark": remark or f"手动备份 {index}/{len(target_units)}",
+                        "owner_user": service.get("user"),
+                        "deleted": False,
+                    }
+                )
             self._tasks_by_id[task_id] = task
         self._start_task_worker(task_id)
         return self._public_task(task)
@@ -1418,6 +1545,176 @@ class JsonDataStore:
             raise ChildServiceTypeNotFoundError(child_service_type)
         return target_services
 
+    def _resolve_backup_target(
+        self,
+        *,
+        service_type: str | None = None,
+        service_name: str | None = None,
+        unit_name: str | None = None,
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """按全局唯一名称解析备份目标。"""
+
+        if unit_name:
+            service, child_service, unit = self._find_unit_by_name(unit_name)
+            if service_name is not None and service["name"] != service_name:
+                raise ServiceUnitNotFoundError(unit_name)
+            return {
+                "scope": "unit",
+                "serviceName": service["name"],
+                "serviceType": service["type"],
+                "childServiceType": child_service.get("type"),
+                "childServiceName": child_service.get("name"),
+                "unitName": unit["name"],
+            }
+
+        if service_name:
+            service = self._services_by_name.get(service_name)
+            if service is None:
+                raise ServiceNotFoundError(service_name)
+            resolved: dict[str, Any] = {
+                "scope": scope or "service",
+                "serviceName": service["name"],
+                "serviceType": service["type"],
+            }
+            return resolved
+
+        if service_type:
+            return {
+                "scope": "service_type",
+                "serviceType": service_type,
+            }
+
+        return {}
+
+    def _backup_target_units(
+        self,
+        service: dict[str, Any],
+        *,
+        scope: str,
+        unit_name: str | None,
+    ) -> list[dict[str, dict[str, Any]]]:
+        """返回备份任务对应的 child service / unit 列表。"""
+
+        items: list[dict[str, dict[str, Any]]] = []
+        for child_service in service.get("services", []):
+            for unit in child_service.get("units", []):
+                if scope == "unit" and unit.get("name") != unit_name:
+                    continue
+                items.append({"child_service": child_service, "unit": unit})
+
+        if not items:
+            if scope == "unit":
+                raise ServiceUnitNotFoundError(unit_name or "")
+        return items
+
+    def _find_unit_by_name(self, unit_name: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        for service in self._services_by_name.values():
+            for child_service in service.get("services", []):
+                for unit in child_service.get("units", []):
+                    if unit.get("name") == unit_name:
+                        return service, child_service, unit
+        raise ServiceUnitNotFoundError(unit_name)
+
+    def _backup_capability_fields(self, service_type: str) -> list[dict[str, Any]]:
+        fields = [
+            {
+                "name": "scope",
+                "type": "string",
+                "required": True,
+                "enumValues": ["service", "unit"],
+                "description": "备份范围",
+                "requiresUserInput": True,
+            },
+            {
+                "name": "backupType",
+                "type": "string",
+                "required": True,
+                "enumValues": ["full"],
+                "description": "备份类型",
+                "requiresUserInput": True,
+            },
+            {
+                "name": "retentionDays",
+                "type": "integer",
+                "required": True,
+                "min": 1,
+                "max": 365,
+                "description": "备份保留天数",
+                "requiresUserInput": True,
+            },
+            {
+                "name": "remark",
+                "type": "string",
+                "required": False,
+                "description": "备注",
+                "requiresUserInput": False,
+            },
+        ]
+        if service_type in {"mysql", "upsql", "tidb"}:
+            fields.append(
+                {
+                    "name": "options.compressMode",
+                    "type": "string",
+                    "required": False,
+                    "enumValues": ["gzip", "none"],
+                    "description": "压缩模式",
+                    "requiresUserInput": True,
+                }
+            )
+        if service_type == "redis":
+            fields.append(
+                {
+                    "name": "options.rdbOnly",
+                    "type": "boolean",
+                    "required": False,
+                    "description": "是否仅创建 RDB 备份",
+                    "requiresUserInput": True,
+                }
+            )
+        return fields
+
+    def _running_backups_for_resolved_target(self, resolved: dict[str, Any]) -> list[dict[str, Any]]:
+        if not resolved or resolved.get("scope") == "service_type":
+            return []
+        running: list[dict[str, Any]] = []
+        for backup in self._backups:
+            if backup.get("task_status") != "running":
+                continue
+            if not self._backup_matches_resolved_target(backup, resolved):
+                continue
+            running.append(
+                {
+                    "backupId": backup.get("backup_id"),
+                    "taskId": backup.get("task_id"),
+                    "serviceName": backup.get("service_name"),
+                    "childServiceName": backup.get("child_service_name"),
+                    "unitName": backup.get("unit_name"),
+                    "startedAt": backup.get("started_at"),
+                }
+            )
+        return running[:20]
+
+    def _backup_matches_resolved_target(self, backup: dict[str, Any], resolved: dict[str, Any]) -> bool:
+        service_name = resolved.get("serviceName")
+        if service_name and backup.get("service_name") != service_name:
+            return False
+        unit_name = resolved.get("unitName")
+        if unit_name:
+            return backup.get("unit_name") == unit_name
+        child_service_name = resolved.get("childServiceName")
+        if child_service_name:
+            return backup.get("child_service_name") == child_service_name
+        child_service_type = resolved.get("childServiceType")
+        if child_service_type:
+            return backup.get("child_service_type") == child_service_type
+        return True
+
+    def _format_backup_time(self, value: datetime) -> str:
+        """返回 Phase9 backups 使用的时间格式。"""
+
+        return value.astimezone(UTC).replace(tzinfo=None, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
     def _get_updated_service_detail(self, name: str) -> dict[str, Any]:
         """返回更新后的完整服务详情。"""
 
@@ -1643,6 +1940,9 @@ class JsonDataStore:
             if task_type == "service.image.upgrade":
                 self._run_service_image_upgrade_task(task_id, operation)
                 return
+            if task_type == "service.backup.create":
+                self._run_service_backup_task(task_id, operation)
+                return
 
             raise ValueError(f"unsupported task type '{task_type}'")
         except Exception as error:  # noqa: BLE001
@@ -1678,6 +1978,40 @@ class JsonDataStore:
                 "version": operation["version"],
             }
 
+    def _run_service_backup_task(self, task_id: str, operation: dict[str, Any]) -> None:
+        """后台完成手动备份任务，并更新对应 backup records。"""
+
+        backup_ids = operation.get("backupIds") or []
+        if not isinstance(backup_ids, list):
+            backup_ids = []
+        time.sleep(max(self.task_unit_interval_seconds, 0.01))
+        with self._lock:
+            finished_dt = self._utcnow_datetime()
+            finished_at = self._format_backup_time(finished_dt)
+            retention_days = int(operation.get("retentionDays") or 0)
+            expires_at = self._format_backup_time(finished_dt + timedelta(days=retention_days))
+            for backup in self._backups:
+                if backup.get("task_id") != task_id:
+                    continue
+                backup["task_status"] = "succeeded"
+                backup["task_error"] = None
+                backup["finished_at"] = finished_at
+                backup["duration_seconds"] = 1
+                backup["expires_at"] = expires_at
+                backup["backup_path"] = f"mock://backups/{task_id}/{backup['backup_id']}.bak"
+                backup["storage_type"] = "NAS"
+                backup["size_bytes"] = max(1024, self._stable_int(task_id, backup["backup_id"]) % 10_000_000)
+            task = self._get_task_for_update(task_id)
+            task["status"] = "SUCCESS"
+            task["message"] = "backup completed"
+            task["updatedAt"] = self._utcnow()
+            task["result"] = {
+                "scope": operation.get("scope"),
+                "backupType": operation.get("backupType"),
+                "retentionDays": operation.get("retentionDays"),
+                "backupIds": backup_ids,
+            }
+
     def _mark_task_failed(self, task_id: str, reason: str) -> None:
         """把任务标记为失败。"""
 
@@ -1689,6 +2023,13 @@ class JsonDataStore:
             task["message"] = "task execution failed"
             task["reason"] = reason
             task["updatedAt"] = self._utcnow()
+            for backup in self._backups:
+                if backup.get("task_id") != task_id:
+                    continue
+                backup["task_status"] = "failed"
+                backup["task_error"] = reason
+                backup["finished_at"] = self._format_backup_time(self._utcnow_datetime())
+                backup["duration_seconds"] = 1
 
     def _get_task_for_update(self, task_id: str) -> dict[str, Any]:
         """返回可写的任务对象。"""

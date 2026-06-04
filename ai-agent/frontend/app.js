@@ -88,7 +88,24 @@ function formatValueWithUnit(value, unit) {
   if (value === null || value === undefined || value === "") {
     return "-";
   }
-  return `${escapeHtml(value)}${unit ? escapeHtml(unit) : ""}`;
+  return `${formatApprovalValue(value)}${unit ? escapeHtml(unit) : ""}`;
+}
+
+function formatApprovalValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.map(formatApprovalValue).join("，") : "[]";
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    if (!entries.length) {
+      return "{}";
+    }
+    return entries.map(([key, item]) => `${escapeHtml(key)}: ${formatApprovalValue(item)}`).join("，");
+  }
+  return escapeHtml(value);
 }
 
 function formatRiskLevel(value) {
