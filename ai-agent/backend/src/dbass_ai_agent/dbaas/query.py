@@ -25,6 +25,7 @@ def query_dbaas_data(
     kind: str,
     jq_filter: str,
     max_preview_items: int | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     if kind not in SUPPORTED_KINDS:
         return {
@@ -41,18 +42,29 @@ def query_dbaas_data(
             "message": "第一版仅支持 services 查询。",
         }
 
-    visible = _current_services_snapshot(config, identity)
-    if (
-        identity.role != ADMIN_SCOPE
-        and visible.get("status") == "error"
-        and visible.get("error_type") == "snapshot_missing"
-        and identity.user
-    ):
-        DbaasServiceSynchronizer(config).force_refresh_user_services(
+    synchronizer = DbaasServiceSynchronizer(config)
+    if refresh:
+        refreshed = _force_refresh_services_snapshot(
+            synchronizer,
             identity,
             timeout_seconds=config.user_snapshot_refresh_wait_seconds,
         )
+        if refreshed.get("status") != "fresh" or refreshed.get("last_refresh_status") != "success":
+            return _refresh_failed_response(identity, refreshed)
         visible = _current_services_snapshot(config, identity)
+    else:
+        visible = _current_services_snapshot(config, identity)
+        if (
+            identity.role != ADMIN_SCOPE
+            and visible.get("status") == "error"
+            and visible.get("error_type") == "snapshot_missing"
+            and identity.user
+        ):
+            synchronizer.force_refresh_user_services(
+                identity,
+                timeout_seconds=config.user_snapshot_refresh_wait_seconds,
+            )
+            visible = _current_services_snapshot(config, identity)
     if visible.get("status") != "fresh":
         return visible
 
@@ -108,18 +120,17 @@ def query_dbaas_data(
     preview, item_truncated = _preview_values(values, preview_limit)
     truncated = byte_truncated or item_truncated
     return {
-        "kind": kind,
-        "scope": visible.get("scope"),
+        **visible,
         "status": "success",
         "jq_filter": jq_filter,
         "preview": preview,
         "preview_count": len(preview) if isinstance(preview, list) else 1,
         "truncated": truncated,
-        "data_path": data_path,
+        "byte_truncated": byte_truncated,
         "message": (
             "查询结果较大，仅返回预览，请缩小查询条件。"
             if truncated
-            else "查询完成，结果来自当前用户可见 DBAAS 数据。"
+            else "查询完成，结果来自当前用户可见 DBAAS 服务数据视图。"
         ),
     }
 
@@ -190,6 +201,46 @@ def _snapshot_unavailable(paths, message: str, *, error_type: str = "snapshot_un
         "data_path": None,
         "meta_path": str(paths.meta_path),
         "message": f"当前没有可用的服务列表快照：{message}",
+    }
+
+
+def _force_refresh_services_snapshot(
+    synchronizer: DbaasServiceSynchronizer,
+    identity: Identity,
+    *,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    if identity.role == ADMIN_SCOPE:
+        return synchronizer.force_refresh_admin_services()
+    if identity.user:
+        return synchronizer.force_refresh_user_services(
+            identity,
+            timeout_seconds=timeout_seconds,
+        )
+    return {
+        "kind": SERVICES_KIND,
+        "scope": USER_SCOPE,
+        "user": None,
+        "status": "error",
+        "error_type": "permission_identity_missing",
+        "data_path": None,
+        "message": "当前用户身份缺少可见范围，无法刷新 DBAAS 服务列表快照。",
+    }
+
+
+def _refresh_failed_response(identity: Identity, refreshed: dict[str, Any]) -> dict[str, Any]:
+    scope = ADMIN_SCOPE if identity.role == ADMIN_SCOPE else USER_SCOPE
+    return {
+        "kind": SERVICES_KIND,
+        "scope": refreshed.get("scope") or scope,
+        "user": refreshed.get("user") if refreshed.get("user") is not None else identity.user,
+        "status": "error",
+        "error_type": str(refreshed.get("error_type") or "snapshot_unavailable"),
+        "data_path": None,
+        "meta_path": refreshed.get("meta_path"),
+        "message": (
+            f"当前无法刷新到最新的服务列表快照：{refreshed.get('last_error') or refreshed.get('message') or '刷新失败。'}"
+        ),
     }
 
 

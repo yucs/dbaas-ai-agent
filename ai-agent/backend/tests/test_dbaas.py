@@ -122,6 +122,9 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["scope"], "user")
             self.assertEqual(result["preview"], [{"name": "mysql-b", "healthStatus": "UNHEALTHY"}])
+            self.assertIsInstance(result["synced_at"], str)
+            self.assertIsInstance(result["expires_at"], str)
+            self.assertEqual(result["ttl_seconds"], config.ttl_seconds)
 
     def test_tool_identity_context_can_exit_from_different_context(self) -> None:
         manager = dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None))
@@ -223,6 +226,72 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["scope"], "user")
             refresh_user.assert_called_once()
 
+    def test_query_refresh_for_admin_triggers_force_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+
+            def _refresh() -> dict[str, object]:
+                _write_fresh_admin_snapshot(
+                    config,
+                    [_service("mysql-a", "payment-team", health_status="UNHEALTHY")],
+                )
+                workspace = DbaasWorkspace(config)
+                return {
+                    "status": "fresh",
+                    "last_refresh_status": "success",
+                    "meta_path": str(workspace.meta_path(SERVICES_KIND)),
+                }
+
+            with patch.object(DbaasServiceSynchronizer, "force_refresh_admin_services", side_effect=_refresh) as refresh_admin:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="admin", role="admin", user=None),
+                    kind="services",
+                    jq_filter='[.[] | {name, healthStatus}]',
+                    refresh=True,
+                )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["scope"], "admin")
+            self.assertEqual(result["preview"], [{"name": "mysql-a", "healthStatus": "UNHEALTHY"}])
+            refresh_admin.assert_called_once()
+
+    def test_query_refresh_for_user_triggers_force_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+
+            def _refresh(identity: Identity, *, timeout_seconds: int | None = None) -> dict[str, object]:
+                user = identity.user
+                assert user is not None
+                _write_fresh_user_snapshot(
+                    config,
+                    user,
+                    [_service("mysql-a", user, health_status="UNHEALTHY")],
+                )
+                workspace = DbaasWorkspace(config)
+                paths = workspace.paths(SERVICES_KIND, scope="user", user=user)
+                return {
+                    "status": "fresh",
+                    "scope": "user",
+                    "user": user,
+                    "last_refresh_status": "success",
+                    "meta_path": str(paths.meta_path),
+                }
+
+            with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
+                result = query_dbaas_data(
+                    config,
+                    Identity(user_id="alice", role="user", user="payment-team"),
+                    kind="services",
+                    jq_filter='[.[] | {name, healthStatus}]',
+                    refresh=True,
+                )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["scope"], "user")
+            self.assertEqual(result["preview"], [{"name": "mysql-a", "healthStatus": "UNHEALTHY"}])
+            refresh_user.assert_called_once()
+
     def test_query_user_stale_snapshot_does_not_trigger_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
@@ -273,6 +342,27 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["status"], "error")
             self.assertEqual(result["error_type"], "snapshot_unavailable")
             fetch_services.assert_not_called()
+
+    def test_query_refresh_failure_does_not_fallback_to_old_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_fresh_admin_snapshot(
+                config,
+                [_service("mysql-old", "payment-team", health_status="HEALTHY")],
+            )
+
+            result = query_dbaas_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                kind="services",
+                jq_filter='[.[] | {name, healthStatus}]',
+                refresh=True,
+            )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "snapshot_unavailable")
+            self.assertIsNone(result["data_path"])
+            self.assertIn("当前无法刷新到最新的服务列表快照", result["message"])
 
     def test_query_error_message_is_suitable_for_user_answer_when_snapshot_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

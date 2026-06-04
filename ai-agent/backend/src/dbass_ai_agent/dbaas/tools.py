@@ -65,11 +65,13 @@ def build_service_tools(settings: Settings) -> list[Any]:
         kind: str,
         jq_filter: str,
         max_preview_items: int | None = None,
+        refresh: bool = False,
     ) -> dict[str, Any]:
         """使用 jq 查询当前用户可见的 DBAAS services 数据。
 
         当前仅支持 kind=services。
         首次构造 jq 前，如上下文没有 services schema，先调用 describe_dbaas_schema_tool；已有 schema 则复用。
+        默认使用 refresh=false；用户明确要求强制刷新或重新拉取 DBAAS services 数据时传 refresh=true。
         只传 kind、jq_filter 和必要的 max_preview_items。
         services 顶层是数组，jq 从 .[] 处理单个服务。
         结果 truncated=true 时，仅基于 preview 总结，并建议缩小查询条件。
@@ -81,6 +83,7 @@ def build_service_tools(settings: Settings) -> list[Any]:
             kind=kind,
             jq_filter=jq_filter,
             max_preview_items=max_preview_items,
+            refresh=refresh,
         )
 
     @tool("describe_dbaas_schema_tool")
