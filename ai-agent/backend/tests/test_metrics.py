@@ -22,7 +22,7 @@ from dbass_ai_agent.dbaas.metric_cleanup import cleanup_metric_snapshots  # noqa
 from dbass_ai_agent.dbaas.metric_history import ensure_history_snapshot  # noqa: E402
 from dbass_ai_agent.dbaas.metric_query import query_unit_latest_metric_data  # noqa: E402
 from dbass_ai_agent.dbaas.metric_workspace import MetricWorkspace  # noqa: E402
-from dbass_ai_agent.dbaas.sync import isoformat, utcnow  # noqa: E402
+from dbass_ai_agent.dbaas.snapshot_meta import isoformat, utcnow  # noqa: E402
 from dbass_ai_agent.dbaas.tools import build_dbaas_tools  # noqa: E402
 from dbass_ai_agent.dbaas.workspace import write_json_atomic, write_meta_atomic  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
@@ -39,6 +39,15 @@ class MetricCatalogTests(unittest.TestCase):
         self.assertEqual(first["service_type"], "container")
         self.assertNotIn("service_types", first)
         self.assertNotIn("score", first)
+        shapes = result["data_shapes"]
+        self.assertEqual(shapes["latest"]["top_level"], "array")
+        self.assertEqual(shapes["latest"]["jq_entry"], ".[]")
+        self.assertFalse(shapes["latest"]["has_data_wrapper"])
+        self.assertEqual(shapes["history"]["top_level"], "array")
+        self.assertEqual(shapes["history"]["jq_entry"], ".[]")
+        self.assertFalse(shapes["history"]["has_data_wrapper"])
+        self.assertIn("ts", {field["name"] for field in shapes["history"]["item_fields"]})
+        self.assertIn("value", {field["name"] for field in shapes["history"]["item_fields"]})
 
     def test_catalog_search_filters_by_single_service_type(self) -> None:
         result = describe_unit_metric_catalog("复制状态", service_type="mysql", app_root=APP_ROOT)
@@ -217,7 +226,7 @@ class MetricToolTests(unittest.TestCase):
     def test_build_dbaas_tools_includes_service_and_metric_tools(self) -> None:
         tool_names = {item.name for item in build_dbaas_tools(Settings(), role="user")}
 
-        self.assertIn("query_dbaas_data_tool", tool_names)
+        self.assertIn("query_dbaas_service_data_tool", tool_names)
         self.assertIn("describe_unit_metric_catalog_tool", tool_names)
         self.assertIn("query_unit_latest_metric_data_tool", tool_names)
         self.assertIn("query_unit_metric_history_tool", tool_names)

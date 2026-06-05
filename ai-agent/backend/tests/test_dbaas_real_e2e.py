@@ -27,8 +27,9 @@ from dbass_ai_agent.agent.runtime import DeepAgentRuntime  # noqa: E402
 from dbass_ai_agent.config import DEFAULT_CONFIG_PATH, ConfigError, Settings  # noqa: E402
 from dbass_ai_agent.dbaas.config import dbaas_config_from_settings  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
-from dbass_ai_agent.dbaas.query import query_dbaas_data  # noqa: E402
-from dbass_ai_agent.dbaas.sync import DbaasServiceSynchronizer, isoformat  # noqa: E402
+from dbass_ai_agent.dbaas.service_query import query_dbaas_service_data  # noqa: E402
+from dbass_ai_agent.dbaas.service_sync import DbaasServiceSynchronizer  # noqa: E402
+from dbass_ai_agent.dbaas.snapshot_meta import isoformat  # noqa: E402
 from dbass_ai_agent.dbaas.workspace import DbaasWorkspace, read_json_file, write_meta_atomic  # noqa: E402
 from dbass_ai_agent.identity.models import Identity  # noqa: E402
 from dbass_ai_agent.sessions.models import ChatMessage, SessionMeta  # noqa: E402
@@ -233,10 +234,9 @@ class DbaasRealE2ETests(unittest.TestCase):
                 sync_meta = DbaasServiceSynchronizer(config).force_refresh_admin_services()
                 self.assertEqual(sync_meta["status"], "fresh")
 
-                query_result = query_dbaas_data(
+                query_result = query_dbaas_service_data(
                     config,
                     identity,
-                    kind=SERVICES_KIND,
                     jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
                 )
                 self.assertEqual(query_result["status"], "success", query_result)
@@ -265,10 +265,9 @@ class DbaasRealE2ETests(unittest.TestCase):
             self.assertFalse(workspace.data_path(SERVICES_KIND).exists())
             self.assertFalse(workspace.meta_path(SERVICES_KIND).exists())
 
-            unavailable = query_dbaas_data(
+            unavailable = query_dbaas_service_data(
                 config,
                 identity,
-                kind=SERVICES_KIND,
                 jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
             )
             self.assertEqual(unavailable["status"], "error")
@@ -281,7 +280,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     session=_session_meta(identity, "thread_dbaas_real_e2e_after_stop"),
                     user_message=_user_message(
                         "请重新查询 services 中 healthStatus 不是 HEALTHY 的数量。"
-                        "如果当前没有可用快照，请明确说明无法获得准确数据，不要猜数量。"
+                        "如果当前没有可用数据视图，请明确说明无法获得准确数据，不要猜数量。"
                     ),
                 )
             finally:
@@ -290,7 +289,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             self.assertTrue(
                 any(
                     marker in second_reply.content
-                    for marker in ["无法获得准确数据", "没有可用", "快照", "后台同步", "拉取 DBAAS 数据失败"]
+                    for marker in ["无法获得准确数据", "没有可用", "数据视图", "后台同步", "拉取 DBAAS 数据失败"]
                 ),
                 second_reply.content,
             )

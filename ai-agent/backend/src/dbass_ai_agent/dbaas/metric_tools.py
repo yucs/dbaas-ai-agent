@@ -25,7 +25,7 @@ def build_metric_tools(settings: Settings, require_identity: Callable[[], Identi
     ) -> dict[str, Any]:
         """按关键词、服务类型或 metric_key 搜索 DBAAS 单元监控项 catalog。
 
-        监控查询必须先通过该工具定位 metric_key、value_type、unit 和枚举语义。
+        监控查询必须先通过该工具定位 metric_key、value_type、unit、枚举语义和 latest/history 数据结构。
         不要猜测 metric_key、监控值类型或异常枚举含义。
         """
 
@@ -38,10 +38,10 @@ def build_metric_tools(settings: Settings, require_identity: Callable[[], Identi
         jq_filter: str,
         max_preview_items: int | None = None,
     ) -> dict[str, Any]:
-        """查询当前身份可见的 DBAAS latest 单元监控快照，并对快照执行 jq。
+        """查询当前身份可见的 DBAAS latest 单元监控数据视图，并执行 jq。
 
         metric_key 必须来自 describe_unit_metric_catalog_tool。
-        指定服务、单元、类型、阈值等过滤条件都写入 jq_filter。
+        latest 顶层是数组；jq_filter 可从 .[] 处理单个单元监控值。
         """
 
         return query_unit_latest_metric_data(
@@ -61,7 +61,11 @@ def build_metric_tools(settings: Settings, require_identity: Callable[[], Identi
         jq_filter: str,
         max_preview_items: int | None = None,
     ) -> dict[str, Any]:
-        """查询指定真实单元的 DBAAS history 监控快照，并对历史点位数组执行 jq。"""
+        """查询指定真实单元的 DBAAS history 监控数据视图，并执行 jq。
+
+        history 顶层直接是数组；jq_filter 应从 .[] 遍历历史点位，不存在 .data 包装层。
+        每个历史点位通常包含 ts 和 value 字段。
+        """
 
         return query_unit_metric_history(
             config,

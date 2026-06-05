@@ -5,18 +5,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from langchain_core.tools import tool
-
-from dbass_ai_agent.config import APP_ROOT, Settings
+from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity, UserRole
 
 from .backup_tools import build_backup_tools
-from .config import DbaasConfig, dbaas_config_from_settings
-from .constants import BACKUPS_KIND, SERVICES_KIND
 from .metric_tools import build_metric_tools
 from .precheck_tools import build_precheck_tools
-from .query import query_dbaas_data
-from .schema import describe_schema
+from .service_tools import build_service_tools
 from .write_tools import build_write_tools
 
 
@@ -41,7 +36,7 @@ def dbaas_tool_identity(
 
 def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
     tools = [
-        *build_service_tools(settings),
+        *build_service_tools(settings, _require_identity),
         *build_backup_tools(settings, _require_identity),
         *build_metric_tools(settings, _require_identity),
         *build_precheck_tools(settings, _require_identity),
@@ -55,48 +50,6 @@ def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
 def build_admin_only_tools(settings: Settings) -> list[Any]:
     del settings
     return []
-
-
-def build_service_tools(settings: Settings) -> list[Any]:
-    config = dbaas_config_from_settings(settings)
-
-    @tool("query_dbaas_data_tool")
-    def query_dbaas_data_tool(
-        kind: str,
-        jq_filter: str,
-        max_preview_items: int | None = None,
-        refresh: bool = False,
-    ) -> dict[str, Any]:
-        """使用 jq 查询当前用户可见的 DBAAS services 数据。
-
-        当前仅支持 kind=services。
-        首次构造 jq 前，如上下文没有 services schema，先调用 describe_dbaas_schema_tool；已有 schema 则复用。
-        默认使用 refresh=false；用户明确要求强制刷新或重新拉取 DBAAS services 数据时传 refresh=true。
-        只传 kind、jq_filter 和必要的 max_preview_items。
-        services 顶层是数组，jq 从 .[] 处理单个服务。
-        结果 truncated=true 时，仅基于 preview 总结，并建议缩小查询条件。
-        """
-
-        return query_dbaas_data(
-            config,
-            _require_identity(),
-            kind=kind,
-            jq_filter=jq_filter,
-            max_preview_items=max_preview_items,
-            refresh=refresh,
-        )
-
-    @tool("describe_dbaas_schema_tool")
-    def describe_dbaas_schema_tool(kind: str = SERVICES_KIND) -> dict[str, Any]:
-        """返回 DBAAS schema 字段说明。
-
-        当前支持 kind=services 和 kind=backups。
-        用于确认 DBAAS 字段含义、可用字段和 jq 查询路径。
-        """
-
-        return describe_schema(kind, app_root=APP_ROOT, identity=_require_identity())
-
-    return [query_dbaas_data_tool, describe_dbaas_schema_tool]
 
 
 def _require_identity() -> Identity:

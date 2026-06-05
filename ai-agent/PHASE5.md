@@ -4,7 +4,7 @@
 
 - 状态：已实现第一版，后续扩展未做
 - 当前代码状态：services 快照、admin/user 身份隔离、schema 校验、后台同步、普通用户 prewarm/lease 和受控 jq 查询工具已落地
-- 本文档作用：说明 DBAAS services 快照机制、身份隔离、schema 和 `query_dbaas_data_tool` 的设计与实现边界
+- 本文档作用：说明 DBAAS services 快照机制、身份隔离、schema 和 `query_dbaas_service_data_tool` 的设计与实现边界
 - 仍有效内容：原始 DBAAS 数据不直接进模型上下文，查询走当前身份快照和 jq，普通用户不能 fallback 到 admin 快照，过期快照不能用于回答
 - 后续关注：hosts、clusters、realtime_status 等 kind 仍是后续扩展；services 与 metric jq 公共抽象可在稳定后再做
 
@@ -333,11 +333,11 @@ realtime_status.meta.json
 第一版 Agent 可见工具保留：
 
 ```text
-query_dbaas_data_tool
+query_dbaas_service_data_tool
 describe_dbaas_schema_tool
 ```
 
-`query_dbaas_data_tool` 的职责是读取已发布快照并执行受控 `jq`。
+`query_dbaas_service_data_tool` 的职责是读取已发布快照并执行受控 `jq`。
 它不直接执行任意 DBAAS 请求，
 不删除文件，
 不写入快照，
@@ -452,7 +452,7 @@ data/runtime/dbaas_workspace/admin/.services.json.3zrmm9ds.tmp
 而应通过受控工具执行 `jq`：
 
 ```text
-query_dbaas_data_tool(kind, jq_filter, max_preview_items)
+query_dbaas_service_data_tool(jq_filter, max_preview_items)
 ```
 
 `jq_filter` 可以由大模型根据用户问题和 schema 摘要生成。
@@ -568,12 +568,12 @@ search_dbaas_data_tool
 - 限制文件类型和输出大小
 - 对 schema 说明使用 `describe_dbaas_schema_tool(kind)`，不直接读取任意项目文件
 
-全文搜索需求优先通过 `query_dbaas_data_tool` 的 `jq_filter` 实现；
+全文搜索需求优先通过 `query_dbaas_service_data_tool` 的 `jq_filter` 实现；
 如果后续成为高频需求，再封装 `search_dbaas_data_tool(kind, query, fields)`。
 
 对于“查看某个具体服务的所有内容”这类低频详情查询，
 第一版不新增专用工具，
-统一通过 `query_dbaas_data_tool` 生成 jq 查询完成。
+统一通过 `query_dbaas_service_data_tool` 生成 jq 查询完成。
 
 示例：
 
@@ -587,7 +587,7 @@ search_dbaas_data_tool
 第一版工具组合建议：
 
 ```text
-query_dbaas_data_tool
+query_dbaas_service_data_tool
 describe_dbaas_schema_tool
 ```
 
@@ -692,7 +692,7 @@ mock-server / 真实 DBAAS 在普通用户身份下返回的 `/services`
 
 - 内存缓存不作为事实源
 - 内存缓存不能绕过用户权限过滤
-- `query_dbaas_data_tool` 等查询工具仍应读取当前身份对应的快照文件
+- `query_dbaas_service_data_tool` 等查询工具仍应读取当前身份对应的快照文件
 
 ## 12. 快照 Schema 与字段描述
 
@@ -853,9 +853,11 @@ backend/src/dbass_ai_agent/dbaas/
   config.py
   constants.py
   workspace.py
+  snapshot_meta.py
   schema.py
-  sync.py
-  query.py
+  service_sync.py
+  service_query.py
+  service_tools.py
   tools.py
   background.py
 
@@ -872,16 +874,20 @@ config/schemas/
   - endpoint path 和固定文件名，例如 `/services`、`services.json`、`services.meta.json`
 - `dbaas/workspace.py`
   - 工作目录路径计算、admin 目录、`users/{safe_user}` 目录、临时文件路径、data/meta 文件路径、启动时孤儿 `.tmp` 清理
+- `dbaas/snapshot_meta.py`
+  - 快照元数据时间、过期判断和 meta 读取等公共 helper
 - `dbaas/schema.py`
   - 根据身份加载 admin/user JSON Schema、校验 dbaas-server 响应、生成 schema 字段说明摘要
-- `dbaas/sync.py`
+- `dbaas/service_sync.py`
   - 调用 `dbaas-server` HTTP 接口、刷新 admin 全量快照、刷新普通用户可见快照、临时文件写入、过期文件删除、原子替换发布
-- `dbaas/query.py`
+- `dbaas/service_query.py`
   - 读取当前身份对应快照、受控执行 `jq`、处理 timeout、输出限制、preview 和错误返回
+- `dbaas/service_tools.py`
+  - DeepAgent 可见 services 查询和 DBAAS schema 描述工具包装
 - `dbaas/background.py`
   - 启动时触发 workspace 临时文件清理、admin 后台定时同步循环、普通用户 active lease 刷新循环、普通用户不活跃后的快照删除，供 FastAPI 生命周期挂载
 - `dbaas/tools.py`
-  - DeepAgent 可见工具包装，第一版包含 `query_dbaas_data_tool`、`describe_dbaas_schema_tool`
+  - DBAAS 工具聚合入口，组装 service、backup、metric、precheck 和 write 工具
 
 FastAPI 侧负责在应用生命周期中启动和停止 admin 后台同步任务，
 并在会话打开、会话心跳或会话关闭时维护普通用户 active lease；

@@ -56,10 +56,68 @@ def describe_unit_metric_catalog(
         "status": "success",
         "query": query_text,
         "service_type": service_type_filter,
+        "data_shapes": metric_data_shapes(),
         "items": items,
         "count": len(items),
         "truncated": len(scored) > effective_limit,
         "message": "监控项 catalog 查询完成。" if items else "未找到匹配的监控项。",
+    }
+
+
+def metric_data_shapes() -> dict[str, Any]:
+    return {
+        "latest": {
+            "top_level": "array",
+            "jq_entry": ".[]",
+            "has_data_wrapper": False,
+            "description": "latest 数据视图顶层直接是数组；每个元素表示一个单元的当前监控值。",
+            "item_fields": [
+                {
+                    "name": "service_name",
+                    "description": "服务名称。",
+                    "type": "string",
+                    "nullable": False,
+                },
+                {
+                    "name": "unit_name",
+                    "description": "单元名称。",
+                    "type": "string",
+                    "nullable": False,
+                },
+                {
+                    "name": "service_type",
+                    "description": "服务或子服务类型。",
+                    "type": "string",
+                    "nullable": False,
+                },
+                {
+                    "name": "value",
+                    "description": "监控值，具体类型、单位和枚举语义由 catalog item 的 value_type、unit、enum_values 等字段决定。",
+                    "type": ["number", "string", "boolean", "null"],
+                    "nullable": True,
+                },
+            ],
+        },
+        "history": {
+            "top_level": "array",
+            "jq_entry": ".[]",
+            "has_data_wrapper": False,
+            "description": "history 数据视图顶层直接是数组，不存在 .data 包装层；每个元素表示一个历史点位。",
+            "item_fields": [
+                {
+                    "name": "ts",
+                    "description": "历史点位 Unix timestamp 秒数。",
+                    "type": "number",
+                    "nullable": False,
+                },
+                {
+                    "name": "value",
+                    "description": "历史点位监控值，具体类型、单位和枚举语义由 catalog item 的 value_type、unit、enum_values 等字段决定。",
+                    "type": ["number", "string", "boolean", "null"],
+                    "nullable": True,
+                },
+            ],
+        },
     }
 
 

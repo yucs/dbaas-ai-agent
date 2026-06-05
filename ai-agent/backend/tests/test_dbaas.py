@@ -19,9 +19,10 @@ from dbass_ai_agent.config import APP_ROOT, Settings  # noqa: E402
 from dbass_ai_agent.dbaas.auth import dbaas_identity_headers, dbaas_system_headers  # noqa: E402
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
-from dbass_ai_agent.dbaas.query import query_dbaas_data  # noqa: E402
+from dbass_ai_agent.dbaas.service_query import query_dbaas_service_data  # noqa: E402
 from dbass_ai_agent.dbaas.schema import describe_schema, validate_payload  # noqa: E402
-from dbass_ai_agent.dbaas.sync import DbaasServiceSynchronizer, isoformat, utcnow  # noqa: E402
+from dbass_ai_agent.dbaas.service_sync import DbaasServiceSynchronizer  # noqa: E402
+from dbass_ai_agent.dbaas.snapshot_meta import isoformat, utcnow  # noqa: E402
 from dbass_ai_agent.dbaas.tools import (  # noqa: E402
     build_dbaas_tools,
     dbaas_tool_identity,
@@ -99,7 +100,7 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
     @unittest.skipUnless(shutil.which("jq"), "jq is required for DBAAS query tests")
-    def test_query_dbaas_data_reads_regular_user_snapshot(self) -> None:
+    def test_query_dbaas_service_data_reads_regular_user_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
             _write_fresh_user_snapshot(
@@ -111,10 +112,9 @@ class DbaasSyncTests(unittest.TestCase):
                 ],
             )
 
-            result = query_dbaas_data(
+            result = query_dbaas_service_data(
                 config,
                 Identity(user_id="alice", role="user", user="payment-team"),
-                kind="services",
                 jq_filter='[.[] | select(.healthStatus != "HEALTHY") | {name, healthStatus}]',
                 max_preview_items=10,
             )
@@ -175,10 +175,9 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertTrue(workspace.data_path(SERVICES_KIND).exists())
             self.assertTrue(workspace.meta_path(SERVICES_KIND).exists())
 
-            result = query_dbaas_data(
+            result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                kind="services",
                 jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
             )
 
@@ -189,10 +188,9 @@ class DbaasSyncTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
 
-            result = query_dbaas_data(
+            result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                kind="services",
                 jq_filter=".[]",
             )
 
@@ -215,10 +213,9 @@ class DbaasSyncTests(unittest.TestCase):
                 return {"status": "fresh"}
 
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    kind="services",
                     jq_filter='[.[] | {name, healthStatus}]',
                 )
 
@@ -243,10 +240,9 @@ class DbaasSyncTests(unittest.TestCase):
                 }
 
             with patch.object(DbaasServiceSynchronizer, "force_refresh_admin_services", side_effect=_refresh) as refresh_admin:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="admin", role="admin", user=None),
-                    kind="services",
                     jq_filter='[.[] | {name, healthStatus}]',
                     refresh=True,
                 )
@@ -279,10 +275,9 @@ class DbaasSyncTests(unittest.TestCase):
                 }
 
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    kind="services",
                     jq_filter='[.[] | {name, healthStatus}]',
                     refresh=True,
                 )
@@ -298,10 +293,9 @@ class DbaasSyncTests(unittest.TestCase):
             _write_expired_user_snapshot(config, "payment-team", [_service("mysql-old", "payment-team")])
 
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    kind="services",
                     jq_filter=".[]",
                 )
 
@@ -315,10 +309,9 @@ class DbaasSyncTests(unittest.TestCase):
             _write_error_user_snapshot(config, "payment-team", "upstream failed")
 
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    kind="services",
                     jq_filter=".[]",
                 )
 
@@ -332,10 +325,9 @@ class DbaasSyncTests(unittest.TestCase):
             _write_expired_admin_snapshot(config, [_service("mysql-old", "payment-team")])
 
             with patch.object(DbaasServiceSynchronizer, "_fetch_services") as fetch_services:
-                result = query_dbaas_data(
+                result = query_dbaas_service_data(
                     config,
                     Identity(user_id="admin", role="admin", user=None),
-                    kind="services",
                     jq_filter=".[]",
                 )
 
@@ -351,10 +343,9 @@ class DbaasSyncTests(unittest.TestCase):
                 [_service("mysql-old", "payment-team", health_status="HEALTHY")],
             )
 
-            result = query_dbaas_data(
+            result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                kind="services",
                 jq_filter='[.[] | {name, healthStatus}]',
                 refresh=True,
             )
@@ -362,22 +353,21 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["status"], "error")
             self.assertEqual(result["error_type"], "snapshot_unavailable")
             self.assertIsNone(result["data_path"])
-            self.assertIn("当前无法刷新到最新的服务列表快照", result["message"])
+            self.assertIn("当前无法刷新 DBAAS 服务数据视图", result["message"])
 
     def test_query_error_message_is_suitable_for_user_answer_when_snapshot_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
 
-            result = query_dbaas_data(
+            result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                kind="services",
                 jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
             )
 
             self.assertEqual(result["status"], "error")
             self.assertEqual(result["error_type"], "snapshot_unavailable")
-            self.assertIn("当前没有可用的服务列表快照", result["message"])
+            self.assertIn("当前没有可用的 DBAAS 服务数据视图", result["message"])
             self.assertIn("后台同步可能尚未完成", result["message"])
 
 
@@ -842,7 +832,9 @@ class _FakeDbaasHttpClient:
         *,
         headers: dict[str, str],
         json: dict | None = None,
+        params: dict | None = None,
     ) -> _FakeDbaasResponse:
+        del params
         self.last_method = method
         self.last_url = url
         self.last_headers = headers

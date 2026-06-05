@@ -1612,6 +1612,52 @@ class Phase10BackupCreateToolTests(unittest.TestCase):
             }.issubset(set(schema["required"]))
         )
 
+    def test_backup_unit_scope_requires_unit_name_before_approval_target(self) -> None:
+        from dbass_ai_agent.operations.proposal_builder import build_operation_proposal
+
+        with self.assertRaisesRegex(ValueError, "unit_name"):
+            build_operation_proposal(
+                "create_service_backup_task_tool",
+                {
+                    "service_name": "mysql-xf2",
+                    "scope": "unit",
+                    "backup_type": "full",
+                    "retention_days": 7,
+                },
+            )
+
+    def test_create_service_backup_task_tool_rejects_unit_scope_without_unit_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="admin", role="admin", user=None)
+            service = _session_service(tmpdir)
+            detail = service.create_session(identity, title="phase10 backup missing unit")
+            operation_service = OperationService(service.repository)
+            task_service = TaskService(service.repository, _dbaas_config(tmpdir))
+
+            tools = {tool.name: tool for tool in build_write_tools(Settings())}
+
+            with operation_run_context(
+                OperationRunContext(
+                    identity=identity,
+                    session=detail.meta,
+                    run_id="run_phase10_backup_missing_unit",
+                    operation_service=operation_service,
+                    task_service=task_service,
+                )
+            ):
+                result = tools["create_service_backup_task_tool"].invoke(
+                    {
+                        "service_name": "mysql-xf2",
+                        "scope": "unit",
+                        "backup_type": "full",
+                        "retention_days": 7,
+                    }
+                )
+
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error_type"], "missing_unit_name")
+            self.assertEqual(task_service.list_tasks(detail.meta), [])
+
     def test_create_service_backup_task_tool_creates_unified_task_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             identity = Identity(user_id="admin", role="admin", user=None)

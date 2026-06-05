@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +15,11 @@ from .auth import dbaas_identity_headers, dbaas_system_headers, dbaas_user_heade
 from .config import DbaasConfig
 from .constants import ADMIN_SCOPE, SERVICES_ENDPOINT, SERVICES_KIND, USER_SCOPE
 from .schema import DbaasSchemaError, schema_path, schema_version, validate_payload
+from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import (
     DbaasSnapshotPaths,
     DbaasWorkspace,
     delete_if_exists,
-    read_json_file,
     replace_file_atomic,
     write_json_temp,
 )
@@ -28,42 +28,6 @@ from .workspace import (
 logger = logging.getLogger(__name__)
 _user_refresh_locks: dict[str, threading.Lock] = {}
 _user_refresh_locks_guard = threading.Lock()
-
-
-def utcnow() -> datetime:
-    return datetime.now(tz=UTC)
-
-
-def isoformat(dt: datetime) -> str:
-    return dt.isoformat().replace("+00:00", "Z")
-
-
-def parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
-def is_meta_fresh(meta: dict[str, Any], *, now: datetime | None = None) -> bool:
-    if meta.get("status") != "fresh":
-        return False
-    expires_at = meta.get("expires_at")
-    if not isinstance(expires_at, str):
-        return False
-    try:
-        return (now or utcnow()) <= parse_time(expires_at)
-    except ValueError:
-        return False
-
-
-def read_meta(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        payload = read_json_file(path)
-    except (FileNotFoundError, ValueError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload
 
 
 class DbaasServiceSynchronizer:
@@ -92,7 +56,7 @@ class DbaasServiceSynchronizer:
         timeout = self.config.user_snapshot_refresh_wait_seconds if timeout_seconds is None else timeout_seconds
         acquired = lock.acquire(timeout=max(0, timeout))
         if not acquired:
-            return self._snapshot_unavailable_meta(paths, "当前用户服务列表快照正在刷新，等待超时。")
+            return self._snapshot_unavailable_meta(paths, "当前用户服务数据视图正在刷新，等待超时。")
         try:
             return self._force_refresh_services(paths, identity=identity)
         finally:
@@ -201,6 +165,7 @@ class DbaasServiceSynchronizer:
             and meta.get("user") == paths.user
             and meta.get("data_path") == str(paths.data_path)
             and meta.get("schema_version") == schema_version(SERVICES_KIND, scope=paths.scope)
+            and meta.get("schema_path") == str(schema_path(SERVICES_KIND, app_root=self.app_root, scope=paths.scope))
             and paths.data_path.exists()
             and paths.meta_path.exists()
         )
@@ -249,7 +214,7 @@ class DbaasServiceSynchronizer:
             "schema_path": str(schema_path(SERVICES_KIND, app_root=self.app_root, scope=paths.scope)),
             "last_refresh_status": "error",
             "last_error": message,
-            "message": f"当前没有可用的服务列表快照，可能拉取 DBAAS 数据失败：{message}",
+            "message": f"当前没有可用的 DBAAS 服务数据视图，暂时无法获得准确数据：{message}",
         }
 
     def _write_meta(self, paths: DbaasSnapshotPaths, meta: dict[str, Any]) -> None:

@@ -15,8 +15,8 @@ from .config import DbaasConfig
 from .metric_catalog import get_metric_catalog_entry
 from .metric_models import MetricSnapshotPaths
 from .metric_workspace import MetricWorkspace, MetricWorkspaceError
-from .sync import delete_if_exists, isoformat, is_meta_fresh, read_meta, utcnow
-from .workspace import replace_file_atomic, write_json_temp
+from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
+from .workspace import delete_if_exists, replace_file_atomic, write_json_temp
 
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def _refresh_history(
             delete_if_exists(meta_tmp_path)
         _delete_snapshot(paths)
         logger.exception("dbaas history metric snapshot write failed metric_key=%s", metric_key)
-        return _error(metric_key, "snapshot_unavailable", f"写入历史监控快照失败：{exc}")
+        return _error(metric_key, "snapshot_unavailable", f"写入 DBAAS 历史监控数据失败：{exc}")
 
 
 def _fresh_snapshot(paths: MetricSnapshotPaths) -> dict[str, Any] | None:

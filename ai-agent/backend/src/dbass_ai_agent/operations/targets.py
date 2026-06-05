@@ -5,6 +5,10 @@ from typing import Any
 from .models import OperationTarget
 
 
+class InvalidOperationTargetError(ValueError):
+    """Raised when a tool call lacks enough information to build an operation target."""
+
+
 def service_child_target(service_name: str, child_service_type: str | None = None) -> OperationTarget:
     qualifiers: dict[str, Any] = {}
     if child_service_type:
@@ -25,7 +29,9 @@ def backup_target(
 ) -> OperationTarget:
     normalized_scope = (scope or "service").strip().lower()
     if normalized_scope == "unit":
-        target_id = unit_name or f"{service_name}/unit"
+        if not unit_name:
+            raise InvalidOperationTargetError("scope=unit 时必须明确指定 unit_name。")
+        target_id = unit_name
         qualifiers = {
             "scope": "unit",
             "service_name": service_name,

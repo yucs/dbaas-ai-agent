@@ -106,7 +106,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
             expected_common_tools = {
-                "query_dbaas_data_tool",
+                "query_dbaas_service_data_tool",
                 "describe_dbaas_schema_tool",
                 "describe_service_backup_capability_tool",
                 "describe_unit_metric_catalog_tool",

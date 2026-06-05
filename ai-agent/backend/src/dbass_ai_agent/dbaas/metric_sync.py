@@ -15,8 +15,8 @@ from .config import DbaasConfig
 from .metric_catalog import get_metric_catalog_entry
 from .metric_models import MetricSnapshotPaths
 from .metric_workspace import MetricWorkspace, MetricWorkspaceError
-from .sync import delete_if_exists, isoformat, is_meta_fresh, read_meta, utcnow
-from .workspace import replace_file_atomic, write_json_temp
+from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
+from .workspace import delete_if_exists, replace_file_atomic, write_json_temp
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def ensure_latest_snapshot(config: DbaasConfig, identity: Identity, metric_key: 
     lock = _lock_for(paths.key)
     acquired = lock.acquire(timeout=config.metric_refresh_lock_timeout_seconds)
     if not acquired:
-        return _error(metric_key, "snapshot_unavailable", "监控项正在刷新，等待超时，当前无法获得准确监控数据。")
+        return _error(metric_key, "snapshot_unavailable", "DBAAS 监控数据视图正在刷新，等待超时，当前无法获得准确数据。")
     try:
         fresh = _fresh_snapshot(paths)
         if fresh is not None:
@@ -117,7 +117,7 @@ def _refresh_latest(
             delete_if_exists(meta_tmp_path)
         _delete_snapshot(paths)
         logger.exception("dbaas latest metric snapshot write failed metric_key=%s", metric_key)
-        return _error(metric_key, "snapshot_unavailable", f"写入监控快照失败：{exc}")
+        return _error(metric_key, "snapshot_unavailable", f"写入 DBAAS 监控数据失败：{exc}")
 
 
 def _fresh_snapshot(paths: MetricSnapshotPaths) -> dict[str, Any] | None:

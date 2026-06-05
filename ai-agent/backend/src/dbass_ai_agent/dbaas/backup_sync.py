@@ -14,7 +14,7 @@ from .auth import dbaas_identity_headers
 from .config import DbaasConfig
 from .constants import ADMIN_SCOPE, BACKUPS_ENDPOINT, BACKUPS_KIND, USER_SCOPE
 from .schema import schema_path, schema_version
-from .sync import isoformat, is_meta_fresh, read_meta, utcnow
+from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import (
     DbaasSnapshotPaths,
     DbaasWorkspace,
@@ -67,7 +67,7 @@ class DbaasBackupSynchronizer:
         lock = _lock_for(paths.key)
         acquired = lock.acquire(timeout=self.config.user_snapshot_refresh_wait_seconds)
         if not acquired:
-            return self._snapshot_unavailable(paths, "当前备份快照正在刷新，等待超时。")
+            return self._snapshot_unavailable(paths, "当前 DBAAS 备份数据视图正在刷新，等待超时。")
         try:
             current = read_meta(paths.meta_path)
             if not force and self._is_snapshot_fresh(paths, current):
@@ -78,7 +78,7 @@ class DbaasBackupSynchronizer:
             if result.get("status") == "fresh":
                 return result
 
-            message = str(result.get("message") or "备份快照刷新失败。")
+            message = str(result.get("message") or "DBAAS 备份数据视图刷新失败。")
             error_type = str(result.get("error_type") or "snapshot_unavailable")
             if force and current is not None and self._is_snapshot_fresh(paths, current):
                 self._write_fresh_error_meta(paths, current, message)
@@ -158,7 +158,7 @@ class DbaasBackupSynchronizer:
             if meta_tmp_path is not None:
                 delete_if_exists(meta_tmp_path)
             logger.exception("dbaas backups snapshot write failed scope=%s user=%s", paths.scope, paths.user)
-            return self._snapshot_unavailable(paths, f"写入备份快照失败：{exc}", error_type="snapshot_unavailable")
+            return self._snapshot_unavailable(paths, f"写入 DBAAS 备份数据失败：{exc}", error_type="snapshot_unavailable")
 
     def _ttl_delta(self):
         from datetime import timedelta
@@ -239,7 +239,7 @@ class DbaasBackupSynchronizer:
             "error_type": error_type,
             "data_path": None,
             "meta_path": str(paths.meta_path) if paths is not None else None,
-            "message": f"当前没有可用的备份列表快照：{message}",
+            "message": f"当前没有可用的 DBAAS 备份数据视图，暂时无法获得准确数据：{message}",
         }
 
 

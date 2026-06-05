@@ -8,7 +8,15 @@ from jsonschema import Draft202012Validator
 
 from dbass_ai_agent.identity.models import Identity
 
-from .constants import ADMIN_SCOPE, BACKUPS_KIND, SCHEMA_FILES, SCHEMA_VERSIONS, SERVICES_KIND, SUPPORTED_KINDS, USER_SCOPE
+from .constants import (
+    ADMIN_SCOPE,
+    BACKUPS_KIND,
+    SCHEMA_FILES,
+    SCHEMA_VERSIONS,
+    SERVICES_KIND,
+    SUPPORTED_SCHEMA_KINDS,
+    USER_SCOPE,
+)
 from .workspace import read_json_file
 
 
@@ -125,7 +133,7 @@ def _field_enum_summary(field_schema: dict[str, Any]) -> list[Any]:
 
 
 def _require_supported_kind(kind: str) -> None:
-    if kind not in SUPPORTED_KINDS:
+    if kind not in SUPPORTED_SCHEMA_KINDS:
         raise DbaasSchemaError(f"unsupported dbaas kind: {kind}")
 
 

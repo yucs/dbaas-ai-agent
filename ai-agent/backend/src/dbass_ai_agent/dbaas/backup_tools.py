@@ -23,10 +23,10 @@ def build_backup_tools(settings: Settings, require_identity: Callable[[], Identi
         max_preview_items: int | None = None,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        """查询当前身份可见的 DBAAS 备份快照，并对快照执行 jq。
+        """使用 jq 查询当前身份可见的 DBAAS backups 数据视图。
 
-        生成 backups jq 前应先调用 describe_dbaas_schema_tool(kind="backups")。
-        用户明确要求最新、刷新、当前或实时备份列表时传 refresh=true。
+        如字段不确定、涉及时间/枚举/nullable 判断或首次构造复杂 jq，先调用 describe_dbaas_schema_tool(kind="backups")。
+        backups 顶层是数组；jq_filter 可从 .[] 处理单条备份记录。
         """
 
         return query_dbaas_backup_data(

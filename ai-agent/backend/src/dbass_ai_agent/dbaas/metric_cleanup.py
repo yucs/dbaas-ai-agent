@@ -11,7 +11,8 @@ from dbass_ai_agent.config import Settings
 
 from .config import DbaasConfig, dbaas_config_from_settings
 from .metric_workspace import METRICS_HISTORY_DIR, METRICS_LATEST_DIR
-from .sync import delete_if_exists, parse_time, read_meta, utcnow
+from .snapshot_meta import parse_time, read_meta, utcnow
+from .workspace import delete_if_exists
 
 
 logger = logging.getLogger(__name__)

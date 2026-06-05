@@ -13,7 +13,7 @@ from .models import (
     RequiredRole,
     RiskLevel,
 )
-from .targets import target_from_tool_call
+from .targets import InvalidOperationTargetError, target_from_tool_call
 
 
 _RISK_ORDER: dict[RiskLevel, int] = {
@@ -68,7 +68,10 @@ def build_operation_proposal_item(
     current_service: dict[str, Any] | None = None,
 ) -> OperationProposalItem:
     config = require_action_config(tool_name)
-    target = target_from_tool_call(tool_name, tool_args)
+    try:
+        target = target_from_tool_call(tool_name, tool_args)
+    except InvalidOperationTargetError as exc:
+        raise ValueError(str(exc)) from exc
     return OperationProposalItem(
         action=config.action,
         targets=[target],

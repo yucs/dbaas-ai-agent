@@ -439,9 +439,18 @@ def build_write_tools(settings: Settings) -> list[Any]:
         options: dict[str, Any] | None = None,
         remark: str | None = None,
     ) -> dict[str, Any]:
-        """创建 DBAAS 服务手动备份异步任务。写操作必须先经过人工确认。"""
+        """创建 DBAAS 服务手动备份异步任务。写操作必须先经过人工确认。
+
+        scope 只能是 service 或 unit；scope=unit 时必须传用户明确指定的 unit_name。
+        """
 
         tool_name = "create_service_backup_task_tool"
+        if (scope or "").strip().lower() == "unit" and not (unit_name or "").strip():
+            return {
+                "status": "error",
+                "error_type": "missing_unit_name",
+                "message": "scope=unit 时必须明确指定 unit_name，不能直接进入审批或创建备份任务。",
+            }
         config = require_action_config(tool_name)
         context = require_operation_context()
         _assert_required_role(context.identity.role, config.required_role)

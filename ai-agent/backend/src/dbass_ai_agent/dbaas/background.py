@@ -10,7 +10,7 @@ from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity
 
 from .config import dbaas_config_from_settings
-from .sync import DbaasServiceSynchronizer
+from .service_sync import DbaasServiceSynchronizer
 from .workspace import DbaasWorkspace
 
 
