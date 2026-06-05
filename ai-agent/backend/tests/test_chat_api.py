@@ -388,6 +388,35 @@ class SendMessageApiTests(unittest.TestCase):
             original_identity = Identity(user_id="alice", role="user", user="alice")
             with self.assertRaises(Exception):
                 service.get_session_for_cleanup(original_identity, session_id)
+            self.assertFalse((Path(tmpdir) / "alice").exists())
+
+    def test_delete_session_keeps_user_directory_when_other_sessions_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            identity = Identity(user_id="alice", role="user", user="alice")
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            first = service.create_session(identity, title="第一个会话")
+            second = service.create_session(identity, title="第二个会话")
+
+            deleted_session_id = service.delete_session(identity, first.meta.session_id)
+
+            self.assertEqual(deleted_session_id, first.meta.session_id)
+            self.assertFalse((Path(tmpdir) / "alice" / "sessions" / first.meta.session_id).exists())
+            self.assertTrue((Path(tmpdir) / "alice").exists())
+            self.assertTrue((Path(tmpdir) / "alice" / "sessions" / second.meta.session_id).exists())
+            self.assertEqual(
+                [item.session_id for item in service.list_sessions(identity)],
+                [second.meta.session_id],
+            )
 
     def test_stream_message_rejects_blank_content_before_persisting(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -144,6 +144,25 @@ class SessionRepository:
         self.index_store.save(index_path, ordered)
 
     def delete_session_directory(self, user_id: str, session_id: str) -> None:
-        session_root = build_session_paths(self.data_root, user_id, session_id).session_root
+        paths = build_session_paths(self.data_root, user_id, session_id)
+        session_root = paths.session_root
         if session_root.exists():
             shutil.rmtree(session_root)
+        self._delete_empty_user_sessions_root(paths.sessions_root, paths.user_root)
+
+    def _delete_empty_user_sessions_root(self, sessions_root: Path, user_root: Path) -> None:
+        if not sessions_root.exists():
+            return
+        if any(child.is_dir() for child in sessions_root.iterdir()):
+            return
+        index_path = sessions_root / "index.json"
+        if index_path.exists():
+            index_path.unlink()
+        try:
+            sessions_root.rmdir()
+        except OSError:
+            return
+        try:
+            user_root.rmdir()
+        except OSError:
+            return
