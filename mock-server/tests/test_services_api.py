@@ -439,6 +439,70 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
     assert replica_unit["version"].startswith("8.0.36")
 
 
+def test_describe_image_upgrade_capabilities_returns_available_targets() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/image-upgrade-capabilities",
+        headers=admin_headers(),
+        params={
+            "serviceName": "payad001",
+            "childServiceType": "mysql",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported": True,
+        "availableTargets": [
+            {
+                "image": "mysql:8.0.37",
+                "version": "8.0.37",
+            },
+            {
+                "image": "mysql:8.0.38",
+                "version": "8.0.38",
+            },
+        ],
+    }
+
+
+def test_describe_image_upgrade_capabilities_enforces_service_access() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/image-upgrade-capabilities",
+        headers=user_headers("order-platform-team"),
+        params={
+            "serviceName": "payad001",
+            "childServiceType": "mysql",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "user 'order-platform-team' cannot access service 'payad001'",
+    }
+
+
+def test_describe_image_upgrade_capabilities_returns_502_for_missing_child_service() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/image-upgrade-capabilities",
+        headers=admin_headers(),
+        params={
+            "serviceName": "payad001",
+            "childServiceType": "tidb",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "service 'payad001' has no child service type 'tidb'",
+    }
+
+
 def test_create_image_upgrade_task_returns_400_when_unit_not_in_child_service() -> None:
     client = create_test_client()
 

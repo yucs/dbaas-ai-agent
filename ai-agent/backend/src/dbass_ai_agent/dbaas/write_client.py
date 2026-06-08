@@ -219,6 +219,26 @@ class DbaasWriteClient:
             timeout_seconds=timeout_seconds,
         )
 
+    def describe_service_image_upgrade_capability(
+        self,
+        identity: Identity,
+        service_name: str,
+        *,
+        child_service_type: str,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "serviceName": service_name,
+            "childServiceType": child_service_type,
+        }
+        return self._request_json(
+            identity,
+            "GET",
+            "/image-upgrade-capabilities",
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+
     def describe_service_backup_capability(
         self,
         identity: Identity,

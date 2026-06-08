@@ -6,6 +6,7 @@ from app.auth import CurrentUser, ensure_service_access, get_current_user, resol
 from app.schemas import (
     BackupCapabilityResponse,
     CreateTaskResponse,
+    ImageUpgradeCapabilityResponse,
     PrecheckServiceResourceUpdateRequest,
     PrecheckServiceResourceUpdateResponse,
     PrecheckServiceStorageUpdateRequest,
@@ -102,6 +103,32 @@ def describe_backup_task_capabilities(
         if isinstance(resolved_service_name, str) and resolved_service_name:
             ensure_service_access(store, current_user, resolved_service_name)
     return BackupCapabilityResponse.model_validate(result)
+
+
+@router.get("/image-upgrade-capabilities", response_model=ImageUpgradeCapabilityResponse)
+def describe_image_upgrade_capabilities(
+    request: Request,
+    serviceName: str = Query(description="服务名称"),
+    childServiceType: str = Query(description="目标子服务类型"),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ImageUpgradeCapabilityResponse:
+    """返回指定服务/子服务的可升级镜像和版本候选。"""
+
+    store = get_store(request)
+    ensure_service_access(store, current_user, serviceName)
+    try:
+        result = store.describe_image_upgrade_capabilities(
+            serviceName,
+            child_service_type=childServiceType,
+        )
+    except ServiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"service '{serviceName}' not found") from None
+    except ChildServiceTypeNotFoundError:
+        raise HTTPException(
+            status_code=502,
+            detail=f"service '{serviceName}' has no child service type '{childServiceType}'",
+        ) from None
+    return ImageUpgradeCapabilityResponse.model_validate(result)
 
 
 @router.post("/api/v1/prechecks/service-resource-update", response_model=PrecheckServiceResourceUpdateResponse)

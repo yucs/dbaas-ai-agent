@@ -427,6 +427,29 @@ class JsonDataStore:
         self._start_task_worker(task_id)
         return self._public_task(task)
 
+    def describe_image_upgrade_capabilities(
+        self,
+        name: str,
+        *,
+        child_service_type: str,
+    ) -> dict[str, Any]:
+        """返回指定服务/子服务的可升级镜像和版本候选。"""
+
+        with self._lock:
+            target_services = self._get_target_child_services(name, child_service_type)
+            current_version = self._child_service_base_version(target_services[0])
+            available_targets = [
+                {
+                    "image": f"{child_service_type}:{version}",
+                    "version": version,
+                }
+                for version in self._next_patch_versions(current_version)
+            ]
+            return {
+                "supported": bool(available_targets),
+                "availableTargets": available_targets,
+            }
+
     def describe_backup_task_capabilities(
         self,
         *,
@@ -1690,6 +1713,35 @@ class JsonDataStore:
         if service_type == "redis":
             return ["6.2.14", "7.0.15"][seed % 2]
         return f"1.{seed % 8}.{seed % 20}"
+
+    def _child_service_base_version(self, child_service: dict[str, Any]) -> str:
+        """返回子服务当前三段版本。"""
+
+        version = child_service.get("version")
+        if isinstance(version, str) and version:
+            return version
+        for unit in child_service.get("units", []):
+            unit_version = unit.get("version")
+            if isinstance(unit_version, str) and unit_version:
+                return ".".join(unit_version.split(".")[:3])
+        return "1.0.0"
+
+    def _next_patch_versions(self, current_version: str) -> list[str]:
+        """基于当前版本生成两个稳定的 patch 升级候选。"""
+
+        parts = current_version.split(".")
+        if len(parts) < 3:
+            return []
+        try:
+            major = int(parts[0])
+            minor = int(parts[1])
+            patch = int(parts[2])
+        except ValueError:
+            return []
+        return [
+            f"{major}.{minor}.{patch + offset}"
+            for offset in (1, 2)
+        ]
 
     def _stable_int(self, *parts: object) -> int:
         """基于输入生成稳定整数。"""

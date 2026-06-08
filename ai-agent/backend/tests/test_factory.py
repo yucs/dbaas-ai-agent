@@ -109,6 +109,7 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                 "query_dbaas_service_data_tool",
                 "describe_dbaas_schema_tool",
                 "describe_service_backup_capability_tool",
+                "describe_service_image_upgrade_capability_tool",
                 "describe_unit_metric_catalog_tool",
                 "query_unit_latest_metric_data_tool",
                 "query_unit_metric_history_tool",

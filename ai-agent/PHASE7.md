@@ -95,6 +95,7 @@ DBAAS 工具层负责：
 ```text
 PUT  /services/{name}/resource
 PUT  /services/{name}/storage
+GET  /image-upgrade-capabilities
 POST /services/{name}/image-upgrade
 GET  /tasks/{task_id}
 ```
@@ -103,6 +104,7 @@ GET  /tasks/{task_id}
 
 - `resource` 更新是同步操作，返回更新后的服务详情
 - `storage` 更新是同步操作，返回更新后的服务详情
+- `image-upgrade-capabilities` 是只读能力接口，返回指定服务/子服务可升级的镜像和版本候选
 - `image-upgrade` 是异步操作，返回 `taskId`
 - `tasks/{task_id}` 用于查询异步任务状态
 
@@ -2646,7 +2648,46 @@ PUT /services/{name}/storage
 - `status=succeeded` 或 `failed`
 - `changes[]` 变更列表
 
-### 11.3 create_service_image_upgrade_task_tool
+### 11.3 describe_service_image_upgrade_capability_tool
+
+用途：
+
+- 查询指定服务/子服务当前可升级的镜像和版本候选
+- 发起镜像升级前用于约束 `image` 和 `version`，避免模型自行猜测
+
+参数：
+
+```json
+{
+  "service_name": "payad001",
+  "child_service_type": "mysql"
+}
+```
+
+DBAAS 调用：
+
+```text
+GET /image-upgrade-capabilities?serviceName={service_name}&childServiceType={child_service_type}
+```
+
+返回最小结构：
+
+```json
+{
+  "supported": true,
+  "availableTargets": [
+    {
+      "image": "mysql:8.0.37",
+      "version": "8.0.37"
+    }
+  ]
+}
+```
+
+第一版 capability 只表达候选项，不承载风险评估、滚动升级能力、release notes 或 precheck 结论。
+如果用户未明确指定 `image` / `version`，模型只能展示 `availableTargets` 供用户选择，不能自行替用户挑选。
+
+### 11.4 create_service_image_upgrade_task_tool
 
 用途：
 
@@ -2676,7 +2717,7 @@ POST /services/{name}/image-upgrade
 - `OperationResult.status=task_created`
 - `task.task_id`
 
-### 11.4 get_dbaas_task_tool
+### 11.5 get_dbaas_task_tool
 
 用途：
 

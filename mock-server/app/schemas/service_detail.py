@@ -287,6 +287,20 @@ class ServiceImageUpgradeRequest(ApiSchema):
     )
 
 
+class ImageUpgradeTarget(ApiSchema):
+    """可升级镜像目标。"""
+
+    image: str = Field(description="目标镜像，例如 mysql:8.0.37")
+    version: str = Field(description="目标版本号，例如 8.0.37")
+
+
+class ImageUpgradeCapabilityResponse(ApiSchema):
+    """`GET /image-upgrade-capabilities` 的响应模型。"""
+
+    supported: bool = Field(description="是否支持镜像升级")
+    availableTargets: list[ImageUpgradeTarget] = Field(default_factory=list, description="可选镜像和版本候选")
+
+
 class ServiceBackupRequest(ApiSchema):
     """`POST /services/{name}/backup` 的请求模型。"""
 

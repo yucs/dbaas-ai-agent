@@ -90,6 +90,64 @@ class BackupQueryTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error_type"], "missing_target")
 
+    def test_describe_image_upgrade_capability_tool_calls_dbaas_with_target_params(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                dbaas_server_base_url="http://127.0.0.1:9000",
+                dbaas_workspace_dir=Path(tmpdir) / "workspace",
+            )
+            identity = Identity(user_id="admin", role="admin", user=None)
+            fake_client = _FakeClient(
+                _FakeResponse(
+                    200,
+                    {
+                        "supported": True,
+                        "availableTargets": [
+                            {
+                                "image": "mysql:8.0.37",
+                                "version": "8.0.37",
+                            }
+                        ],
+                    },
+                )
+            )
+
+            with patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client):
+                tools = {tool.name: tool for tool in build_dbaas_tools(settings, role="admin")}
+                with dbaas_tool_identity(identity):
+                    result = tools["describe_service_image_upgrade_capability_tool"].invoke(
+                        {
+                            "service_name": "mysql-xf2",
+                            "child_service_type": "mysql",
+                        }
+                    )
+
+            self.assertTrue(result["supported"])
+            self.assertEqual(fake_client.last_method, "GET")
+            self.assertEqual(fake_client.last_url, "http://127.0.0.1:9000/image-upgrade-capabilities")
+            self.assertEqual(
+                fake_client.last_params,
+                {
+                    "serviceName": "mysql-xf2",
+                    "childServiceType": "mysql",
+                },
+            )
+            self.assertEqual(fake_client.last_headers["X-DBAAS-Actor-Role"], "admin")
+
+    def test_describe_image_upgrade_capability_tool_requires_target(self) -> None:
+        tools = {tool.name: tool for tool in build_dbaas_tools(Settings(), role="admin")}
+
+        with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+            result = tools["describe_service_image_upgrade_capability_tool"].invoke(
+                {
+                    "service_name": "",
+                    "child_service_type": "mysql",
+                }
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "missing_target")
+
     @unittest.skipUnless(shutil.which("jq"), "jq is required for backup query tests")
     def test_query_fetches_snapshot_with_identity_and_runs_jq(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

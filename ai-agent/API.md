@@ -648,6 +648,33 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 
 ## 7. 任务接口
 
+### 7.0 镜像升级候选查询
+
+镜像升级属于 DBAAS 写操作，但候选镜像和版本必须先来自 DBAAS 只读能力查询。
+当用户未明确指定 `image` / `version`，AI Agent 应先通过 DBAAS 工具查询候选项，并展示给用户选择；不能自行猜测或默认选择目标版本。
+
+DBAAS 侧建议提供：
+
+```http
+GET /image-upgrade-capabilities?serviceName={service_name}&childServiceType={child_service_type}
+```
+
+最小返回结构：
+
+```json
+{
+  "supported": true,
+  "availableTargets": [
+    {
+      "image": "mysql:8.0.37",
+      "version": "8.0.37"
+    }
+  ]
+}
+```
+
+第一版只承载可选 `image/version`，不承载风险评估、release notes 或 precheck 结论。
+
 ### 7.1 查询 Session 下的任务
 
 ```http

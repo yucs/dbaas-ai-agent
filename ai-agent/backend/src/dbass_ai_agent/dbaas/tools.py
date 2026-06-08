@@ -9,6 +9,7 @@ from dbass_ai_agent.config import Settings
 from dbass_ai_agent.identity.models import Identity, UserRole
 
 from .backup_tools import build_backup_tools
+from .capability_tools import build_capability_tools
 from .metric_tools import build_metric_tools
 from .precheck_tools import build_precheck_tools
 from .service_tools import build_service_tools
@@ -38,6 +39,7 @@ def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
     tools = [
         *build_service_tools(settings, _require_identity),
         *build_backup_tools(settings, _require_identity),
+        *build_capability_tools(settings, _require_identity),
         *build_metric_tools(settings, _require_identity),
         *build_precheck_tools(settings, _require_identity),
         *build_write_tools(settings),
