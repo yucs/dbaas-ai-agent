@@ -339,7 +339,7 @@ curl -X POST http://127.0.0.1:8000/services/payad001/image-upgrade \
 查询通用任务：
 
 ```bash
-curl http://127.0.0.1:8000/tasks/task-service-image-upgrade-payad001-mysql-a3f9c2 \
+curl http://127.0.0.1:8000/tasks/a3f9c2017b12e0af9d45c8b00123abcd \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin'
@@ -485,7 +485,8 @@ mock-server/
 
 - 所有异步接口都应返回 `taskId`
 - 统一通过 `GET /tasks/{taskId}` 查询任务状态
-- mock-server 生成的 `taskId` 包含动作、服务名、子服务类型和随机后缀，例如 `task-service-image-upgrade-payad001-mysql-a3f9c2`
+- mock-server 生成的 `taskId` 为 32 字符随机 hex 字符串，例如 `a3f9c2017b12e0af9d45c8b00123abcd`
+- mock-server 生成的备份 `backupId`/`backup_id` 也为 32 字符随机 hex 字符串
 - 当前通用任务字段包括 `taskId`、`type`、`status`、`message`、`reason`、`resourceType`、`resourceName`、`result`、`createdAt`、`updatedAt`
 - 当前任务状态使用 `RUNNING`、`SUCCESS`、`FAILED`
 - `POST /services/{name}/image-upgrade` 会创建 `service.image.upgrade` 类型任务

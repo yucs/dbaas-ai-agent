@@ -404,7 +404,7 @@ def test_create_image_upgrade_task_and_complete_via_task_query() -> None:
     assert list(create_payload.keys()) == ["taskId"]
     task_id = create_payload["taskId"]
     assert re.fullmatch(
-        r"task-service-image-upgrade-payad001-mysql-[0-9a-f]{6}",
+        r"[0-9a-f]{32}",
         task_id,
     )
 

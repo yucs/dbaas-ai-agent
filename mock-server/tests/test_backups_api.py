@@ -1,10 +1,14 @@
 import json
 from pathlib import Path
+import re
 import time
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+
+
+HEX_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 
 
 def create_test_client(task_unit_interval_seconds: float = 0.01) -> TestClient:
@@ -93,12 +97,13 @@ def test_create_service_backup_task_creates_running_records_then_completes() -> 
 
     assert create_response.status_code == 200
     task_id = create_response.json()["taskId"]
-    assert task_id.startswith("task-service-backup-create-payad001-unit-")
+    assert HEX_ID_PATTERN.fullmatch(task_id)
 
     backups_response = client.get("/backups", headers=admin_headers())
     assert backups_response.status_code == 200
     created = [item for item in backups_response.json() if item["task_id"] == task_id]
     assert len(created) == 1
+    assert HEX_ID_PATTERN.fullmatch(created[0]["backup_id"])
     assert created[0]["task_status"] == "running"
     assert created[0]["unit_name"] == "aaa8ee1f_payad001"
 
@@ -129,9 +134,11 @@ def test_create_service_backup_task_for_service_can_create_multiple_records() ->
 
     assert create_response.status_code == 200
     task_id = create_response.json()["taskId"]
+    assert HEX_ID_PATTERN.fullmatch(task_id)
     response = client.get("/backups", headers=admin_headers())
     created = [item for item in response.json() if item["task_id"] == task_id]
     assert len(created) >= 3
+    assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in created)
     assert {item["task_status"] for item in created} == {"running"}
 
 
@@ -164,6 +171,9 @@ def test_backup_seed_is_large_and_covers_core_scenarios() -> None:
     assert any(item["finished_at"] is None for item in payload)
     assert any(item["expires_at"] is not None and item["remark"] == "已过期但未删除" for item in payload)
     assert any(item["deleted"] is True for item in payload)
+    assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in payload)
+    assert all(HEX_ID_PATTERN.fullmatch(item["task_id"]) for item in payload)
+    assert len({item["backup_id"] for item in payload}) == len(payload)
 
 
 def test_admin_can_query_all_existing_backups_including_expired_but_not_deleted() -> None:
@@ -173,13 +183,12 @@ def test_admin_can_query_all_existing_backups_including_expired_but_not_deleted(
 
     assert response.status_code == 200
     payload = response.json()
-    backup_ids = {item["backup_id"] for item in payload}
     assert len(payload) >= 6_200
-    assert "backup-payad001-001" in backup_ids
-    assert "backup-payad001-002" in backup_ids
-    assert "backup-ordad002-001" in backup_ids
-    assert "backup-sesad003-deleted" not in backup_ids
-    expired = next(item for item in payload if item["backup_id"] == "backup-payad001-002")
+    assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in payload)
+    assert all(item.get("deleted") is not True for item in payload)
+    assert any(item["service_name"] == "payad001" for item in payload)
+    assert any(item["service_name"] == "ordad002" for item in payload)
+    expired = next(item for item in payload if item["service_name"] == "payad001" and item["remark"] == "已过期但未删除")
     assert expired["remark"] == "已过期但未删除"
     statuses = {item["task_status"] for item in payload}
     assert {"succeeded", "failed", "timeout", "canceled", "running"}.issubset(statuses)
@@ -192,17 +201,9 @@ def test_non_admin_can_only_query_owned_backups() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    backup_ids = {item["backup_id"] for item in payload}
     assert len(payload) == 7
-    assert {
-        "backup-payad001-001",
-        "backup-payad001-002",
-        "backup-payad001-003",
-        "backup-payad001-004",
-        "backup-payad001-005",
-        "backup-payad001-006",
-        "backup-payad001-007",
-    } == backup_ids
+    assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in payload)
+    assert {item["service_name"] for item in payload} == {"payad001"}
     assert all("owner_user" not in item for item in payload)
 
 

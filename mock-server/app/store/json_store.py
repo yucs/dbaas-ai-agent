@@ -545,7 +545,7 @@ class JsonDataStore:
             }
             compress_mode = str((options or {}).get("compressMode") or (options or {}).get("compress_mode") or "gzip")
             for index, item in enumerate(target_units, start=1):
-                backup_id = f"backup-{self._slug(name)}-{self._slug(item['unit']['name'])}-{secrets.token_hex(3)}"
+                backup_id = self._next_backup_id()
                 task["_operation"]["backupIds"].append(backup_id)
                 self._backups.append(
                     {
@@ -2313,27 +2313,21 @@ class JsonDataStore:
         service_name: str,
         child_service_type: str,
     ) -> str:
-        """生成包含动作、服务、子服务和随机后缀的任务 ID。"""
+        """生成 32 字符随机任务 ID。"""
 
-        prefix = "-".join(
-            [
-                "task",
-                self._slug(action),
-                self._slug(service_name),
-                self._slug(child_service_type),
-            ]
-        )
         while True:
-            task_id = f"{prefix}-{secrets.token_hex(3)}"
+            task_id = secrets.token_hex(16)
             if task_id not in self._tasks_by_id:
                 return task_id
 
-    @staticmethod
-    def _slug(value: str) -> str:
-        """将任务 ID 组成片段规范化为 URL 友好的短文本。"""
+    def _next_backup_id(self) -> str:
+        """生成 32 字符随机备份 ID。"""
 
-        normalized = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-        return normalized or "unknown"
+        existing_ids = {item.get("backup_id") for item in self._backups}
+        while True:
+            backup_id = secrets.token_hex(16)
+            if backup_id not in existing_ids:
+                return backup_id
 
     def _utcnow(self) -> str:
         """返回当前 UTC 时间字符串。"""

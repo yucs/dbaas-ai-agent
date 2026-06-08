@@ -16,6 +16,8 @@ DATA_DIR = ROOT / "data"
 RNG = random.Random(20260421)
 HOST_BY_ID: dict[str, dict[str, Any]] = {}
 UNIT_IDS: set[str] = set()
+BACKUP_IDS: set[str] = set()
+TASK_IDS: set[str] = set()
 
 SITE_COUNT = 12
 CLUSTERS_PER_SITE = 4
@@ -1151,6 +1153,16 @@ def random_unit_id() -> str:
             return value
 
 
+def random_unique_hex_id(used_ids: set[str]) -> str:
+    """Return a globally unique 32-character random hex ID for seed data."""
+
+    while True:
+        value = secrets.token_hex(16)
+        if value not in used_ids:
+            used_ids.add(value)
+            return value
+
+
 def build_backups(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build backup seed data with both curated and high-volume generic samples."""
 
@@ -1179,7 +1191,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-001",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 6, 1, 7, 30, 6),
             finished_at=datetime(2026, 6, 1, 7, 30, 10),
@@ -1196,7 +1208,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_replica,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-002",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="table",
             started_at=datetime(2026, 5, 30, 3, 0, 0),
             finished_at=datetime(2026, 5, 30, 3, 5, 0),
@@ -1213,7 +1225,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-003",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 27, 2, 0, 0),
             finished_at=datetime(2026, 5, 27, 2, 2, 0),
@@ -1230,7 +1242,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-004",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="incremental",
             started_at=datetime(2026, 5, 29, 2, 0, 0),
             finished_at=datetime(2026, 5, 29, 2, 10, 0),
@@ -1247,7 +1259,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-005",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 31, 21, 30, 0),
             finished_at=datetime(2026, 5, 31, 21, 33, 0),
@@ -1264,7 +1276,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_replica,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-006",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="incremental",
             started_at=datetime(2026, 6, 1, 1, 0, 0),
             finished_at=datetime(2026, 6, 1, 1, 3, 0),
@@ -1281,7 +1293,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-007",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 24, 1, 0, 0),
             finished_at=datetime(2026, 5, 24, 1, 2, 30),
@@ -1298,7 +1310,7 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=mysql_primary,
-            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-008",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 18, 2, 0, 0),
             finished_at=datetime(2026, 5, 18, 2, 2, 0),
@@ -1324,7 +1336,7 @@ def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="tikv", occurrence=1),
-            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-001",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="incremental",
             started_at=datetime(2026, 6, 1, 9, 30, 0),
             finished_at=None,
@@ -1341,7 +1353,7 @@ def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="tidb", occurrence=1),
-            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-002",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 31, 1, 20, 0),
             finished_at=datetime(2026, 5, 31, 1, 35, 0),
@@ -1358,7 +1370,7 @@ def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="tikv", occurrence=2),
-            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-003",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="incremental",
             started_at=datetime(2026, 5, 28, 1, 10, 0),
             finished_at=datetime(2026, 5, 28, 1, 18, 30),
@@ -1375,7 +1387,7 @@ def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="tikv", occurrence=3),
-            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-004",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="snapshot",
             started_at=datetime(2026, 5, 23, 0, 50, 0),
             finished_at=datetime(2026, 5, 23, 1, 5, 0),
@@ -1392,7 +1404,7 @@ def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="tidb", occurrence=2),
-            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-005",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 15, 1, 0, 0),
             finished_at=datetime(2026, 5, 15, 1, 16, 0),
@@ -1419,7 +1431,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=redis_primary,
-            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-001",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="snapshot",
             started_at=datetime(2026, 6, 1, 1, 0, 0),
             finished_at=datetime(2026, 6, 1, 1, 0, 20),
@@ -1436,7 +1448,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="redis", occurrence=2),
-            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-002",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="snapshot",
             started_at=datetime(2026, 5, 29, 1, 20, 0),
             finished_at=datetime(2026, 5, 29, 1, 20, 45),
@@ -1453,7 +1465,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=select_backup_target(targets, child_service_type="redis", occurrence=3),
-            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-003",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 22, 0, 30, 0),
             finished_at=datetime(2026, 5, 22, 0, 30, 25),
@@ -1470,7 +1482,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         make_backup_record(
             service=service,
             target=redis_primary,
-            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-deleted",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type="full",
             started_at=datetime(2026, 5, 20, 0, 0, 0),
             finished_at=datetime(2026, 5, 20, 0, 0, 12),
@@ -1513,7 +1525,7 @@ def build_generic_service_backups(service: dict[str, Any], *, service_index: int
         make_backup_record(
             service=service,
             target=recent_target,
-            backup_id=f"backup-{service['name']}-recent-{service_index:04d}",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type=backup_types[0],
             started_at=recent_started,
             finished_at=None if recent_status == "running" else recent_started + timedelta(seconds=recent_duration_seconds(recent_size)),
@@ -1541,7 +1553,7 @@ def build_generic_service_backups(service: dict[str, Any], *, service_index: int
         make_backup_record(
             service=service,
             target=second_target,
-            backup_id=f"backup-{service['name']}-weekly-{service_index:04d}",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type=backup_types[1],
             started_at=second_started,
             finished_at=second_started + timedelta(seconds=second_duration),
@@ -1569,7 +1581,7 @@ def build_generic_service_backups(service: dict[str, Any], *, service_index: int
         make_backup_record(
             service=service,
             target=third_target,
-            backup_id=f"backup-{service['name']}-archived-{service_index:04d}",
+            backup_id=random_unique_hex_id(BACKUP_IDS),
             backup_type=backup_types[2],
             started_at=old_started,
             finished_at=old_started + timedelta(seconds=old_duration),
@@ -1785,7 +1797,7 @@ def make_backup_record(
     actual_owner_user = owner_user or service["user"]
     return {
         "backup_id": backup_id,
-        "task_id": f"task-{backup_id}",
+        "task_id": random_unique_hex_id(TASK_IDS),
         "service_name": service["name"],
         "service_type": service["type"],
         "child_service_name": target["child_service_name"],
