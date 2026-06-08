@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from deepagents.middleware.summarization import SummarizationMiddleware
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.language_models.model_profile import ModelProfile
 
@@ -21,9 +21,13 @@ if str(SRC_ROOT) not in sys.path:
 
 from dbass_ai_agent.agent.factory import (  # noqa: E402
     AgentFactoryError,
+    DEEPAGENTS_BUILTIN_TOOLS_DISABLED_PROMPT,
+    DEEPAGENTS_BUILTIN_TOOL_NAMES,
+    DbaasToolAllowlistMiddleware,
     _build_logged_summarization_middleware_class,
     _build_chat_model,
     _create_runtime_agent,
+    _dbaas_tool_allowlist_middleware,
     _interrupt_on_for_tools,
     build_runtime_artifacts,
     build_summarization_middleware_factory,
@@ -32,6 +36,32 @@ from dbass_ai_agent.agent.factory import (  # noqa: E402
 from dbass_ai_agent.agent.compression_events import capture_compression_notices  # noqa: E402
 from dbass_ai_agent.agent.prompt import load_compression_prompt, load_system_prompt  # noqa: E402
 from dbass_ai_agent.config import Settings  # noqa: E402
+
+
+def _tool_name(tool: object) -> str | None:
+    if isinstance(tool, dict):
+        name = tool.get("name")
+        return name if isinstance(name, str) else None
+    name = getattr(tool, "name", None)
+    return name if isinstance(name, str) else None
+
+
+class _FakeModelRequest:
+    def __init__(
+        self,
+        tools: list[object],
+        system_message: SystemMessage | None = None,
+    ) -> None:
+        self.tools = tools
+        self.system_message = system_message
+
+    def override(
+        self,
+        *,
+        tools: list[object],
+        system_message: SystemMessage | None = None,
+    ) -> "_FakeModelRequest":
+        return _FakeModelRequest(tools, system_message)
 
 
 class BuildRuntimeArtifactsTests(unittest.TestCase):
@@ -101,9 +131,15 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             kwargs = create_agent_mock.call_args_list[0].kwargs
             self.assertEqual(
                 set(kwargs),
-                {"model", "tools", "checkpointer", "system_prompt", "interrupt_on"},
+                {
+                    "model",
+                    "tools",
+                    "middleware",
+                    "checkpointer",
+                    "system_prompt",
+                    "interrupt_on",
+                },
             )
-            self.assertNotIn("middleware", kwargs)
             self.assertIs(kwargs["model"], main_model)
             expected_common_tools = {
                 "query_dbaas_service_data_tool",
@@ -140,6 +176,8 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
                     "create_service_backup_task_tool",
                 },
             )
+            self.assertEqual(len(kwargs["middleware"]), 1)
+            self.assertIsInstance(kwargs["middleware"][0], DbaasToolAllowlistMiddleware)
             self.assertIs(kwargs["checkpointer"], saver_mock.return_value)
             self.assertEqual(
                 [call.kwargs["system_prompt"] for call in create_agent_mock.call_args_list],
@@ -162,6 +200,54 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
             )
 
         self.assertEqual(set(result), {"user_write_tool"})
+
+    def test_dbaas_tool_allowlist_filters_deepagents_builtin_tools(self) -> None:
+        allowed_tools = [
+            SimpleNamespace(name="query_dbaas_service_data_tool"),
+            SimpleNamespace(name="query_unit_metric_history_tool"),
+        ]
+        middleware = _dbaas_tool_allowlist_middleware(allowed_tools)
+        request = _FakeModelRequest(
+            [
+                *allowed_tools,
+                *(SimpleNamespace(name=name) for name in DEEPAGENTS_BUILTIN_TOOL_NAMES),
+                {"name": "task"},
+                {"name": "query_unit_metric_history_tool"},
+                SimpleNamespace(name=None),
+            ]
+        )
+
+        filtered_names = middleware.wrap_model_call(
+            request,
+            lambda filtered_request: [_tool_name(tool) for tool in filtered_request.tools],
+        )
+
+        self.assertEqual(
+            filtered_names,
+            [
+                "query_dbaas_service_data_tool",
+                "query_unit_metric_history_tool",
+                "query_unit_metric_history_tool",
+            ],
+        )
+        self.assertTrue(DEEPAGENTS_BUILTIN_TOOL_NAMES.isdisjoint(filtered_names))
+
+    def test_dbaas_tool_allowlist_appends_disabled_builtin_notice(self) -> None:
+        middleware = _dbaas_tool_allowlist_middleware(
+            [SimpleNamespace(name="query_dbaas_service_data_tool")]
+        )
+        request = _FakeModelRequest(
+            [SimpleNamespace(name="query_dbaas_service_data_tool")],
+            system_message=SystemMessage(content="base prompt"),
+        )
+
+        system_text = middleware.wrap_model_call(
+            request,
+            lambda filtered_request: filtered_request.system_message.text,
+        )
+
+        self.assertIn("base prompt", system_text)
+        self.assertIn(DEEPAGENTS_BUILTIN_TOOLS_DISABLED_PROMPT, system_text)
 
     def test_load_system_prompt_appends_role_extend_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

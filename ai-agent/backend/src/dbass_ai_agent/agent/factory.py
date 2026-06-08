@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import SystemMessage
 
 from dbass_ai_agent.agent.compression_events import CompressionNotice, publish_compression_notice
 from dbass_ai_agent.config import Settings
@@ -21,8 +23,89 @@ from .prompt import load_compression_prompt, load_system_prompt
 logger = logging.getLogger(__name__)
 
 
+DEEPAGENTS_BUILTIN_TOOL_NAMES = frozenset(
+    {
+        "write_todos",
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob",
+        "grep",
+        "execute",
+        "task",
+        "start_async_task",
+        "check_async_task",
+        "update_async_task",
+        "cancel_async_task",
+        "list_async_tasks",
+    }
+)
+DEEPAGENTS_BUILTIN_TOOLS_DISABLED_PROMPT = (
+    "DBAAS runtime policy: DeepAgents built-in general-purpose tools are disabled "
+    "for this assistant, including todo tools, filesystem tools, shell execution, "
+    "and subagent task tools. Only use the DBAAS tools explicitly provided in "
+    "the current tool list. Never claim to launch subagents, read local files, "
+    "write local files, or run shell commands."
+)
+
+
 class AgentFactoryError(RuntimeError):
     """Raised when the DeepAgent runtime cannot be initialized."""
+
+
+def _tool_name(tool: Any) -> str | None:
+    if isinstance(tool, dict):
+        name = tool.get("name")
+        return name if isinstance(name, str) else None
+    name = getattr(tool, "name", None)
+    return name if isinstance(name, str) else None
+
+
+class DbaasToolAllowlistMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Keep only app-registered DBAAS tools visible to the model."""
+
+    def __init__(self, allowed_tool_names: set[str]) -> None:
+        self._allowed_tool_names = frozenset(allowed_tool_names)
+
+    def wrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        return handler(self._filter_request_tools(request))
+
+    async def awrap_model_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        return await handler(self._filter_request_tools(request))
+
+    def _filter_request_tools(self, request: Any) -> Any:
+        tools = [
+            tool
+            for tool in request.tools
+            if (name := _tool_name(tool)) is not None and name in self._allowed_tool_names
+        ]
+        return request.override(
+            tools=tools,
+            system_message=_append_to_system_message(
+                getattr(request, "system_message", None),
+                DEEPAGENTS_BUILTIN_TOOLS_DISABLED_PROMPT,
+            ),
+        )
+
+
+def _append_to_system_message(
+    system_message: SystemMessage | None,
+    text: str,
+) -> SystemMessage:
+    content_blocks = list(system_message.content_blocks) if system_message else []
+    if content_blocks:
+        text = f"\n\n{text}"
+    content_blocks.append({"type": "text", "text": text})
+    return SystemMessage(content_blocks=content_blocks)
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +340,7 @@ def _create_runtime_agent(
         return create_deep_agent(
             model=model,
             tools=tools,
+            middleware=[_dbaas_tool_allowlist_middleware(tools)],
             checkpointer=checkpointer,
             system_prompt=system_prompt,
             interrupt_on=_interrupt_on_for_tools(tools),
@@ -270,6 +354,12 @@ def _interrupt_on_for_tools(tools: list[Any]) -> dict[str, dict[str, Any]]:
         for tool_name, config in build_interrupt_on_config().items()
         if tool_name in tool_names
     }
+
+
+def _dbaas_tool_allowlist_middleware(tools: list[Any]) -> DbaasToolAllowlistMiddleware:
+    return DbaasToolAllowlistMiddleware(
+        {tool.name for tool in tools if getattr(tool, "name", None)}
+    )
 
 
 def _build_chat_model(

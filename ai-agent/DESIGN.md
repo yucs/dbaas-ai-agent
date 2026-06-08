@@ -88,6 +88,14 @@ DeepAgent 原生支持：
 - checkpoint
 - context engineering 基础机制
 
+DeepAgents 默认还会向模型暴露 `write_todos`、文件读写、shell 执行和
+`task` 子代理等通用内置工具。DBAAS 助手的运行时边界必须更窄：
+
+- 模型可见工具只允许项目通过 `build_dbaas_tools(...)` 显式注册的 DBAAS 工具
+- DeepAgents 内置的 `task` 子代理、`execute`、文件工具和 todo 工具在模型请求前被硬过滤
+- 禁用内置工具不改变 DeepAgent 的 checkpoint、streaming、tool calling loop、human-in-the-loop 和上下文压缩能力
+- 需要读取运行态数据时，应通过受控 DBAAS 工具返回结构化结果，而不是让模型直接读取任意本地文件
+
 本项目负责实现：
 
 - DBAAS 领域 prompt、工具和策略

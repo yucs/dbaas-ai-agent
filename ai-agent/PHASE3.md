@@ -70,6 +70,15 @@ User
 当前没有放弃 `create_deep_agent()`，也没有在业务层重新拼一套 agent graph。
 后端仍然通过 `deepagents.create_deep_agent(...)` 保留 DeepAgents 默认主链路能力。
 
+但 DeepAgents 默认会额外注入 `write_todos`、文件工具、`execute` 和
+`task` 子代理等通用工具。DBAAS 助手不开放这些通用工具给模型：
+
+- `factory.py` 在创建 agent 时追加 DBAAS 工具 allowlist middleware
+- 每次模型请求前只保留 `build_dbaas_tools(...)` 显式注册的工具
+- DeepAgents 内置的 todo、文件读写、shell 执行、同步/异步子代理工具都会被过滤
+- 这样仍保留 DeepAgent 的运行时、checkpoint、streaming、tool calling loop 和压缩能力，
+  但避免模型绕过 DBAAS 受控工具直接读写本地文件或启动子代理
+
 DeepAgents 自己会在 `create_deep_agent()` 内部创建 `SummarizationMiddleware`。
 如果项目侧再额外挂一个同类 middleware，会触发 duplicate middleware 报错。
 因此当前实现采用的是：
