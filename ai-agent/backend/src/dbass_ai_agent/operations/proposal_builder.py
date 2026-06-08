@@ -108,25 +108,25 @@ def _summary(action: str, tool_args: dict[str, Any]) -> str:
         changes = []
         if tool_args.get("cpu") is not None:
             changes.append(f"CPU 调整为 {tool_args['cpu']}C")
-        if tool_args.get("memory") is not None:
-            changes.append(f"内存调整为 {tool_args['memory']}GB")
+        if tool_args.get("memory_gb") is not None:
+            changes.append(f"内存调整为 {tool_args['memory_gb']}GB")
         if tool_args.get("platform_auto") is not None:
             changes.append(f"平台自动分配设置为 {tool_args['platform_auto']}")
         return f"将 {service_name}/{child_type} " + "，".join(changes)
     if action == "service.storage.update":
         changes = []
-        if tool_args.get("data_volume_size") is not None:
-            changes.append(f"data 卷调整为 {tool_args['data_volume_size']}GB")
-        if tool_args.get("log_volume_size") is not None:
-            changes.append(f"log 卷调整为 {tool_args['log_volume_size']}GB")
+        if tool_args.get("data_volume_size_gb") is not None:
+            changes.append(f"data 卷调整为 {tool_args['data_volume_size_gb']}GB")
+        if tool_args.get("log_volume_size_gb") is not None:
+            changes.append(f"log 卷调整为 {tool_args['log_volume_size_gb']}GB")
         if tool_args.get("platform_auto") is not None:
             changes.append(f"平台自动分配设置为 {tool_args['platform_auto']}")
         return f"将 {service_name}/{child_type} " + "，".join(changes)
     if action == "service.image.upgrade":
         image = tool_args.get("image") or "-"
         version = tool_args.get("version")
-        unit_ids = tool_args.get("unit_ids")
-        scope = "全部 unit" if not unit_ids else f"指定 unit {unit_ids}"
+        unit_names = tool_args.get("unit_names")
+        scope = "全部 unit" if not unit_names else f"指定 unit 名称 {unit_names}"
         version_text = f"，版本 {version}" if version else ""
         return f"将 {service_name}/{child_type} 镜像升级为 {image}{version_text}，范围：{scope}"
     if action == "service.backup.create":
@@ -149,7 +149,7 @@ def _parameters(
     child = _find_child(current_service or {}, str(tool_args.get("child_service_type") or ""))
     if action == "service.resource.update":
         _append_if_present(parameters, tool_args, "cpu", "CPU", "C", _first_unit_value(child, "cpu"), "C")
-        _append_if_present(parameters, tool_args, "memory", "内存", "GB", _first_unit_value(child, "memory"), "GB")
+        _append_if_present(parameters, tool_args, "memory_gb", "内存", "GB", _first_unit_value(child, "memoryGB"), "GB")
         _append_if_present(
             parameters,
             tool_args,
@@ -163,7 +163,7 @@ def _parameters(
         _append_if_present(
             parameters,
             tool_args,
-            "data_volume_size",
+            "data_volume_size_gb",
             "data 卷",
             "GB",
             _first_storage_size(child, "data"),
@@ -172,7 +172,7 @@ def _parameters(
         _append_if_present(
             parameters,
             tool_args,
-            "log_volume_size",
+            "log_volume_size_gb",
             "log 卷",
             "GB",
             _first_storage_size(child, "log"),
@@ -190,7 +190,7 @@ def _parameters(
     elif action == "service.image.upgrade":
         _append_if_present(parameters, tool_args, "image", "镜像", None)
         _append_if_present(parameters, tool_args, "version", "版本", None)
-        _append_if_present(parameters, tool_args, "unit_ids", "升级 unit", None)
+        _append_if_present(parameters, tool_args, "unit_names", "升级 unit 名称", None)
     elif action == "service.backup.create":
         _append_if_present(parameters, tool_args, "scope", "备份范围", None)
         _append_if_present(parameters, tool_args, "backup_type", "备份类型", None)
@@ -255,4 +255,4 @@ def _first_storage_size(child: dict[str, Any], storage_type: str) -> Any:
     volume = storage.get(storage_type)
     if not isinstance(volume, dict):
         return None
-    return volume.get("size")
+    return volume.get("sizeGB", volume.get("size"))

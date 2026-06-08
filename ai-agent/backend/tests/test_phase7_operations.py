@@ -65,7 +65,7 @@ class ApprovalRuntime:
                         "args": {
                             "service_name": "mysql-xf2",
                             "child_service_type": "mysql",
-                            "memory": 15,
+                            "memory_gb": 15,
                         },
                     },
                 ],
@@ -175,7 +175,7 @@ class ExpiringNextApprovalRuntime(ExpiringRuntime):
                         "args": {
                             "service_name": "mysql-xf2",
                             "child_service_type": "mysql",
-                            "memory": 16,
+                            "memory_gb": 16,
                         },
                     },
                 ],
@@ -260,7 +260,7 @@ class NestedResumeRuntime:
                         "args": {
                             "service_name": "mysql-xf2",
                             "child_service_type": "mysql",
-                            "data_volume_size": 600,
+                            "data_volume_size_gb": 600,
                         },
                     },
                 ],
@@ -463,7 +463,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                                 "args": {
                                     "service_name": "mysql-xf2",
                                     "child_service_type": "mysql",
-                                    "memory": 15,
+                                    "memory_gb": 15,
                                 },
                             },
                         ],
@@ -523,7 +523,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                                 "args": {
                                     "service_name": "mysql-xf2",
                                     "child_service_type": "mysql",
-                                    "memory": 15,
+                                    "memory_gb": 15,
                                 },
                             },
                         ],
@@ -574,7 +574,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                     ],
@@ -707,7 +707,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                     ],
@@ -838,7 +838,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                         {
@@ -846,7 +846,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "data_volume_size": 600,
+                                "data_volume_size_gb": 600,
                             },
                         },
                     ],
@@ -866,10 +866,10 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
             memory_param = approval.proposal.items[0].parameters[0]
             storage_param = approval.proposal.items[1].parameters[0]
-            self.assertEqual(memory_param.key, "memory")
+            self.assertEqual(memory_param.key, "memory_gb")
             self.assertEqual(memory_param.current_value, 8)
             self.assertEqual(memory_param.current_unit, "GB")
-            self.assertEqual(storage_param.key, "data_volume_size")
+            self.assertEqual(storage_param.key, "data_volume_size_gb")
             self.assertEqual(storage_param.current_value, 500)
             self.assertEqual(storage_param.current_unit, "GB")
 
@@ -891,7 +891,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                     ],
@@ -940,7 +940,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                     ],
@@ -993,7 +993,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                     ],
@@ -1054,7 +1054,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "mysql",
-                                "memory": 15,
+                                "memory_gb": 15,
                             },
                         },
                         {
@@ -1062,7 +1062,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
                             "args": {
                                 "service_name": "mysql-xf2",
                                 "child_service_type": "proxy",
-                                "memory": 4,
+                                "memory_gb": 4,
                             },
                         },
                     ],
@@ -2133,10 +2133,10 @@ class FakeCurrentValueClient:
                         {
                             "id": "mysql-0",
                             "cpu": 2,
-                            "memory": 8,
+                            "memoryGB": 8,
                             "storage": {
-                                "data": {"size": 500},
-                                "log": {"size": 100},
+                                "data": {"sizeGB": 500},
+                                "log": {"sizeGB": 100},
                             },
                         }
                     ],
@@ -2251,7 +2251,7 @@ def _create_expired_resource_approval(identity: Identity, detail, service: Sessi
                     "args": {
                         "service_name": "mysql-xf2",
                         "child_service_type": "mysql",
-                        "memory": 15,
+                        "memory_gb": 15,
                     },
                 },
             ],

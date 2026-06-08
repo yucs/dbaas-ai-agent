@@ -35,7 +35,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
         child_service_type: str,
         platform_auto: bool | None = None,
         cpu: float | None = None,
-        memory: float | None = None,
+        memory_gb: float | None = None,
     ) -> dict[str, Any]:
         """更新 DBAAS 服务子服务的 CPU、内存或平台自动分配设置。写操作必须先经过人工确认。"""
 
@@ -49,7 +49,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
             child_service_type=child_service_type,
             platform_auto=platform_auto,
             cpu=cpu,
-            memory=memory,
+            memory_gb=memory_gb,
         )
         existing_operation = context.operation_service.find_existing(
             context.session,
@@ -92,7 +92,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
                 child_service_type=child_service_type,
                 platform_auto=platform_auto,
                 cpu=cpu,
-                memory=memory,
+                memory_gb=memory_gb,
                 timeout_seconds=config.timeout_seconds,
             )
             changes = _resource_changes(target, before, after, child_service_type)
@@ -156,8 +156,8 @@ def build_write_tools(settings: Settings) -> list[Any]:
         service_name: str,
         child_service_type: str,
         platform_auto: bool | None = None,
-        data_volume_size: float | None = None,
-        log_volume_size: float | None = None,
+        data_volume_size_gb: float | None = None,
+        log_volume_size_gb: float | None = None,
     ) -> dict[str, Any]:
         """更新 DBAAS 服务子服务的 data/log 存储规格。写操作必须先经过人工确认。"""
 
@@ -170,8 +170,8 @@ def build_write_tools(settings: Settings) -> list[Any]:
             service_name=service_name,
             child_service_type=child_service_type,
             platform_auto=platform_auto,
-            data_volume_size=data_volume_size,
-            log_volume_size=log_volume_size,
+            data_volume_size_gb=data_volume_size_gb,
+            log_volume_size_gb=log_volume_size_gb,
         )
         existing_operation = context.operation_service.find_existing(
             context.session,
@@ -213,8 +213,8 @@ def build_write_tools(settings: Settings) -> list[Any]:
                 service_name,
                 child_service_type=child_service_type,
                 platform_auto=platform_auto,
-                data_volume_size=data_volume_size,
-                log_volume_size=log_volume_size,
+                data_volume_size_gb=data_volume_size_gb,
+                log_volume_size_gb=log_volume_size_gb,
                 timeout_seconds=config.timeout_seconds,
             )
             changes = _storage_changes(target, before, after, child_service_type)
@@ -279,7 +279,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
         child_service_type: str,
         image: str,
         version: str | None = None,
-        unit_ids: list[str] | None = None,
+        unit_names: list[str] | None = None,
     ) -> dict[str, Any]:
         """创建 DBAAS 服务镜像升级异步任务。写操作必须先经过人工确认。"""
 
@@ -293,7 +293,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
             child_service_type=child_service_type,
             image=image,
             version=version,
-            unit_ids=unit_ids,
+            unit_names=unit_names,
         )
         existing_operation = context.operation_service.find_existing(
             context.session,
@@ -333,7 +333,7 @@ def build_write_tools(settings: Settings) -> list[Any]:
                 child_service_type=child_service_type,
                 image=image,
                 version=version,
-                unit_ids=unit_ids,
+                unit_names=unit_names,
                 timeout_seconds=config.timeout_seconds,
             )
             task_id = str(payload.get("taskId") or "")
@@ -687,17 +687,17 @@ def _resource_changes(
     before_child = _find_child(before, child_service_type)
     after_child = _find_child(after, child_service_type)
     changes: list[OperationChange] = []
-    for field, label, unit in [
-        ("cpu", "CPU", "C"),
-        ("memory", "内存", "GB"),
+    for snapshot_field, result_field, label, unit in [
+        ("cpu", "cpu", "CPU", "C"),
+        ("memoryGB", "memory_gb", "内存", "GB"),
     ]:
-        before_value = _first_unit_value(before_child, field)
-        after_value = _first_unit_value(after_child, field)
+        before_value = _first_unit_value(before_child, snapshot_field)
+        after_value = _first_unit_value(after_child, snapshot_field)
         if before_value != after_value:
             changes.append(
                 OperationChange(
                     target=target,
-                    field=field,
+                    field=result_field,
                     label=label,
                     before=before_value,
                     after=after_value,
@@ -739,7 +739,7 @@ def _storage_changes(
             changes.append(
                 OperationChange(
                     target=target,
-                    field=f"{field}_volume_size",
+                    field=f"{field}_volume_size_gb",
                     label=label,
                     before=before_value,
                     after=after_value,
@@ -849,7 +849,7 @@ def _first_storage_size(child: dict[str, Any], storage_type: str) -> Any:
     volume = storage.get(storage_type)
     if not isinstance(volume, dict):
         return None
-    return volume.get("size")
+    return volume.get("sizeGB", volume.get("size"))
 
 
 def _change_type(before: Any, after: Any) -> str | None:

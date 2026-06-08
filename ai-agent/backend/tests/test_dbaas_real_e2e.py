@@ -51,7 +51,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                         identity=identity,
                         session=session,
                         user_message=_user_message(
-                            "mysql-xf2/mysql 扩到 101C301G"
+                            "payad001/mysql 扩到 101C301G"
                         ),
                     )
                     tool_calls = _thread_tool_calls(runtime, session)
@@ -74,7 +74,7 @@ class DbaasRealE2ETests(unittest.TestCase):
         )
         self.assertIsNotNone(target_precheck, tool_calls)
         assert target_precheck is not None
-        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("service_name"), "payad001")
         self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
         self.assertTrue(
             any(marker in reply.content for marker in ["资源不足", "blocking_errors", "insufficient_capacity"]),
@@ -95,7 +95,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     reply = runtime.generate_reply(
                         identity=identity,
                         session=session,
-                        user_message=_user_message("mysql-xf2/mysql CPU 要不要扩"),
+                        user_message=_user_message("payad001/mysql CPU 要不要扩"),
                     )
                     tool_names = _thread_tool_names(runtime, session)
                 finally:
@@ -120,7 +120,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     first_reply = runtime.generate_reply(
                         identity=identity,
                         session=session,
-                        user_message=_user_message("mysql-xf2/mysql 扩到 16C64G"),
+                        user_message=_user_message("payad001/mysql 扩到 16C64G"),
                     )
                     first_tool_calls = _thread_tool_calls(runtime, session)
                     second_reply = runtime.generate_reply(
@@ -147,7 +147,7 @@ class DbaasRealE2ETests(unittest.TestCase):
         )
         self.assertIsNotNone(target_precheck, first_tool_calls)
         assert target_precheck is not None
-        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("service_name"), "payad001")
         self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
 
         self.assertTrue(second_reply.paused, second_reply.content)
@@ -172,7 +172,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     reply = runtime.generate_reply(
                         identity=identity,
                         session=session,
-                        user_message=_user_message("mysql-xf2/mysql data 扩到 1024G，log 扩到 200G"),
+                        user_message=_user_message("payad001/mysql data 扩到 1024G，log 扩到 200G"),
                     )
                     tool_calls = _thread_tool_calls(runtime, session)
                 finally:
@@ -194,7 +194,7 @@ class DbaasRealE2ETests(unittest.TestCase):
         )
         self.assertIsNotNone(target_precheck, tool_calls)
         assert target_precheck is not None
-        self.assertEqual(target_precheck["args"].get("service_name"), "mysql-xf2")
+        self.assertEqual(target_precheck["args"].get("service_name"), "payad001")
         self.assertEqual(target_precheck["args"].get("child_service_type"), "mysql")
 
     def test_real_llm_short_storage_advice_uses_precheck_without_approval(self) -> None:
@@ -211,7 +211,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     reply = runtime.generate_reply(
                         identity=identity,
                         session=session,
-                        user_message=_user_message("mysql-xf2/mysql 磁盘要不要扩"),
+                        user_message=_user_message("payad001/mysql 磁盘要不要扩"),
                     )
                     tool_names = _thread_tool_names(runtime, session)
                 finally:
@@ -237,7 +237,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                 query_result = query_dbaas_service_data(
                     config,
                     identity,
-                    jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+                    jq_filter='[.[] | select(.runningStatus != "passing")] | length',
                 )
                 self.assertEqual(query_result["status"], "success", query_result)
                 expected_count = query_result["preview"]
@@ -249,7 +249,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                         identity=identity,
                         session=_session_meta(identity, "thread_dbaas_real_e2e"),
                         user_message=_user_message(
-                            "请使用 DBAAS 工具查询 services 中 healthStatus 不是 HEALTHY 的数量，"
+                            "请使用 DBAAS 工具查询 services 中 runningStatus 不是 passing 的数量，"
                             "只回答数量和一句依据。"
                         ),
                     )
@@ -268,7 +268,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             unavailable = query_dbaas_service_data(
                 config,
                 identity,
-                jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+                jq_filter='[.[] | select(.runningStatus != "passing")] | length',
             )
             self.assertEqual(unavailable["status"], "error")
             self.assertEqual(unavailable["error_type"], "snapshot_unavailable")
@@ -279,7 +279,7 @@ class DbaasRealE2ETests(unittest.TestCase):
                     identity=identity,
                     session=_session_meta(identity, "thread_dbaas_real_e2e_after_stop"),
                     user_message=_user_message(
-                        "请重新查询 services 中 healthStatus 不是 HEALTHY 的数量。"
+                        "请重新查询 services 中 runningStatus 不是 passing 的数量。"
                         "如果当前没有可用数据视图，请明确说明无法获得准确数据，不要猜数量。"
                     ),
                 )

@@ -58,7 +58,7 @@ class DbaasWriteClient:
         child_service_type: str,
         platform_auto: bool | None = None,
         cpu: float | None = None,
-        memory: float | None = None,
+        memory_gb: float | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -68,8 +68,8 @@ class DbaasWriteClient:
             payload["platformAuto"] = platform_auto
         if cpu is not None:
             payload["cpu"] = cpu
-        if memory is not None:
-            payload["memory"] = memory
+        if memory_gb is not None:
+            payload["memoryGB"] = memory_gb
         return self._request_json(
             identity,
             "PUT",
@@ -168,8 +168,8 @@ class DbaasWriteClient:
         *,
         child_service_type: str,
         platform_auto: bool | None = None,
-        data_volume_size: float | None = None,
-        log_volume_size: float | None = None,
+        data_volume_size_gb: float | None = None,
+        log_volume_size_gb: float | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -178,10 +178,10 @@ class DbaasWriteClient:
         if platform_auto is not None:
             payload["platformAuto"] = platform_auto
         storage: dict[str, Any] = {}
-        if data_volume_size is not None:
-            storage["dataVolumeSize"] = data_volume_size
-        if log_volume_size is not None:
-            storage["logVolumeSize"] = log_volume_size
+        if data_volume_size_gb is not None:
+            storage["data"] = {"sizeGB": data_volume_size_gb}
+        if log_volume_size_gb is not None:
+            storage["log"] = {"sizeGB": log_volume_size_gb}
         if storage:
             payload["storage"] = storage
         return self._request_json(
@@ -200,7 +200,7 @@ class DbaasWriteClient:
         child_service_type: str,
         image: str,
         version: str | None = None,
-        unit_ids: list[str] | None = None,
+        unit_names: list[str] | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -209,8 +209,8 @@ class DbaasWriteClient:
         }
         if version is not None:
             payload["version"] = version
-        if unit_ids is not None:
-            payload["unitIds"] = unit_ids
+        if unit_names is not None:
+            payload["unitNames"] = unit_names
         return self._request_json(
             identity,
             "POST",
