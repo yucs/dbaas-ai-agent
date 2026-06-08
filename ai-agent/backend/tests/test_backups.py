@@ -50,7 +50,7 @@ class BackupQueryTests(unittest.TestCase):
                     200,
                     {
                         "supported": True,
-                        "serviceType": "upsql",
+                        "serviceType": "mysql",
                         "fields": [
                             {"name": "backupType", "required": True},
                             {"name": "retentionDays", "required": True},
@@ -399,7 +399,7 @@ def _backup(
     backup_id: str,
     service_name: str,
     *,
-    service_type: str = "upsql",
+    service_type: str = "mysql",
     child_service_name: str = "mysql-primary",
     child_service_type: str = "mysql",
     unit_name: str = "mysql-primary-01",

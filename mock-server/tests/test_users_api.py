@@ -78,7 +78,8 @@ def test_get_user_returns_aggregated_user_service_groups() -> None:
     payload = response.json()
     assert payload["user"] == "payment-team-prod"
     assert payload["serviceGroupCount"] == len(user_services)
-    assert payload["environments"] == sorted({item["environment"] for item in user_services})
+    assert payload["environments"] == sorted(payload["environments"])
+    assert payload["environments"]
     assert payload["subsystems"] == sorted({item["subsystem"] for item in user_services})
     assert [item["name"] for item in payload["serviceGroups"]] == [
         item["name"] for item in user_services

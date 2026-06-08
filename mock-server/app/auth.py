@@ -109,7 +109,7 @@ def ensure_service_access(
 ) -> dict[str, Any]:
     """校验当前用户是否可访问指定服务。"""
 
-    service_detail = store.get_service_detail(service_name)
+    service_detail = store.get_service_seed(service_name)
     if service_detail is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import random
+import secrets
 from typing import Any
 
 
@@ -14,16 +15,45 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 RNG = random.Random(20260421)
 HOST_BY_ID: dict[str, dict[str, Any]] = {}
+UNIT_IDS: set[str] = set()
 
 SITE_COUNT = 12
 CLUSTERS_PER_SITE = 4
 HOSTS_PER_CLUSTER = 60
 GENERATED_SERVICE_COUNT = 2200
 BACKUP_REFERENCE_TIME = datetime(2026, 6, 1, 10, 0, 0)
+MYSQL_ANCHOR_SERVICE_NAME = "payad001"
+TIDB_ANCHOR_SERVICE_NAME = "ordad002"
+REDIS_ANCHOR_SERVICE_NAME = "sesad003"
 SPECIAL_BACKUP_SERVICE_NAMES = {
-    "mysql-xf2",
-    "tidb-oltp",
-    "redis-cache",
+    MYSQL_ANCHOR_SERVICE_NAME,
+    TIDB_ANCHOR_SERVICE_NAME,
+    REDIS_ANCHOR_SERVICE_NAME,
+}
+
+ARCHITECTURES = (("amd64", "X86", "1"), ("arm64", "ARM", "2"))
+OWNER_NAMES = ("陈思远", "李明哲", "王佳宁", "赵雨晴", "周启航", "吴嘉怡", "郑皓文", "孙亦辰", "马婧雯", "胡承泽")
+BUSINESS_CATALOG: dict[str, tuple[str, str, str]] = {
+    "account": ("ACC", "账户中心系统ZHZT", "账户资料库"),
+    "analytics": ("ANA", "经营分析系统JYFX", "指标明细库"),
+    "billing": ("BIL", "计费账务系统JFZW", "账单结算库"),
+    "cache": ("CAC", "缓存加速系统HCJS", "热点缓存库"),
+    "content": ("CNT", "内容管理系统NRGL", "内容元数据库"),
+    "growth": ("GRW", "增长运营系统ZZYY", "活动投放库"),
+    "inventory": ("INV", "库存履约系统KCLY", "库存流水库"),
+    "messaging": ("MSG", "消息通知系统XXTZ", "消息投递库"),
+    "monitor": ("MON", "监控观测系统JKGC", "时序监控库"),
+    "order": ("ORD", "交易订单系统JYDD", "订单核心库"),
+    "payment": ("PAY", "支付核心系统ZFHX", "支付交易库"),
+    "payment-platform": ("PAY", "支付核心系统ZFHX", "支付路由库"),
+    "profile": ("PRF", "客户画像系统KHHX", "画像标签库"),
+    "recommend": ("REC", "智能推荐系统ZNTJ", "推荐特征库"),
+    "search": ("SEA", "搜索检索系统SSJS", "搜索索引库"),
+    "session": ("SES", "会话缓存系统HHHC", "登录态缓存库"),
+    "stream": ("STM", "实时流处理系统SSLC", "流式消息库"),
+    "stream-platform": ("STM", "实时流处理系统SSLC", "流式消息库"),
+    "tidb-platform": ("ORD", "交易订单系统JYDD", "分布式订单库"),
+    "warehouse": ("WHS", "数仓服务系统SCFW", "宽表明细库"),
 }
 
 
@@ -38,38 +68,40 @@ class SiteSpec:
 
 
 SERVICE_PATTERNS: list[dict[str, Any]] = [
-    {"type": "mysql", "name_prefix": "account-mysql", "user": "account-team-prod", "subsystem": "account", "environments": ("prod",), "weight": 18},
-    {"type": "mysql", "name_prefix": "payment-mysql", "user": "payment-team-prod", "subsystem": "payment", "environments": ("prod", "staging"), "weight": 16},
-    {"type": "mysql", "name_prefix": "billing-mysql", "user": "billing-team-prod", "subsystem": "billing", "environments": ("prod", "staging"), "weight": 12},
-    {"type": "tidb", "name_prefix": "order-tidb", "user": "order-team-prod", "subsystem": "order", "environments": ("prod", "staging"), "weight": 14},
-    {"type": "tidb", "name_prefix": "inventory-tidb", "user": "inventory-team-prod", "subsystem": "inventory", "environments": ("prod", "staging"), "weight": 12},
-    {"type": "kafka", "name_prefix": "trade-kafka", "user": "trade-team-staging", "subsystem": "trade", "environments": ("staging", "perf"), "weight": 10},
-    {"type": "kafka", "name_prefix": "message-kafka", "user": "messaging-team-staging", "subsystem": "messaging", "environments": ("staging", "perf"), "weight": 8},
-    {"type": "influxdb", "name_prefix": "monitor-influxdb", "user": "monitor-team-prod", "subsystem": "monitor", "environments": ("prod", "perf"), "weight": 10},
-    {"type": "redis", "name_prefix": "session-redis", "user": "session-team-prod", "subsystem": "session", "environments": ("prod", "staging", "dev"), "weight": 10},
-    {"type": "redis", "name_prefix": "profile-redis", "user": "profile-team-prod", "subsystem": "profile", "environments": ("prod", "staging", "dev"), "weight": 8},
-    {"type": "mongodb", "name_prefix": "content-mongodb", "user": "content-team-staging", "subsystem": "content", "environments": ("staging", "dev"), "weight": 8},
-    {"type": "mongodb", "name_prefix": "growth-mongodb", "user": "growth-team-staging", "subsystem": "growth", "environments": ("staging", "dev"), "weight": 8},
-    {"type": "elasticsearch", "name_prefix": "search-es", "user": "search-team-staging", "subsystem": "search", "environments": ("staging", "perf"), "weight": 6},
-    {"type": "elasticsearch", "name_prefix": "recommend-es", "user": "recommend-team-staging", "subsystem": "recommend", "environments": ("staging", "perf"), "weight": 6},
-    {"type": "clickhouse", "name_prefix": "warehouse-clickhouse", "user": "warehouse-team-prod", "subsystem": "warehouse", "environments": ("prod", "perf"), "weight": 6},
-    {"type": "clickhouse", "name_prefix": "analytics-clickhouse", "user": "analytics-team-prod", "subsystem": "analytics", "environments": ("prod", "perf"), "weight": 6},
+    {"type": "mysql", "code": "acc", "user": "account-team-prod", "subsystem": "account", "environments": ("prod",), "weight": 18},
+    {"type": "mysql", "code": "pay", "user": "payment-team-prod", "subsystem": "payment", "environments": ("prod", "staging"), "weight": 16},
+    {"type": "mysql", "code": "bil", "user": "billing-team-prod", "subsystem": "billing", "environments": ("prod", "staging"), "weight": 12},
+    {"type": "tidb", "code": "ord", "user": "order-team-prod", "subsystem": "order", "environments": ("prod", "staging"), "weight": 14},
+    {"type": "tidb", "code": "inv", "user": "inventory-team-prod", "subsystem": "inventory", "environments": ("prod", "staging"), "weight": 12},
+    {"type": "kafka", "code": "trd", "user": "trade-team-staging", "subsystem": "trade", "environments": ("staging", "perf"), "weight": 10},
+    {"type": "kafka", "code": "msg", "user": "messaging-team-staging", "subsystem": "messaging", "environments": ("staging", "perf"), "weight": 8},
+    {"type": "influxdb", "code": "mon", "user": "monitor-team-prod", "subsystem": "monitor", "environments": ("prod", "perf"), "weight": 10},
+    {"type": "redis", "code": "ses", "user": "session-team-prod", "subsystem": "session", "environments": ("prod", "staging", "dev"), "weight": 10},
+    {"type": "redis", "code": "prf", "user": "profile-team-prod", "subsystem": "profile", "environments": ("prod", "staging", "dev"), "weight": 8},
+    {"type": "mongodb", "code": "cnt", "user": "content-team-staging", "subsystem": "content", "environments": ("staging", "dev"), "weight": 8},
+    {"type": "mongodb", "code": "grw", "user": "growth-team-staging", "subsystem": "growth", "environments": ("staging", "dev"), "weight": 8},
+    {"type": "elasticsearch", "code": "sea", "user": "search-team-staging", "subsystem": "search", "environments": ("staging", "perf"), "weight": 6},
+    {"type": "elasticsearch", "code": "rec", "user": "recommend-team-staging", "subsystem": "recommend", "environments": ("staging", "perf"), "weight": 6},
+    {"type": "clickhouse", "code": "whs", "user": "warehouse-team-prod", "subsystem": "warehouse", "environments": ("prod", "perf"), "weight": 6},
+    {"type": "clickhouse", "code": "ana", "user": "analytics-team-prod", "subsystem": "analytics", "environments": ("prod", "perf"), "weight": 6},
 ]
 
 
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    UNIT_IDS.clear()
 
     sites = build_sites()
     clusters = build_clusters(sites)
     hosts = build_hosts(sites, clusters)
     services = build_services(sites, clusters, hosts)
     backups = build_backups(services)
+    public_services = public_service_seed_data(services, sites, hosts)
 
     write_json(DATA_DIR / "sites.json", sites)
     write_json(DATA_DIR / "clusters.json", clusters)
     write_json(DATA_DIR / "hosts.json", hosts)
-    write_json(DATA_DIR / "services.json", services)
+    write_json(DATA_DIR / "services.json", public_services)
     write_json(DATA_DIR / "backups.json", backups)
 
 
@@ -77,18 +109,18 @@ def build_sites() -> list[dict[str, Any]]:
     """Build raw site seed data."""
 
     site_rows = [
-        ("site-prod-sh-01", "Shanghai Production Site 01", "prod", "cn-east-1", "cn-east-1a"),
-        ("site-prod-sh-02", "Shanghai Production Site 02", "prod", "cn-east-1", "cn-east-1b"),
-        ("site-prod-bj-01", "Beijing Production Site 01", "prod", "cn-north-1", "cn-north-1a"),
-        ("site-prod-gz-01", "Guangzhou Production Site 01", "prod", "cn-south-1", "cn-south-1a"),
-        ("site-staging-sh-01", "Shanghai Staging Site 01", "staging", "cn-east-1", "cn-east-1c"),
-        ("site-staging-bj-01", "Beijing Staging Site 01", "staging", "cn-north-1", "cn-north-1b"),
-        ("site-staging-gz-01", "Guangzhou Staging Site 01", "staging", "cn-south-1", "cn-south-1b"),
-        ("site-dev-hz-01", "Hangzhou Development Site 01", "dev", "cn-east-2", "cn-east-2a"),
-        ("site-dev-sz-01", "Shenzhen Development Site 01", "dev", "cn-south-2", "cn-south-2a"),
-        ("site-perf-sh-01", "Shanghai Performance Site 01", "perf", "cn-east-1", "cn-east-1d"),
-        ("site-perf-bj-01", "Beijing Performance Site 01", "perf", "cn-north-1", "cn-north-1c"),
-        ("site-dr-sh-01", "Shanghai Disaster Recovery Site 01", "prod", "cn-east-1", "cn-east-1e"),
+        ("site-prod-sh-01", "上海PIT站", "prod", "cn-east-1", "cn-east-1a"),
+        ("site-prod-sh-02", "上海张江站", "prod", "cn-east-1", "cn-east-1b"),
+        ("site-prod-bj-01", "北京亦庄站", "prod", "cn-north-1", "cn-north-1a"),
+        ("site-prod-gz-01", "广州南沙站", "prod", "cn-south-1", "cn-south-1a"),
+        ("site-staging-sh-01", "上海验证站", "staging", "cn-east-1", "cn-east-1c"),
+        ("site-staging-bj-01", "北京验证站", "staging", "cn-north-1", "cn-north-1b"),
+        ("site-staging-gz-01", "广州验证站", "staging", "cn-south-1", "cn-south-1b"),
+        ("site-dev-hz-01", "杭州研发站", "dev", "cn-east-2", "cn-east-2a"),
+        ("site-dev-sz-01", "深圳研发站", "dev", "cn-south-2", "cn-south-2a"),
+        ("site-perf-sh-01", "上海压测站", "perf", "cn-east-1", "cn-east-1d"),
+        ("site-perf-bj-01", "北京压测站", "perf", "cn-north-1", "cn-north-1c"),
+        ("site-dr-sh-01", "上海灾备站", "prod", "cn-east-1", "cn-east-1e"),
     ]
 
     sites: list[dict[str, Any]] = []
@@ -100,6 +132,7 @@ def build_sites() -> list[dict[str, Any]]:
                 "environment": environment,
                 "region": region,
                 "zone": zone,
+                "areaName": ("核心区", "转接区", "容灾区", "验证区")[sequence % 4],
                 "sequence": sequence,
                 "siteType": "SELF_MANAGED",
                 "provider": "DBScale Cloud",
@@ -155,7 +188,7 @@ def build_hosts(sites: list[dict[str, Any]], clusters: list[dict[str, Any]]) -> 
             hosts.append(
                 {
                     "id": host_id,
-                    "name": f"dbaas-{site['environment']}-worker-{cluster_sequence:02d}-{host_index + 1:02d}",
+                    "name": f"syn47{cluster_sequence:02d}{host_index + 1000:04d}",
                     "ip": ip,
                     "clusterId": cluster["id"],
                     "hostStatus": host_status,
@@ -254,7 +287,7 @@ def build_services(
 
     services.append(
         build_mysql_service(
-            name="mysql-xf2",
+            name=MYSQL_ANCHOR_SERVICE_NAME,
             site=site_by_id["site-prod-sh-01"],
             user="payment-platform-team",
             subsystem="payment-platform",
@@ -272,7 +305,7 @@ def build_services(
     )
     services.append(
         build_tidb_service(
-            name="tidb-oltp",
+            name=TIDB_ANCHOR_SERVICE_NAME,
             site=site_by_id["site-prod-sh-02"],
             user="db-platform-team",
             subsystem="tidb-platform",
@@ -285,7 +318,7 @@ def build_services(
     )
     services.append(
         build_kafka_service(
-            name="kafka-stream",
+            name="stmad004",
             site=site_by_id["site-prod-sh-01"],
             user="streaming-platform-team",
             subsystem="stream-platform",
@@ -296,7 +329,7 @@ def build_services(
     )
     services.append(
         build_influxdb_service(
-            name="influxdb-monitor",
+            name="monad005",
             site=site_by_id["site-prod-sh-01"],
             user="observability-platform-team",
             subsystem="monitor-platform",
@@ -307,7 +340,7 @@ def build_services(
     )
     services.append(
         build_redis_service(
-            name="redis-cache",
+            name=REDIS_ANCHOR_SERVICE_NAME,
             site=site_by_id["site-prod-sh-01"],
             user="cache-platform-team",
             subsystem="cache-platform",
@@ -318,7 +351,7 @@ def build_services(
     )
     services.append(
         build_mongodb_service(
-            name="mongodb-docs",
+            name="cntad006",
             site=site_by_id["site-staging-sh-01"],
             user="content-platform-team",
             subsystem="content-platform",
@@ -329,7 +362,7 @@ def build_services(
     )
     services.append(
         build_elasticsearch_service(
-            name="elasticsearch-search",
+            name="seaad007",
             site=site_by_id["site-staging-sh-01"],
             user="search-platform-team",
             subsystem="search-platform",
@@ -340,7 +373,7 @@ def build_services(
     )
     services.append(
         build_clickhouse_service(
-            name="clickhouse-warehouse",
+            name="whsad008",
             site=site_by_id["site-prod-bj-01"],
             user="warehouse-platform-team",
             subsystem="warehouse-platform",
@@ -355,13 +388,19 @@ def build_services(
     for site in sites:
         environments_to_sites.setdefault(site["environment"], []).append(site)
 
+    pattern_serials: dict[str, int] = {}
     for index in range(GENERATED_SERVICE_COUNT):
         pattern = weighted_patterns[index % len(weighted_patterns)]
         environment = pattern["environments"][index % len(pattern["environments"])]
         site = environments_to_sites[environment][index % len(environments_to_sites[environment])]
-        serial = f"{index + 1:04d}"
+        pattern_key = f"{pattern['code']}:{environment}"
+        pattern_serials[pattern_key] = pattern_serials.get(pattern_key, 0) + 1
+        name = generated_service_name(
+            code=pattern["code"],
+            environment=environment,
+            serial=pattern_serials[pattern_key],
+        )
         if pattern["type"] == "mysql":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_mysql_service(
                     name=name,
@@ -374,7 +413,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "tidb":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_tidb_service(
                     name=name,
@@ -387,7 +425,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "kafka":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_kafka_service(
                     name=name,
@@ -400,7 +437,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "influxdb":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_influxdb_service(
                     name=name,
@@ -413,7 +449,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "redis":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_redis_service(
                     name=name,
@@ -426,7 +461,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "mongodb":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_mongodb_service(
                     name=name,
@@ -439,7 +473,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "elasticsearch":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_elasticsearch_service(
                     name=name,
@@ -452,7 +485,6 @@ def build_services(
                 )
             )
         elif pattern["type"] == "clickhouse":
-            name = f"{pattern['name_prefix']}-{environment}-{site['region']}-{serial}"
             services.append(
                 build_clickhouse_service(
                     name=name,
@@ -466,6 +498,135 @@ def build_services(
             )
 
     return services
+
+
+def public_service_seed_data(
+    services: list[dict[str, Any]],
+    sites: list[dict[str, Any]],
+    hosts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project internal generated services to the public services schema shape."""
+
+    site_by_id = {site["id"]: site for site in sites}
+    host_by_id = {host["id"]: host for host in hosts}
+    public_services: list[dict[str, Any]] = []
+    for service in services:
+        site = site_by_id[service["siteId"]]
+        child_type_counts: dict[str, int] = {}
+        child_services: list[dict[str, Any]] = []
+        for child_service in service.get("services", []):
+            child_service_type = child_service["type"]
+            child_type_counts[child_service_type] = child_type_counts.get(child_service_type, 0) + 1
+            child_services.append(
+                public_child_service(
+                    child_service,
+                    service_name=service["name"],
+                    occurrence=child_type_counts[child_service_type],
+                    host_by_id=host_by_id,
+                )
+            )
+        public_services.append(
+            {
+                "name": service["name"],
+                "type": service["type"],
+                "user": service.get("user"),
+                "ownerAccount": service.get("ownerAccount"),
+                "ownerName": service.get("ownerName"),
+                "businessSystemName": service.get("businessSystemName"),
+                "businessSubsystemName": service.get("businessSubsystemName"),
+                "subsystem": service.get("businessSubsystemName") or service.get("subsystem"),
+                "siteId": service["siteId"],
+                "siteName": site["name"],
+                "areaName": service.get("areaName") or site.get("areaName"),
+                "sharding": service.get("sharding"),
+                "runningStatus": public_running_status(service.get("runningStatus") or service.get("healthStatus")),
+                "replicationStatus": public_running_status(service.get("replicationStatus")),
+                "childServices": child_services,
+                "backupStrategy": service.get("backupStrategy"),
+            }
+        )
+    return public_services
+
+
+def public_child_service(
+    child_service: dict[str, Any],
+    *,
+    service_name: str,
+    occurrence: int,
+    host_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Project an internal child service to the public services schema shape."""
+
+    return {
+        "name": child_service_public_name(service_name, child_service["type"], occurrence),
+        "type": child_service["type"],
+        "version": child_service.get("version"),
+        "port": child_service.get("port"),
+        "runningStatus": public_running_status(child_service.get("runningStatus") or child_service.get("healthStatus")),
+        "units": [
+            public_service_unit(unit, host_by_id=host_by_id)
+            for unit in child_service.get("units", [])
+        ],
+    }
+
+
+def child_service_public_name(service_name: str, child_service_type: str, occurrence: int) -> str:
+    """Return a stable public child-service name."""
+
+    return f"{service_name}-{child_service_type}-{occurrence:02d}"
+
+
+def public_service_unit(
+    unit: dict[str, Any],
+    *,
+    host_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Project an internal unit to the public services schema shape."""
+
+    host = host_by_id[unit["hostId"]]
+    return {
+        "name": unit["name"],
+        "type": unit["type"],
+        "cpuArchitecture": unit.get("cpuArchitecture"),
+        "cpuArchitectureDisplayName": unit.get("cpuArchitectureDisplayName"),
+        "version": unit.get("version"),
+        "runningStatus": public_running_status(unit.get("runningStatus") or unit.get("healthStatus")),
+        "hostName": host["name"],
+        "hostIp": host["ip"],
+        "ip": unit.get("ip") or unit.get("containerIp"),
+        "ipv6": unit.get("ipv6"),
+        "cpu": unit.get("cpu"),
+        "memoryGB": unit.get("memoryGB") or unit.get("memory"),
+        "storage": {
+            "data": public_volume(unit["storage"]["data"]),
+            "log": public_volume(unit["storage"]["log"]),
+        },
+    }
+
+
+def public_volume(volume: dict[str, Any]) -> dict[str, Any]:
+    """Project an internal volume to the public services schema shape."""
+
+    return {
+        "sizeGB": volume.get("sizeGB") or volume.get("size"),
+        "type": volume.get("type"),
+        "typeDisplayName": volume.get("typeDisplayName"),
+    }
+
+
+def public_running_status(value: Any) -> str | None:
+    """Map internal health states to public services running status values."""
+
+    if value is None:
+        return None
+    normalized = str(value).strip().upper()
+    if normalized in {"HEALTHY", "PASSING", "RUNNING", "SUCCESS"}:
+        return "passing"
+    if normalized in {"WARN", "WARNING", "DEGRADED", "RESTARTING", "MAINTENANCE"}:
+        return "warning"
+    if normalized in {"UNHEALTHY", "CRITICAL", "FAILED", "FAILURE", "STOPPED"}:
+        return "critical"
+    return str(value).strip().lower()
 
 
 def build_service_base(
@@ -485,15 +646,26 @@ def build_service_base(
     """Create the common service-group shape."""
 
     third_octet = 10 + (int(site["sequence"]) * 16 + sequence_hint % 16)
+    arch, arch_name, build_suffix = choose_architecture(name)
+    owner_account, owner_name = choose_owner(name)
+    business_system_name, business_subsystem_name = choose_business_names(subsystem)
     return {
         "name": name,
         "type": service_type,
         "user": user,
         "subsystem": subsystem,
+        "ownerAccount": owner_account,
+        "ownerName": owner_name,
+        "businessSystemName": business_system_name,
+        "businessSubsystemName": business_subsystem_name,
         "siteId": site["id"],
-        "architecture": architecture,
+        "areaName": site.get("areaName"),
+        "topology": architecture,
         "sharding": sharding,
         "healthStatus": "HEALTHY",
+        "runningStatus": "HEALTHY",
+        "replicationStatus": "HEALTHY",
+        "_buildVersionSuffix": build_suffix,
         "network": {
             "vpcId": f"vpc-{site['environment']}-{site['region']}",
             "subnetId": f"subnet-{site['id']}-{sequence_hint % 16:02d}",
@@ -728,6 +900,7 @@ def make_unit(
     """Create a unit bound to a host and disks."""
 
     key = f"{name}:{child_service_type}:{unit_id}"
+    public_unit_id = random_unit_id()
     host = host_by_id[explicit_host_id] if explicit_host_id is not None else choose_host(site_id, key)
     unit_health_status, container_status = compute_unit_runtime_state(
         service_name=name,
@@ -739,18 +912,25 @@ def make_unit(
 
     data_disk = pick_host_disk(host, disk_types={"data"}, preferred_media=data_media_preference(child_service_type))
     log_disk = pick_host_disk(host, disk_types={"log", "data"}, preferred_media=log_media_preference(child_service_type))
+    arch, arch_name, build_suffix = choose_architecture(name)
+    container_ip = next_container_ip()
 
     return {
-        "id": unit_id,
-        "name": unit_id,
-        "type": "docker",
+        "id": public_unit_id,
+        "name": unit_display_name(service_name=name, unit_id=unit_id),
+        "type": child_service_type,
         "role": role,
         "image": image,
-        "version": version,
+        "version": unit_version(version, build_suffix),
+        "cpuArchitecture": arch,
+        "cpuArchitectureDisplayName": arch_name,
         "healthStatus": unit_health_status,
+        "runningStatus": unit_health_status,
         "containerStatus": container_status,
         "hostId": host["id"],
-        "containerIp": next_container_ip(),
+        "containerIp": container_ip,
+        "ip": container_ip,
+        "ipv6": unit_ipv6(container_ip),
         "cpu": cpu,
         "memory": memory,
         "storage": {
@@ -758,11 +938,15 @@ def make_unit(
                 "diskId": data_disk["diskId"],
                 "mountPoint": f"/dbaas/{child_service_type}/{unit_id}/data",
                 "size": data_size,
+                "type": f"local:{data_disk['mediaType']}",
+                "typeDisplayName": disk_type_display_name(data_disk["mediaType"]),
             },
             "log": {
                 "diskId": log_disk["diskId"],
                 "mountPoint": f"/dbaas/{child_service_type}/{unit_id}/log",
                 "size": log_size,
+                "type": f"local:{log_disk['mediaType']}",
+                "typeDisplayName": disk_type_display_name(log_disk["mediaType"]),
             },
         },
     }
@@ -836,19 +1020,26 @@ def apply_runtime_health(service: dict[str, Any], *, allow_anomalies: bool) -> d
     if not allow_anomalies:
         for child_service in service["services"]:
             child_service["healthStatus"] = "HEALTHY"
+            child_service["runningStatus"] = "HEALTHY"
             for unit in child_service["units"]:
                 unit["healthStatus"] = "HEALTHY"
+                unit["runningStatus"] = "HEALTHY"
                 unit["containerStatus"] = "RUNNING"
         service["healthStatus"] = "HEALTHY"
+        service["runningStatus"] = "HEALTHY"
+        service["replicationStatus"] = "HEALTHY"
         return service
 
     child_healths: list[str] = []
     for child_service in service["services"]:
         unit_healths = [unit["healthStatus"] for unit in child_service["units"]]
         child_service["healthStatus"] = derive_health_status(unit_healths)
+        child_service["runningStatus"] = child_service["healthStatus"]
         child_healths.append(child_service["healthStatus"])
 
     service["healthStatus"] = derive_health_status(child_healths)
+    service["runningStatus"] = service["healthStatus"]
+    service["replicationStatus"] = service["healthStatus"]
     return service
 
 
@@ -875,10 +1066,89 @@ def log_media_preference(child_service_type: str) -> tuple[str, ...]:
     return ("HDD", "SSD")
 
 
+def generated_service_name(*, code: str, environment: str, serial: int) -> str:
+    """Generate an 8-character DBAAS-like service name."""
+
+    env_code = {
+        "prod": "ad",
+        "staging": "st",
+        "dev": "dv",
+        "perf": "pf",
+    }.get(environment, "ad")
+    return f"{code[:3]}{env_code}{serial + 100:03d}"
+
+
+def choose_architecture(seed: str) -> tuple[str, str, str]:
+    """Choose a deterministic CPU architecture and build suffix."""
+
+    return ARCHITECTURES[stable_index(seed) % len(ARCHITECTURES)]
+
+
+def choose_owner(seed: str) -> tuple[str, str]:
+    """Choose a deterministic DBAAS owner account and name."""
+
+    account = f"03{stable_index(seed) % 1_000_000:06d}"
+    name = OWNER_NAMES[stable_index(f"owner:{seed}") % len(OWNER_NAMES)]
+    return account, name
+
+
+def choose_business_names(subsystem: str) -> tuple[str, str]:
+    """Choose meaningful business system names for a subsystem."""
+
+    normalized = subsystem.removesuffix("-platform")
+    catalog = BUSINESS_CATALOG.get(subsystem) or BUSINESS_CATALOG.get(normalized)
+    if catalog is None:
+        catalog = ("DBA", "数据库平台系统DBPT", "数据库服务库")
+    return catalog[1], catalog[2]
+
+
+def unit_display_name(*, service_name: str, unit_id: str) -> str:
+    """Generate a production-like unit display name."""
+
+    hex_seed = f"{stable_index(service_name + ':' + unit_id) * 2654435761 & 0xFFFFFFFF:08x}"
+    return f"{hex_seed}_{service_name}"
+
+
+def unit_version(version: str, build_suffix: str) -> str:
+    """Return a 4-part unit version while child services keep 3 parts."""
+
+    parts = version.split(".")
+    if len(parts) >= 4:
+        return ".".join(parts[:4])
+    return ".".join([*parts, *("0" for _ in range(3 - len(parts))), build_suffix])
+
+
+def unit_ipv6(ipv4: str) -> str:
+    """Map a deterministic IPv4 container address to a fake IPv6 service address."""
+
+    _first, _second, third, fourth = ipv4.split(".")
+    return f"2405:78c0:2000:{int(third):04x}::{int(fourth):x}"
+
+
+def disk_type_display_name(media_type: str) -> str:
+    """Return a Chinese disk display name."""
+
+    if media_type == "SSD":
+        return "本地固态盘"
+    if media_type == "HDD":
+        return "本地机械盘"
+    return "本地磁盘"
+
+
 def stable_index(value: str) -> int:
     """Return a deterministic integer index for a string."""
 
     return sum(ord(char) for char in value)
+
+
+def random_unit_id() -> str:
+    """Return a globally unique 32-bit random unit ID for seed data."""
+
+    while True:
+        value = f"{secrets.randbits(32):08x}"
+        if value not in UNIT_IDS:
+            UNIT_IDS.add(value)
+            return value
 
 
 def build_backups(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -887,9 +1157,9 @@ def build_backups(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
     services_by_name = {service["name"]: service for service in services}
     backups: list[dict[str, Any]] = []
 
-    backups.extend(build_mysql_xf2_backups(services_by_name["mysql-xf2"]))
-    backups.extend(build_tidb_oltp_backups(services_by_name["tidb-oltp"]))
-    backups.extend(build_redis_cache_backups(services_by_name["redis-cache"]))
+    backups.extend(build_mysql_anchor_backups(services_by_name[MYSQL_ANCHOR_SERVICE_NAME]))
+    backups.extend(build_tidb_anchor_backups(services_by_name[TIDB_ANCHOR_SERVICE_NAME]))
+    backups.extend(build_redis_anchor_backups(services_by_name[REDIS_ANCHOR_SERVICE_NAME]))
 
     for service_index, service in enumerate(services):
         if service["name"] in SPECIAL_BACKUP_SERVICE_NAMES:
@@ -899,18 +1169,17 @@ def build_backups(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return backups
 
 
-def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
+def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     """Build curated MySQL backups used by real-agent backup questions."""
 
-    targets = {
-        target["unit_name"]: target
-        for target in build_backup_targets(service)
-    }
+    targets = build_backup_targets(service)
+    mysql_primary = select_backup_target(targets, child_service_type="mysql", role="primary")
+    mysql_replica = select_backup_target(targets, child_service_type="mysql", role="replica")
     return [
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-001",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-001",
             backup_type="full",
             started_at=datetime(2026, 6, 1, 7, 30, 6),
             finished_at=datetime(2026, 6, 1, 7, 30, 10),
@@ -926,8 +1195,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-replica-01"],
-            backup_id="backup-mysql-xf2-002",
+            target=mysql_replica,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-002",
             backup_type="table",
             started_at=datetime(2026, 5, 30, 3, 0, 0),
             finished_at=datetime(2026, 5, 30, 3, 5, 0),
@@ -943,8 +1212,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-003",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-003",
             backup_type="full",
             started_at=datetime(2026, 5, 27, 2, 0, 0),
             finished_at=datetime(2026, 5, 27, 2, 2, 0),
@@ -960,8 +1229,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-004",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-004",
             backup_type="incremental",
             started_at=datetime(2026, 5, 29, 2, 0, 0),
             finished_at=datetime(2026, 5, 29, 2, 10, 0),
@@ -977,8 +1246,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-005",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-005",
             backup_type="full",
             started_at=datetime(2026, 5, 31, 21, 30, 0),
             finished_at=datetime(2026, 5, 31, 21, 33, 0),
@@ -994,8 +1263,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-replica-01"],
-            backup_id="backup-mysql-xf2-006",
+            target=mysql_replica,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-006",
             backup_type="incremental",
             started_at=datetime(2026, 6, 1, 1, 0, 0),
             finished_at=datetime(2026, 6, 1, 1, 3, 0),
@@ -1011,8 +1280,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-007",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-007",
             backup_type="full",
             started_at=datetime(2026, 5, 24, 1, 0, 0),
             finished_at=datetime(2026, 5, 24, 1, 2, 30),
@@ -1028,8 +1297,8 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["mysql-primary-01"],
-            backup_id="backup-mysql-xf2-008",
+            target=mysql_primary,
+            backup_id=f"backup-{MYSQL_ANCHOR_SERVICE_NAME}-008",
             backup_type="full",
             started_at=datetime(2026, 5, 18, 2, 0, 0),
             finished_at=datetime(2026, 5, 18, 2, 2, 0),
@@ -1047,18 +1316,15 @@ def build_mysql_xf2_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
+def build_tidb_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     """Build curated TiDB backups covering running and failed states."""
 
-    targets = {
-        target["unit_name"]: target
-        for target in build_backup_targets(service)
-    }
+    targets = build_backup_targets(service)
     return [
         make_backup_record(
             service=service,
-            target=targets["tikv-01"],
-            backup_id="backup-tidb-oltp-001",
+            target=select_backup_target(targets, child_service_type="tikv", occurrence=1),
+            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-001",
             backup_type="incremental",
             started_at=datetime(2026, 6, 1, 9, 30, 0),
             finished_at=None,
@@ -1074,8 +1340,8 @@ def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["tidb-01"],
-            backup_id="backup-tidb-oltp-002",
+            target=select_backup_target(targets, child_service_type="tidb", occurrence=1),
+            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-002",
             backup_type="full",
             started_at=datetime(2026, 5, 31, 1, 20, 0),
             finished_at=datetime(2026, 5, 31, 1, 35, 0),
@@ -1091,8 +1357,8 @@ def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["tikv-02"],
-            backup_id="backup-tidb-oltp-003",
+            target=select_backup_target(targets, child_service_type="tikv", occurrence=2),
+            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-003",
             backup_type="incremental",
             started_at=datetime(2026, 5, 28, 1, 10, 0),
             finished_at=datetime(2026, 5, 28, 1, 18, 30),
@@ -1108,8 +1374,8 @@ def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["tikv-03"],
-            backup_id="backup-tidb-oltp-004",
+            target=select_backup_target(targets, child_service_type="tikv", occurrence=3),
+            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-004",
             backup_type="snapshot",
             started_at=datetime(2026, 5, 23, 0, 50, 0),
             finished_at=datetime(2026, 5, 23, 1, 5, 0),
@@ -1125,8 +1391,8 @@ def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["tidb-02"],
-            backup_id="backup-tidb-oltp-005",
+            target=select_backup_target(targets, child_service_type="tidb", occurrence=2),
+            backup_id=f"backup-{TIDB_ANCHOR_SERVICE_NAME}-005",
             backup_type="full",
             started_at=datetime(2026, 5, 15, 1, 0, 0),
             finished_at=datetime(2026, 5, 15, 1, 16, 0),
@@ -1144,18 +1410,16 @@ def build_tidb_oltp_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def build_redis_cache_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
+def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     """Build curated Redis backups with mixed statuses."""
 
-    targets = {
-        target["unit_name"]: target
-        for target in build_backup_targets(service)
-    }
+    targets = build_backup_targets(service)
+    redis_primary = select_backup_target(targets, child_service_type="redis", role="primary")
     return [
         make_backup_record(
             service=service,
-            target=targets["redis-primary-01"],
-            backup_id="backup-redis-cache-001",
+            target=redis_primary,
+            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-001",
             backup_type="snapshot",
             started_at=datetime(2026, 6, 1, 1, 0, 0),
             finished_at=datetime(2026, 6, 1, 1, 0, 20),
@@ -1171,8 +1435,8 @@ def build_redis_cache_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["redis-replica-01"],
-            backup_id="backup-redis-cache-002",
+            target=select_backup_target(targets, child_service_type="redis", role="replica", occurrence=1),
+            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-002",
             backup_type="snapshot",
             started_at=datetime(2026, 5, 29, 1, 20, 0),
             finished_at=datetime(2026, 5, 29, 1, 20, 45),
@@ -1188,8 +1452,8 @@ def build_redis_cache_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["redis-replica-02"],
-            backup_id="backup-redis-cache-003",
+            target=select_backup_target(targets, child_service_type="redis", role="replica", occurrence=2),
+            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-003",
             backup_type="full",
             started_at=datetime(2026, 5, 22, 0, 30, 0),
             finished_at=datetime(2026, 5, 22, 0, 30, 25),
@@ -1205,8 +1469,8 @@ def build_redis_cache_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=targets["redis-primary-01"],
-            backup_id="backup-redis-cache-deleted",
+            target=redis_primary,
+            backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-deleted",
             backup_type="full",
             started_at=datetime(2026, 5, 20, 0, 0, 0),
             finished_at=datetime(2026, 5, 20, 0, 0, 12),
@@ -1340,7 +1604,9 @@ def build_backup_targets(service: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "child_service_name": derive_child_service_name(child_type, unit["name"], unit_index),
                     "child_service_type": child_type,
+                    "unit_id": unit["id"],
                     "unit_name": unit["name"],
+                    "role": unit["role"],
                 }
             )
 
@@ -1353,9 +1619,30 @@ def build_backup_targets(service: dict[str, Any]) -> list[dict[str, str]]:
         {
             "child_service_name": derive_child_service_name(first_child["type"], first_unit["name"], 1),
             "child_service_type": first_child["type"],
+            "unit_id": first_unit["id"],
             "unit_name": first_unit["name"],
+            "role": first_unit["role"],
         }
     ]
+
+
+def select_backup_target(
+    targets: list[dict[str, str]],
+    *,
+    child_service_type: str,
+    role: str | None = None,
+    occurrence: int = 1,
+) -> dict[str, str]:
+    """Select a backup target by explicit fields instead of semantic unit IDs."""
+
+    matches = [
+        target
+        for target in targets
+        if target["child_service_type"] == child_service_type and (role is None or target["role"] == role)
+    ]
+    if occurrence < 1 or occurrence > len(matches):
+        raise ValueError(f"backup target not found: child_service_type={child_service_type}, role={role}")
+    return matches[occurrence - 1]
 
 
 def backup_capable_child_types(service_type: str) -> set[str]:

@@ -39,8 +39,8 @@ def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None
     payload = response.json()
     assert len(payload) == 100_000
     assert any(
-        item["service_name"] == "mysql-xf2"
-        and item["unit_name"] == "mysql-primary-01"
+        item["service_name"] == "payad001"
+        and item["unit_name"] == "aaa8ee1f_payad001"
         and item["service_type"] == "mysql"
         for item in payload
     )
@@ -61,13 +61,13 @@ def test_non_admin_can_query_all_owned_services_latest_metric_without_service_na
     payload = response.json()
     assert len(payload) == 5_000
     assert any(
-        item["service_name"] == "mysql-xf2"
-        and item["unit_name"] == "mysql-primary-01"
+        item["service_name"] == "payad001"
+        and item["unit_name"] == "aaa8ee1f_payad001"
         and item["service_type"] == "mysql"
         for item in payload
     )
     assert any(
-        item["service_name"] == "mysql-xf2"
+        item["service_name"] == "payad001"
         and item["unit_name"].startswith("payment-platform-team-mock-")
         for item in payload
     )
@@ -78,16 +78,16 @@ def test_non_admin_can_query_own_service_latest_metric() -> None:
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.mem.usagePercent", "service_name": "mysql-xf2"},
+        params={"metric_key": "container.mem.usagePercent", "service_name": "payad001"},
         headers=user_headers("payment-platform-team"),
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 100_000
-    assert payload[0]["service_name"] == "mysql-xf2"
-    assert payload[0]["unit_name"] == "proxy-01"
-    assert all(item["service_name"] == "mysql-xf2" for item in payload[:100])
+    assert payload[0]["service_name"] == "payad001"
+    assert payload[0]["unit_name"] == "2637448a_payad001"
+    assert all(item["service_name"] == "payad001" for item in payload[:100])
     assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
 
 
@@ -96,7 +96,7 @@ def test_non_admin_cannot_query_other_users_service_latest_metric() -> None:
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.cpu.use", "service_name": "mysql-xf2"},
+        params={"metric_key": "container.cpu.use", "service_name": "payad001"},
         headers=user_headers("db-platform-team"),
     )
 
@@ -142,7 +142,7 @@ def test_admin_can_query_unit_metric_history() -> None:
     start_ts = end_ts - 300
 
     response = client.get(
-        "/units/mysql-primary-01/metrics/history",
+        "/units/aaa8ee1f_payad001/metrics/history",
         params={
             "metric_key": "container.cpu.use",
             "start_ts": start_ts,
@@ -163,7 +163,7 @@ def test_unit_metric_history_rejects_invalid_time_range() -> None:
     now_ts = int(time.time()) - 60
 
     response = client.get(
-        "/units/mysql-primary-01/metrics/history",
+        "/units/aaa8ee1f_payad001/metrics/history",
         params={
             "metric_key": "container.cpu.use",
             "start_ts": now_ts,
@@ -182,7 +182,7 @@ def test_non_admin_can_query_own_real_unit_history() -> None:
     start_ts = end_ts - 120
 
     response = client.get(
-        "/units/mysql-primary-01/metrics/history",
+        "/units/aaa8ee1f_payad001/metrics/history",
         params={
             "metric_key": "instance.mysql.version",
             "start_ts": start_ts,
@@ -201,7 +201,7 @@ def test_unit_metric_history_rejects_fake_unit() -> None:
     start_ts = end_ts - 120
 
     response = client.get(
-        "/units/mysql-xf2-mock-000001/metrics/history",
+        "/units/payad001-mock-000001/metrics/history",
         params={
             "metric_key": "container.cpu.use",
             "start_ts": start_ts,
@@ -211,4 +211,4 @@ def test_unit_metric_history_rejects_fake_unit() -> None:
     )
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "unit 'mysql-xf2-mock-000001' not found"}
+    assert response.json() == {"detail": "unit 'payad001-mock-000001' not found"}

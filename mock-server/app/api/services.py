@@ -66,7 +66,7 @@ def list_services(
         ]
     return [
         UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
-        for service_detail in store.list_service_details(user=effective_user)
+        for service_detail in store.list_service_seeds(user=effective_user)
     ]
 
 
@@ -175,7 +175,7 @@ def update_service_resource(
             child_service_type=payload.childServiceType,
             platform_auto=payload.platformAuto,
             cpu=payload.cpu,
-            memory=payload.memory,
+            memory_gb=payload.memoryGB,
         )
     except ServiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"service '{name}' not found") from None
@@ -186,7 +186,10 @@ def update_service_resource(
         ) from None
     if current_user.is_admin:
         return ServiceDetailResponse.model_validate(service_detail)
-    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
+    updated_seed = store.get_service_seed(name)
+    if updated_seed is None:
+        raise HTTPException(status_code=404, detail=f"service '{name}' not found")
+    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(updated_seed))
 
 
 @router.put("/services/{name}/storage", response_model=ServiceDetailResponse | UserServiceDetailResponse)
@@ -206,8 +209,8 @@ def update_service_storage(
             name,
             child_service_type=payload.childServiceType,
             platform_auto=payload.platformAuto,
-            data_volume_size=storage.dataVolumeSize if storage is not None else None,
-            log_volume_size=storage.logVolumeSize if storage is not None else None,
+            data_volume_size_gb=storage.data.sizeGB if storage is not None and storage.data is not None else None,
+            log_volume_size_gb=storage.log.sizeGB if storage is not None and storage.log is not None else None,
         )
     except ServiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"service '{name}' not found") from None
@@ -218,7 +221,10 @@ def update_service_storage(
         ) from None
     if current_user.is_admin:
         return ServiceDetailResponse.model_validate(service_detail)
-    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(service_detail))
+    updated_seed = store.get_service_seed(name)
+    if updated_seed is None:
+        raise HTTPException(status_code=404, detail=f"service '{name}' not found")
+    return UserServiceDetailResponse.model_validate(store._public_service_detail_for_user(updated_seed))
 
 
 @router.post("/services/{name}/backup", response_model=CreateTaskResponse)
@@ -270,7 +276,7 @@ def create_service_image_upgrade_task(
             child_service_type=payload.childServiceType,
             image=payload.image,
             version=payload.version,
-            unit_ids=payload.unitIds,
+            unit_names=payload.unitNames,
         )
     except ServiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"service '{name}' not found") from None
@@ -282,6 +288,6 @@ def create_service_image_upgrade_task(
     except ServiceUnitNotFoundError as error:
         raise HTTPException(
             status_code=400,
-            detail=f"service '{name}' has no unit ids '{error.args[0]}' in child service type '{payload.childServiceType}'",
+            detail=f"service '{name}' has no unit names '{error.args[0]}' in child service type '{payload.childServiceType}'",
         ) from None
     return CreateTaskResponse(taskId=task["taskId"])

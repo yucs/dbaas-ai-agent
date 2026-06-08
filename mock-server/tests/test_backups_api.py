@@ -65,27 +65,27 @@ def test_backup_capabilities_by_service_type_returns_simple_fields() -> None:
 def test_backup_capabilities_by_unit_reports_running_backups() -> None:
     client = create_test_client()
 
-    response = client.get("/backup-task-capabilities?unitName=tikv-01", headers=admin_headers())
+    response = client.get("/backup-task-capabilities?unitName=18be9e82_ordad002", headers=admin_headers())
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["resolvedTarget"]["serviceName"] == "tidb-oltp"
-    assert payload["resolvedTarget"]["unitName"] == "tikv-01"
+    assert payload["resolvedTarget"]["serviceName"] == "ordad002"
+    assert payload["resolvedTarget"]["unitName"] == "18be9e82_ordad002"
     assert payload["runtimeHints"]["backupRunning"] is True
-    assert any(item["unitName"] == "tikv-01" for item in payload["runtimeHints"]["runningBackups"])
+    assert any(item["unitName"] == "18be9e82_ordad002" for item in payload["runtimeHints"]["runningBackups"])
 
 
 def test_create_service_backup_task_creates_running_records_then_completes() -> None:
     client = create_test_client(task_unit_interval_seconds=0.2)
 
     create_response = client.post(
-        "/services/mysql-xf2/backup",
+        "/services/payad001/backup",
         headers=admin_headers(),
         json={
             "scope": "unit",
             "backupType": "full",
             "retentionDays": 7,
-            "unitName": "mysql-primary-01",
+            "unitName": "aaa8ee1f_payad001",
             "options": {"compressMode": "gzip"},
             "remark": "manual backup",
         },
@@ -93,14 +93,14 @@ def test_create_service_backup_task_creates_running_records_then_completes() -> 
 
     assert create_response.status_code == 200
     task_id = create_response.json()["taskId"]
-    assert task_id.startswith("task-service-backup-create-mysql-xf2-unit-")
+    assert task_id.startswith("task-service-backup-create-payad001-unit-")
 
     backups_response = client.get("/backups", headers=admin_headers())
     assert backups_response.status_code == 200
     created = [item for item in backups_response.json() if item["task_id"] == task_id]
     assert len(created) == 1
     assert created[0]["task_status"] == "running"
-    assert created[0]["unit_name"] == "mysql-primary-01"
+    assert created[0]["unit_name"] == "aaa8ee1f_payad001"
 
     task_payload = wait_for_task_completion(client, task_id)
     assert task_payload["type"] == "service.backup.create"
@@ -118,7 +118,7 @@ def test_create_service_backup_task_for_service_can_create_multiple_records() ->
     client = create_test_client()
 
     create_response = client.post(
-        "/services/mysql-xf2/backup",
+        "/services/payad001/backup",
         headers=admin_headers(),
         json={
             "scope": "service",
@@ -139,7 +139,7 @@ def test_create_service_backup_task_rejects_child_service_scope() -> None:
     client = create_test_client()
 
     response = client.post(
-        "/services/mysql-xf2/backup",
+        "/services/payad001/backup",
         headers=admin_headers(),
         json={
             "scope": "child_service",
@@ -175,11 +175,11 @@ def test_admin_can_query_all_existing_backups_including_expired_but_not_deleted(
     payload = response.json()
     backup_ids = {item["backup_id"] for item in payload}
     assert len(payload) >= 6_200
-    assert "backup-mysql-xf2-001" in backup_ids
-    assert "backup-mysql-xf2-002" in backup_ids
-    assert "backup-tidb-oltp-001" in backup_ids
-    assert "backup-redis-cache-deleted" not in backup_ids
-    expired = next(item for item in payload if item["backup_id"] == "backup-mysql-xf2-002")
+    assert "backup-payad001-001" in backup_ids
+    assert "backup-payad001-002" in backup_ids
+    assert "backup-ordad002-001" in backup_ids
+    assert "backup-sesad003-deleted" not in backup_ids
+    expired = next(item for item in payload if item["backup_id"] == "backup-payad001-002")
     assert expired["remark"] == "已过期但未删除"
     statuses = {item["task_status"] for item in payload}
     assert {"succeeded", "failed", "timeout", "canceled", "running"}.issubset(statuses)
@@ -195,13 +195,13 @@ def test_non_admin_can_only_query_owned_backups() -> None:
     backup_ids = {item["backup_id"] for item in payload}
     assert len(payload) == 7
     assert {
-        "backup-mysql-xf2-001",
-        "backup-mysql-xf2-002",
-        "backup-mysql-xf2-003",
-        "backup-mysql-xf2-004",
-        "backup-mysql-xf2-005",
-        "backup-mysql-xf2-006",
-        "backup-mysql-xf2-007",
+        "backup-payad001-001",
+        "backup-payad001-002",
+        "backup-payad001-003",
+        "backup-payad001-004",
+        "backup-payad001-005",
+        "backup-payad001-006",
+        "backup-payad001-007",
     } == backup_ids
     assert all("owner_user" not in item for item in payload)
 
@@ -214,5 +214,5 @@ def test_non_admin_cannot_see_other_users_backups() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) == 4
-    assert {item["service_name"] for item in payload} == {"tidb-oltp"}
+    assert {item["service_name"] for item in payload} == {"ordad002"}
     assert {item["task_status"] for item in payload} == {"running", "succeeded", "failed"}

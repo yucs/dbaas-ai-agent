@@ -1,7 +1,7 @@
 [
   {
     "id": "cluster-site-prod-sh-01-01",
-    "name": "Shanghai Production Site 01 Cluster 01",
+    "name": "上海PIT站 Cluster 01",
     "siteId": "site-prod-sh-01",
     "sequence": 1,
     "clusterType": "KUBERNETES",
@@ -13,7 +13,7 @@
   },
   {
     "id": "cluster-site-prod-sh-01-02",
-    "name": "Shanghai Production Site 01 Cluster 02",
+    "name": "上海PIT站 Cluster 02",
     "siteId": "site-prod-sh-01",
     "sequence": 2,
     "clusterType": "KUBERNETES",
@@ -25,7 +25,7 @@
   },
   {
     "id": "cluster-site-prod-sh-01-03",
-    "name": "Shanghai Production Site 01 Cluster 03",
+    "name": "上海PIT站 Cluster 03",
     "siteId": "site-prod-sh-01",
     "sequence": 3,
     "clusterType": "BAREMETAL",
@@ -37,7 +37,7 @@
   },
   {
     "id": "cluster-site-prod-sh-01-04",
-    "name": "Shanghai Production Site 01 Cluster 04",
+    "name": "上海PIT站 Cluster 04",
     "siteId": "site-prod-sh-01",
     "sequence": 4,
     "clusterType": "KUBERNETES",
@@ -49,7 +49,7 @@
   },
   {
     "id": "cluster-site-prod-sh-02-01",
-    "name": "Shanghai Production Site 02 Cluster 01",
+    "name": "上海张江站 Cluster 01",
     "siteId": "site-prod-sh-02",
     "sequence": 5,
     "clusterType": "KUBERNETES",
@@ -61,7 +61,7 @@
   },
   {
     "id": "cluster-site-prod-sh-02-02",
-    "name": "Shanghai Production Site 02 Cluster 02",
+    "name": "上海张江站 Cluster 02",
     "siteId": "site-prod-sh-02",
     "sequence": 6,
     "clusterType": "KUBERNETES",
@@ -73,7 +73,7 @@
   },
   {
     "id": "cluster-site-prod-sh-02-03",
-    "name": "Shanghai Production Site 02 Cluster 03",
+    "name": "上海张江站 Cluster 03",
     "siteId": "site-prod-sh-02",
     "sequence": 7,
     "clusterType": "BAREMETAL",
@@ -85,7 +85,7 @@
   },
   {
     "id": "cluster-site-prod-sh-02-04",
-    "name": "Shanghai Production Site 02 Cluster 04",
+    "name": "上海张江站 Cluster 04",
     "siteId": "site-prod-sh-02",
     "sequence": 8,
     "clusterType": "KUBERNETES",
@@ -97,7 +97,7 @@
   },
   {
     "id": "cluster-site-prod-bj-01-01",
-    "name": "Beijing Production Site 01 Cluster 01",
+    "name": "北京亦庄站 Cluster 01",
     "siteId": "site-prod-bj-01",
     "sequence": 9,
     "clusterType": "KUBERNETES",
@@ -109,7 +109,7 @@
   },
   {
     "id": "cluster-site-prod-bj-01-02",
-    "name": "Beijing Production Site 01 Cluster 02",
+    "name": "北京亦庄站 Cluster 02",
     "siteId": "site-prod-bj-01",
     "sequence": 10,
     "clusterType": "KUBERNETES",
@@ -121,7 +121,7 @@
   },
   {
     "id": "cluster-site-prod-bj-01-03",
-    "name": "Beijing Production Site 01 Cluster 03",
+    "name": "北京亦庄站 Cluster 03",
     "siteId": "site-prod-bj-01",
     "sequence": 11,
     "clusterType": "BAREMETAL",
@@ -133,7 +133,7 @@
   },
   {
     "id": "cluster-site-prod-bj-01-04",
-    "name": "Beijing Production Site 01 Cluster 04",
+    "name": "北京亦庄站 Cluster 04",
     "siteId": "site-prod-bj-01",
     "sequence": 12,
     "clusterType": "KUBERNETES",
@@ -145,7 +145,7 @@
   },
   {
     "id": "cluster-site-prod-gz-01-01",
-    "name": "Guangzhou Production Site 01 Cluster 01",
+    "name": "广州南沙站 Cluster 01",
     "siteId": "site-prod-gz-01",
     "sequence": 13,
     "clusterType": "KUBERNETES",
@@ -157,7 +157,7 @@
   },
   {
     "id": "cluster-site-prod-gz-01-02",
-    "name": "Guangzhou Production Site 01 Cluster 02",
+    "name": "广州南沙站 Cluster 02",
     "siteId": "site-prod-gz-01",
     "sequence": 14,
     "clusterType": "KUBERNETES",
@@ -169,7 +169,7 @@
   },
   {
     "id": "cluster-site-prod-gz-01-03",
-    "name": "Guangzhou Production Site 01 Cluster 03",
+    "name": "广州南沙站 Cluster 03",
     "siteId": "site-prod-gz-01",
     "sequence": 15,
     "clusterType": "BAREMETAL",
@@ -181,7 +181,7 @@
   },
   {
     "id": "cluster-site-prod-gz-01-04",
-    "name": "Guangzhou Production Site 01 Cluster 04",
+    "name": "广州南沙站 Cluster 04",
     "siteId": "site-prod-gz-01",
     "sequence": 16,
     "clusterType": "KUBERNETES",
@@ -193,7 +193,7 @@
   },
   {
     "id": "cluster-site-staging-sh-01-01",
-    "name": "Shanghai Staging Site 01 Cluster 01",
+    "name": "上海验证站 Cluster 01",
     "siteId": "site-staging-sh-01",
     "sequence": 17,
     "clusterType": "KUBERNETES",
@@ -205,7 +205,7 @@
   },
   {
     "id": "cluster-site-staging-sh-01-02",
-    "name": "Shanghai Staging Site 01 Cluster 02",
+    "name": "上海验证站 Cluster 02",
     "siteId": "site-staging-sh-01",
     "sequence": 18,
     "clusterType": "KUBERNETES",
@@ -217,7 +217,7 @@
   },
   {
     "id": "cluster-site-staging-sh-01-03",
-    "name": "Shanghai Staging Site 01 Cluster 03",
+    "name": "上海验证站 Cluster 03",
     "siteId": "site-staging-sh-01",
     "sequence": 19,
     "clusterType": "BAREMETAL",
@@ -229,7 +229,7 @@
   },
   {
     "id": "cluster-site-staging-sh-01-04",
-    "name": "Shanghai Staging Site 01 Cluster 04",
+    "name": "上海验证站 Cluster 04",
     "siteId": "site-staging-sh-01",
     "sequence": 20,
     "clusterType": "KUBERNETES",
@@ -241,7 +241,7 @@
   },
   {
     "id": "cluster-site-staging-bj-01-01",
-    "name": "Beijing Staging Site 01 Cluster 01",
+    "name": "北京验证站 Cluster 01",
     "siteId": "site-staging-bj-01",
     "sequence": 21,
     "clusterType": "KUBERNETES",
@@ -253,7 +253,7 @@
   },
   {
     "id": "cluster-site-staging-bj-01-02",
-    "name": "Beijing Staging Site 01 Cluster 02",
+    "name": "北京验证站 Cluster 02",
     "siteId": "site-staging-bj-01",
     "sequence": 22,
     "clusterType": "KUBERNETES",
@@ -265,7 +265,7 @@
   },
   {
     "id": "cluster-site-staging-bj-01-03",
-    "name": "Beijing Staging Site 01 Cluster 03",
+    "name": "北京验证站 Cluster 03",
     "siteId": "site-staging-bj-01",
     "sequence": 23,
     "clusterType": "BAREMETAL",
@@ -277,7 +277,7 @@
   },
   {
     "id": "cluster-site-staging-bj-01-04",
-    "name": "Beijing Staging Site 01 Cluster 04",
+    "name": "北京验证站 Cluster 04",
     "siteId": "site-staging-bj-01",
     "sequence": 24,
     "clusterType": "KUBERNETES",
@@ -289,7 +289,7 @@
   },
   {
     "id": "cluster-site-staging-gz-01-01",
-    "name": "Guangzhou Staging Site 01 Cluster 01",
+    "name": "广州验证站 Cluster 01",
     "siteId": "site-staging-gz-01",
     "sequence": 25,
     "clusterType": "KUBERNETES",
@@ -301,7 +301,7 @@
   },
   {
     "id": "cluster-site-staging-gz-01-02",
-    "name": "Guangzhou Staging Site 01 Cluster 02",
+    "name": "广州验证站 Cluster 02",
     "siteId": "site-staging-gz-01",
     "sequence": 26,
     "clusterType": "KUBERNETES",
@@ -313,7 +313,7 @@
   },
   {
     "id": "cluster-site-staging-gz-01-03",
-    "name": "Guangzhou Staging Site 01 Cluster 03",
+    "name": "广州验证站 Cluster 03",
     "siteId": "site-staging-gz-01",
     "sequence": 27,
     "clusterType": "BAREMETAL",
@@ -325,7 +325,7 @@
   },
   {
     "id": "cluster-site-staging-gz-01-04",
-    "name": "Guangzhou Staging Site 01 Cluster 04",
+    "name": "广州验证站 Cluster 04",
     "siteId": "site-staging-gz-01",
     "sequence": 28,
     "clusterType": "KUBERNETES",
@@ -337,7 +337,7 @@
   },
   {
     "id": "cluster-site-dev-hz-01-01",
-    "name": "Hangzhou Development Site 01 Cluster 01",
+    "name": "杭州研发站 Cluster 01",
     "siteId": "site-dev-hz-01",
     "sequence": 29,
     "clusterType": "KUBERNETES",
@@ -349,7 +349,7 @@
   },
   {
     "id": "cluster-site-dev-hz-01-02",
-    "name": "Hangzhou Development Site 01 Cluster 02",
+    "name": "杭州研发站 Cluster 02",
     "siteId": "site-dev-hz-01",
     "sequence": 30,
     "clusterType": "KUBERNETES",
@@ -361,7 +361,7 @@
   },
   {
     "id": "cluster-site-dev-hz-01-03",
-    "name": "Hangzhou Development Site 01 Cluster 03",
+    "name": "杭州研发站 Cluster 03",
     "siteId": "site-dev-hz-01",
     "sequence": 31,
     "clusterType": "BAREMETAL",
@@ -373,7 +373,7 @@
   },
   {
     "id": "cluster-site-dev-hz-01-04",
-    "name": "Hangzhou Development Site 01 Cluster 04",
+    "name": "杭州研发站 Cluster 04",
     "siteId": "site-dev-hz-01",
     "sequence": 32,
     "clusterType": "KUBERNETES",
@@ -385,7 +385,7 @@
   },
   {
     "id": "cluster-site-dev-sz-01-01",
-    "name": "Shenzhen Development Site 01 Cluster 01",
+    "name": "深圳研发站 Cluster 01",
     "siteId": "site-dev-sz-01",
     "sequence": 33,
     "clusterType": "KUBERNETES",
@@ -397,7 +397,7 @@
   },
   {
     "id": "cluster-site-dev-sz-01-02",
-    "name": "Shenzhen Development Site 01 Cluster 02",
+    "name": "深圳研发站 Cluster 02",
     "siteId": "site-dev-sz-01",
     "sequence": 34,
     "clusterType": "KUBERNETES",
@@ -409,7 +409,7 @@
   },
   {
     "id": "cluster-site-dev-sz-01-03",
-    "name": "Shenzhen Development Site 01 Cluster 03",
+    "name": "深圳研发站 Cluster 03",
     "siteId": "site-dev-sz-01",
     "sequence": 35,
     "clusterType": "BAREMETAL",
@@ -421,7 +421,7 @@
   },
   {
     "id": "cluster-site-dev-sz-01-04",
-    "name": "Shenzhen Development Site 01 Cluster 04",
+    "name": "深圳研发站 Cluster 04",
     "siteId": "site-dev-sz-01",
     "sequence": 36,
     "clusterType": "KUBERNETES",
@@ -433,7 +433,7 @@
   },
   {
     "id": "cluster-site-perf-sh-01-01",
-    "name": "Shanghai Performance Site 01 Cluster 01",
+    "name": "上海压测站 Cluster 01",
     "siteId": "site-perf-sh-01",
     "sequence": 37,
     "clusterType": "KUBERNETES",
@@ -445,7 +445,7 @@
   },
   {
     "id": "cluster-site-perf-sh-01-02",
-    "name": "Shanghai Performance Site 01 Cluster 02",
+    "name": "上海压测站 Cluster 02",
     "siteId": "site-perf-sh-01",
     "sequence": 38,
     "clusterType": "KUBERNETES",
@@ -457,7 +457,7 @@
   },
   {
     "id": "cluster-site-perf-sh-01-03",
-    "name": "Shanghai Performance Site 01 Cluster 03",
+    "name": "上海压测站 Cluster 03",
     "siteId": "site-perf-sh-01",
     "sequence": 39,
     "clusterType": "BAREMETAL",
@@ -469,7 +469,7 @@
   },
   {
     "id": "cluster-site-perf-sh-01-04",
-    "name": "Shanghai Performance Site 01 Cluster 04",
+    "name": "上海压测站 Cluster 04",
     "siteId": "site-perf-sh-01",
     "sequence": 40,
     "clusterType": "KUBERNETES",
@@ -481,7 +481,7 @@
   },
   {
     "id": "cluster-site-perf-bj-01-01",
-    "name": "Beijing Performance Site 01 Cluster 01",
+    "name": "北京压测站 Cluster 01",
     "siteId": "site-perf-bj-01",
     "sequence": 41,
     "clusterType": "KUBERNETES",
@@ -493,7 +493,7 @@
   },
   {
     "id": "cluster-site-perf-bj-01-02",
-    "name": "Beijing Performance Site 01 Cluster 02",
+    "name": "北京压测站 Cluster 02",
     "siteId": "site-perf-bj-01",
     "sequence": 42,
     "clusterType": "KUBERNETES",
@@ -505,7 +505,7 @@
   },
   {
     "id": "cluster-site-perf-bj-01-03",
-    "name": "Beijing Performance Site 01 Cluster 03",
+    "name": "北京压测站 Cluster 03",
     "siteId": "site-perf-bj-01",
     "sequence": 43,
     "clusterType": "BAREMETAL",
@@ -517,7 +517,7 @@
   },
   {
     "id": "cluster-site-perf-bj-01-04",
-    "name": "Beijing Performance Site 01 Cluster 04",
+    "name": "北京压测站 Cluster 04",
     "siteId": "site-perf-bj-01",
     "sequence": 44,
     "clusterType": "KUBERNETES",
@@ -529,7 +529,7 @@
   },
   {
     "id": "cluster-site-dr-sh-01-01",
-    "name": "Shanghai Disaster Recovery Site 01 Cluster 01",
+    "name": "上海灾备站 Cluster 01",
     "siteId": "site-dr-sh-01",
     "sequence": 45,
     "clusterType": "KUBERNETES",
@@ -541,7 +541,7 @@
   },
   {
     "id": "cluster-site-dr-sh-01-02",
-    "name": "Shanghai Disaster Recovery Site 01 Cluster 02",
+    "name": "上海灾备站 Cluster 02",
     "siteId": "site-dr-sh-01",
     "sequence": 46,
     "clusterType": "KUBERNETES",
@@ -553,7 +553,7 @@
   },
   {
     "id": "cluster-site-dr-sh-01-03",
-    "name": "Shanghai Disaster Recovery Site 01 Cluster 03",
+    "name": "上海灾备站 Cluster 03",
     "siteId": "site-dr-sh-01",
     "sequence": 47,
     "clusterType": "BAREMETAL",
@@ -565,7 +565,7 @@
   },
   {
     "id": "cluster-site-dr-sh-01-04",
-    "name": "Shanghai Disaster Recovery Site 01 Cluster 04",
+    "name": "上海灾备站 Cluster 04",
     "siteId": "site-dr-sh-01",
     "sequence": 48,
     "clusterType": "KUBERNETES",

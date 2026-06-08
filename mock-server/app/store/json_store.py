@@ -101,12 +101,31 @@ class JsonDataStore:
                 return None
             return self._public_service_detail(service)
 
+    def get_service_seed(self, name: str) -> dict[str, Any] | None:
+        """返回服务组内部 seed 数据，供权限校验和写接口使用。"""
+
+        with self._lock:
+            service = self._services_by_name.get(name)
+            if service is None:
+                return None
+            return deepcopy(service)
+
     def list_service_details(self, *, user: str | None = None) -> list[dict[str, Any]]:
         """返回当前内存中的服务组详情，可按 user 过滤。"""
 
         with self._lock:
             return [
                 self._public_service_detail(self._services_by_name[name])
+                for name in sorted(self._services_by_name)
+                if user is None or self._services_by_name[name].get("user") == user
+            ]
+
+    def list_service_seeds(self, *, user: str | None = None) -> list[dict[str, Any]]:
+        """返回当前内存中的服务组内部 seed，可按 user 过滤。"""
+
+        with self._lock:
+            return [
+                deepcopy(self._services_by_name[name])
                 for name in sorted(self._services_by_name)
                 if user is None or self._services_by_name[name].get("user") == user
             ]
@@ -305,7 +324,7 @@ class JsonDataStore:
                 raise HostNotFoundError(host_id)
 
             host_detail = self._public_host_summary(host_id)
-            host_detail["units"] = sorted(self._collect_host_units(host_id), key=lambda item: item["unitId"])
+            host_detail["units"] = sorted(self._collect_host_units(host_id), key=lambda item: item["unitName"])
             return host_detail
 
     def update_service_resources(
@@ -315,7 +334,7 @@ class JsonDataStore:
         child_service_type: str,
         platform_auto: bool | None = None,
         cpu: float | None = None,
-        memory: float | None = None,
+        memory_gb: float | None = None,
     ) -> dict[str, Any]:
         """按子服务类型批量更新其下所有 unit 的 CPU 和内存。"""
 
@@ -328,8 +347,9 @@ class JsonDataStore:
                 for unit in child_service.get("units", []):
                     if cpu is not None:
                         unit["cpu"] = cpu
-                    if memory is not None:
-                        unit["memory"] = memory
+                    if memory_gb is not None:
+                        unit["memory"] = memory_gb
+                        unit["memoryGB"] = memory_gb
 
         return self._get_updated_service_detail(name)
 
@@ -339,8 +359,8 @@ class JsonDataStore:
         *,
         child_service_type: str,
         platform_auto: bool | None = None,
-        data_volume_size: float | None = None,
-        log_volume_size: float | None = None,
+        data_volume_size_gb: float | None = None,
+        log_volume_size_gb: float | None = None,
     ) -> dict[str, Any]:
         """按子服务类型批量更新其下所有 unit 的 data/log 卷规格。"""
 
@@ -352,10 +372,12 @@ class JsonDataStore:
                     child_service["platformAuto"] = platform_auto
                 for unit in child_service.get("units", []):
                     storage = unit["storage"]
-                    if data_volume_size is not None:
-                        storage["data"]["size"] = data_volume_size
-                    if log_volume_size is not None:
-                        storage["log"]["size"] = log_volume_size
+                    if data_volume_size_gb is not None:
+                        storage["data"]["size"] = data_volume_size_gb
+                        storage["data"]["sizeGB"] = data_volume_size_gb
+                    if log_volume_size_gb is not None:
+                        storage["log"]["size"] = log_volume_size_gb
+                        storage["log"]["sizeGB"] = log_volume_size_gb
 
             self._refresh_platform_aggregates()
 
@@ -368,20 +390,20 @@ class JsonDataStore:
         child_service_type: str,
         image: str,
         version: str | None = None,
-        unit_ids: list[str] | None = None,
+        unit_names: list[str] | None = None,
     ) -> dict[str, Any]:
         """创建镜像升级异步任务。"""
 
         with self._lock:
             target_services = self._get_target_child_services(name, child_service_type)
-            target_units = self._select_target_units(target_services, unit_ids)
+            target_units = self._select_target_units(target_services, unit_names)
             now = self._utcnow()
             task_id = self._next_task_id(
                 action="service.image.upgrade",
                 service_name=name,
                 child_service_type=child_service_type,
             )
-            selected_unit_ids = [unit["id"] for unit in target_units]
+            selected_unit_names = [unit["name"] for unit in target_units]
             task = {
                 "taskId": task_id,
                 "type": "service.image.upgrade",
@@ -398,7 +420,7 @@ class JsonDataStore:
                     "childServiceType": child_service_type,
                     "image": image,
                     "version": version,
-                    "unitIds": selected_unit_ids,
+                    "unitNames": selected_unit_names,
                 },
             }
             self._tasks_by_id[task_id] = task
@@ -835,18 +857,43 @@ class JsonDataStore:
             )
         normalized_service["user"] = raw_user
 
-        normalized_service.setdefault("healthStatus", "HEALTHY")
+        normalized_service.setdefault("runningStatus", "passing")
+        normalized_service["healthStatus"] = self._internal_health_status(normalized_service.get("runningStatus"))
         normalized_service.setdefault("subsystem", self._derive_subsystem(normalized_service))
-        normalized_service.setdefault("network", self._build_fallback_service_network(site_id, service_index))
+        normalized_service.setdefault("ownerAccount", None)
+        normalized_service.setdefault("ownerName", None)
+        normalized_service.setdefault("businessSystemName", normalized_service.get("subsystem"))
+        normalized_service.setdefault("businessSubsystemName", normalized_service.get("subsystem"))
+        normalized_service.setdefault("areaName", None)
+        normalized_service.setdefault("replicationStatus", normalized_service.get("runningStatus"))
 
-        services = normalized_service.get("services")
+        child_services = normalized_service.pop("childServices", None)
+        services = child_services if child_services is not None else normalized_service.get("services")
         if not isinstance(services, list):
-            raise DataValidationError(f"service '{normalized_service['name']}' must contain a 'services' list")
+            raise DataValidationError(
+                f"service '{normalized_service['name']}' must contain a 'childServices' list"
+            )
+        normalized_service["services"] = services
 
+        child_type_counts: dict[str, int] = {}
         for child_service in services:
             if not isinstance(child_service, dict):
                 raise DataValidationError(f"service '{normalized_service['name']}' child services must be objects")
-            child_service.setdefault("healthStatus", "HEALTHY")
+            child_service_type = child_service.get("type")
+            if not isinstance(child_service_type, str) or not child_service_type:
+                raise DataValidationError(
+                    f"child service in service '{normalized_service['name']}' must have a non-empty 'type'"
+                )
+            child_type_counts[child_service_type] = child_type_counts.get(child_service_type, 0) + 1
+            child_service_name = child_service.get("name")
+            if not isinstance(child_service_name, str) or not child_service_name or child_service_name == child_service_type:
+                child_service["name"] = self._child_service_public_name(
+                    normalized_service["name"],
+                    child_service_type,
+                    child_type_counts[child_service_type],
+                )
+            child_service.setdefault("runningStatus", "passing")
+            child_service["healthStatus"] = self._internal_health_status(child_service.get("runningStatus"))
             child_service.setdefault("platformAuto", None)
             units = child_service.get("units")
             if not isinstance(units, list):
@@ -858,16 +905,23 @@ class JsonDataStore:
                     raise DataValidationError(
                         f"units in child service '{child_service.get('type')}' of service '{normalized_service['name']}' must be objects"
                     )
-                host_id = unit.get("hostId")
-                if not isinstance(host_id, str) or not host_id:
-                    raise DataValidationError(
-                        f"unit '{unit.get('id')}' in service '{normalized_service['name']}' must have a non-empty 'hostId'"
-                    )
-                unit.setdefault("healthStatus", "HEALTHY")
-                unit.setdefault("containerStatus", "RUNNING")
-                unit["storage"] = self._normalize_unit_storage_seed(unit.get("storage"))
+                host_id = self._resolve_unit_host_id(unit, service_name=normalized_service["name"])
+                unit["hostId"] = host_id
+                unit.setdefault("runningStatus", "passing")
+                unit["healthStatus"] = self._internal_health_status(unit.get("runningStatus"))
+                unit["containerStatus"] = self._internal_container_status(unit["healthStatus"])
+                unit.setdefault("type", child_service.get("type") or "unit")
+                unit.setdefault("ip", unit.get("containerIp"))
+                unit["containerIp"] = unit.get("ip")
+                unit["memory"] = unit.get("memoryGB", unit.get("memory"))
+                unit["storage"] = self._normalize_unit_storage_seed(unit.get("storage"), host_id=host_id)
 
         return normalized_service
+
+    def _child_service_public_name(self, service_name: str, child_service_type: str, occurrence: int) -> str:
+        """返回稳定的子服务名称。"""
+
+        return f"{service_name}-{child_service_type}-{occurrence:02d}"
 
     def _public_backup_record(self, backup: dict[str, Any]) -> dict[str, Any]:
         """返回对外可见的备份记录。"""
@@ -914,48 +968,107 @@ class JsonDataStore:
         user = service.get("user")
         return user if isinstance(user, str) and user else None
 
-    def _normalize_unit_storage_seed(self, storage: Any) -> dict[str, Any]:
+    def _normalize_unit_storage_seed(self, storage: Any, *, host_id: str) -> dict[str, Any]:
         """规范化 seed 中的 unit 存储结构。"""
 
         if not isinstance(storage, dict):
             raise DataValidationError("unit storage must be an object with 'data' and 'log'")
 
-        if "data" in storage and "log" in storage:
-            return {
-                "data": self._normalize_volume_seed(storage["data"], volume_name="data"),
-                "log": self._normalize_volume_seed(storage["log"], volume_name="log"),
-            }
-
+        if "data" not in storage or "log" not in storage:
+            raise DataValidationError("unit storage must contain 'data' and 'log' volumes")
         return {
             "data": self._normalize_volume_seed(
-                {"size": storage.get("dataVolumeSize"), "diskId": storage.get("dataDiskId")},
+                storage["data"],
                 volume_name="data",
+                host_id=host_id,
             ),
             "log": self._normalize_volume_seed(
-                {"size": storage.get("logVolumeSize"), "diskId": storage.get("logDiskId")},
+                storage["log"],
                 volume_name="log",
+                host_id=host_id,
             ),
         }
 
-    def _normalize_volume_seed(self, volume: Any, *, volume_name: str) -> dict[str, Any]:
+    def _normalize_volume_seed(self, volume: Any, *, volume_name: str, host_id: str) -> dict[str, Any]:
         """规范化 seed 中的 volume 结构。"""
 
         if not isinstance(volume, dict):
             raise DataValidationError(f"unit storage volume '{volume_name}' must be an object")
-        disk_id = volume.get("diskId")
-        mount_point = volume.get("mountPoint")
-        size = volume.get("size")
+        host = self._hosts_by_id[host_id]
+        disk_id = volume.get("diskId") or self._select_volume_disk_id(host, volume_name=volume_name, volume=volume)
+        mount_point = volume.get("mountPoint") or f"/dbaas/{volume_name}"
+        size = volume.get("sizeGB", volume.get("size"))
         if not isinstance(disk_id, str) or not disk_id:
             raise DataValidationError(f"unit storage volume '{volume_name}' must have a non-empty 'diskId'")
-        if not isinstance(mount_point, str) or not mount_point:
-            mount_point = f"/dbaas/{volume_name}"
         if size is None:
-            raise DataValidationError(f"unit storage volume '{volume_name}' must have 'size'")
+            raise DataValidationError(f"unit storage volume '{volume_name}' must have 'sizeGB'")
         return {
             "diskId": disk_id,
             "mountPoint": mount_point,
             "size": float(size),
+            "sizeGB": float(size),
+            "type": volume.get("type"),
+            "typeDisplayName": volume.get("typeDisplayName"),
         }
+
+    def _resolve_unit_host_id(self, unit: dict[str, Any], *, service_name: str) -> str:
+        """Resolve a public service unit back to a host id for in-memory platform behavior."""
+
+        host_id = unit.get("hostId")
+        if isinstance(host_id, str) and host_id:
+            return host_id
+        host_name = unit.get("hostName")
+        host_ip = unit.get("hostIp")
+        for candidate_id, host in self._hosts_by_id.items():
+            if isinstance(host_name, str) and host_name and host.get("name") == host_name:
+                return candidate_id
+            if isinstance(host_ip, str) and host_ip and host.get("ip") == host_ip:
+                return candidate_id
+        raise DataValidationError(
+            f"unit '{unit.get('name')}' in service '{service_name}' must have a resolvable hostName or hostIp"
+        )
+
+    def _select_volume_disk_id(self, host: dict[str, Any], *, volume_name: str, volume: dict[str, Any]) -> str:
+        """Resolve a public volume to a host disk for in-memory capacity accounting."""
+
+        requested_type = str(volume.get("type") or "")
+        requested_media = requested_type.split(":", 1)[1] if ":" in requested_type else ""
+        candidates = [
+            disk
+            for disk in host.get("disks", [])
+            if disk.get("type") == volume_name or (volume_name == "log" and disk.get("type") == "data")
+        ]
+        if requested_media:
+            media_matches = [disk for disk in candidates if str(disk.get("mediaType", "")).lower() == requested_media.lower()]
+            if media_matches:
+                return str(media_matches[0]["diskId"])
+        if candidates:
+            return str(candidates[0]["diskId"])
+        disks = host.get("disks", [])
+        if disks:
+            return str(disks[0]["diskId"])
+        raise DataValidationError(f"host '{host.get('id')}' has no disks for volume '{volume_name}'")
+
+    def _internal_health_status(self, value: Any) -> str:
+        """Map public running status values to internal platform health status values."""
+
+        normalized = str(value or "").strip().lower()
+        if normalized in {"passing", "healthy", "running", "success"}:
+            return "HEALTHY"
+        if normalized in {"warning", "warn", "degraded", "restarting", "maintenance"}:
+            return "WARN"
+        if normalized in {"critical", "unhealthy", "failed", "failure", "stopped"}:
+            return "UNHEALTHY"
+        return "HEALTHY"
+
+    def _internal_container_status(self, health_status: str) -> str:
+        """Return a simple container status for platform and precheck summaries."""
+
+        if health_status == "HEALTHY":
+            return "RUNNING"
+        if health_status == "WARN":
+            return "RESTARTING"
+        return "FAILED"
 
     def _derive_subsystem(self, service: dict[str, Any]) -> str:
         """推导服务组所属子系统。"""
@@ -1093,7 +1206,8 @@ class JsonDataStore:
                     for volume_name in ("data", "log"):
                         volume = unit["storage"][volume_name]
                         disk = host["_diskById"][volume["diskId"]]
-                        disk["used"] = min(float(disk["capacity"]), float(disk["used"]) + float(volume["size"]))
+                        size = float(volume.get("sizeGB", volume.get("size")) or 0.0)
+                        disk["used"] = min(float(disk["capacity"]), float(disk["used"]) + size)
             for cluster_id in service_cluster_ids:
                 cluster_health_inputs[cluster_id].append(service["healthStatus"])
             site_health_inputs[service["siteId"]].append(service["healthStatus"])
@@ -1178,20 +1292,38 @@ class JsonDataStore:
         """返回对外暴露的服务组详情。"""
 
         site = self._sites_by_id[service["siteId"]]
-        public_service = deepcopy(service)
-        public_service["environment"] = site["environment"]
-        public_service["siteName"] = site["name"]
-        public_service["region"] = site["region"]
-        public_service["zone"] = site["zone"]
-        public_service["user"] = public_service.get("user")
-        public_service.pop("owner", None)
+        public_service = {
+            "name": service["name"],
+            "type": service["type"],
+            "user": service.get("user"),
+            "ownerAccount": service.get("ownerAccount"),
+            "ownerName": service.get("ownerName"),
+            "businessSystemName": service.get("businessSystemName"),
+            "businessSubsystemName": service.get("businessSubsystemName"),
+            "subsystem": service.get("businessSubsystemName") or service.get("subsystem"),
+            "siteId": service["siteId"],
+            "siteName": service.get("siteName") or site["name"],
+            "areaName": service.get("areaName") or site.get("areaName"),
+            "sharding": service.get("sharding"),
+            "runningStatus": self._public_running_status(service.get("runningStatus") or service.get("healthStatus")),
+            "replicationStatus": self._public_running_status(service.get("replicationStatus")),
+            "childServices": [],
+            "backupStrategy": service.get("backupStrategy"),
+        }
 
-        for child_service in public_service.get("services", []):
-            for unit in child_service.get("units", []):
-                host = self._hosts_by_id[unit["hostId"]]
-                unit["hostName"] = host["name"]
-                unit["hostIp"] = host["ip"]
-                unit["storage"] = self._public_unit_storage(unit["storage"], host["_diskById"])
+        for child_service in service.get("services", []):
+            public_service["childServices"].append(
+                {
+                    "name": child_service["name"],
+                    "type": child_service["type"],
+                    "version": child_service.get("version"),
+                    "port": child_service.get("port"),
+                    "runningStatus": self._public_running_status(
+                        child_service.get("runningStatus") or child_service.get("healthStatus")
+                    ),
+                    "units": [self._public_service_unit(unit, service) for unit in child_service.get("units", [])],
+                }
+            )
 
         return public_service
 
@@ -1200,24 +1332,13 @@ class JsonDataStore:
 
         public_service = self._public_service_detail(service)
         public_service.pop("siteId", None)
-        network = public_service.get("network")
-        if isinstance(network, dict):
-            network.pop("vpcId", None)
-            network.pop("subnetId", None)
+        public_service.pop("ownerAccount", None)
+        public_service.pop("ownerName", None)
 
-        for child_service in public_service.get("services", []):
+        for child_service in public_service.get("childServices", []):
             for unit in child_service.get("units", []):
-                unit.pop("id", None)
-                unit.pop("hostId", None)
                 unit.pop("hostName", None)
                 unit.pop("hostIp", None)
-                storage = unit.get("storage")
-                if isinstance(storage, dict):
-                    for volume_name in ("data", "log"):
-                        volume = storage.get(volume_name)
-                        if isinstance(volume, dict):
-                            volume.pop("diskId", None)
-                            volume.pop("diskName", None)
 
         return public_service
 
@@ -1231,7 +1352,12 @@ class JsonDataStore:
             "environments": sorted(
                 {self._sites_by_id[service["siteId"]]["environment"] for service in user_services}
             ),
-            "subsystems": sorted({service["subsystem"] for service in user_services}),
+            "subsystems": sorted(
+                {
+                    service.get("businessSubsystemName") or service["subsystem"]
+                    for service in user_services
+                }
+            ),
         }
 
     def _public_user_detail(self, user: str, user_services: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1243,7 +1369,7 @@ class JsonDataStore:
                 "name": service["name"],
                 "type": service["type"],
                 "user": service.get("user"),
-                "subsystem": service["subsystem"],
+                "subsystem": service.get("businessSubsystemName") or service["subsystem"],
                 "healthStatus": service["healthStatus"],
             }
             for service in user_services
@@ -1251,17 +1377,62 @@ class JsonDataStore:
         return user_detail
 
     def _public_unit_storage(self, storage: dict[str, Any], disk_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        """把 seed 里的简化 volume 信息扩成接口响应结构。"""
+        """把 seed 里的简化 volume 信息投影成服务视图存储结构。"""
 
         public_storage: dict[str, Any] = {}
         for volume_name in ("data", "log"):
             volume = deepcopy(storage[volume_name])
-            disk = disk_by_id[volume["diskId"]]
-            volume["diskName"] = disk["name"]
-            volume["diskType"] = disk["type"]
-            volume["mediaType"] = disk["mediaType"]
-            public_storage[volume_name] = volume
+            disk = disk_by_id.get(volume.get("diskId", ""))
+            public_storage[volume_name] = {
+                "sizeGB": volume.get("sizeGB", volume.get("size")),
+                "type": volume.get("type") or (f"local:{disk['mediaType']}" if disk is not None else None),
+                "typeDisplayName": volume.get("typeDisplayName") or (self._disk_type_display_name(disk) if disk is not None else None),
+            }
         return public_storage
+
+    def _public_service_unit(self, unit: dict[str, Any], service: dict[str, Any]) -> dict[str, Any]:
+        """返回服务视图中的单元信息。"""
+
+        host = self._hosts_by_id[unit["hostId"]]
+        return {
+            "name": unit["name"],
+            "type": unit["type"],
+            "cpuArchitecture": unit.get("cpuArchitecture"),
+            "cpuArchitectureDisplayName": unit.get("cpuArchitectureDisplayName"),
+            "version": unit.get("version"),
+            "runningStatus": self._public_running_status(unit.get("runningStatus") or unit.get("healthStatus")),
+            "hostName": host["name"],
+            "hostIp": host["ip"],
+            "ip": unit.get("ip") or unit.get("containerIp"),
+            "ipv6": unit.get("ipv6"),
+            "cpu": unit.get("cpu"),
+            "memoryGB": unit.get("memoryGB", unit.get("memory")),
+            "storage": self._public_unit_storage(unit["storage"], host["_diskById"]),
+        }
+
+    def _public_running_status(self, value: Any) -> str | None:
+        """把内部状态值转换为服务视图状态。"""
+
+        if value is None:
+            return None
+        text = str(value)
+        if text == "HEALTHY":
+            return "passing"
+        if text == "WARN":
+            return "warning"
+        if text == "UNHEALTHY":
+            return "critical"
+        return text
+
+    def _disk_type_display_name(self, disk: dict[str, Any]) -> str:
+        """返回磁盘类型展示名。"""
+
+        media_type = disk.get("mediaType")
+        if media_type == "SSD":
+            return "本地固态盘"
+        if media_type == "HDD":
+            return "本地机械盘"
+        return str(media_type or "未知磁盘")
 
     def _list_user_services(self, user: str) -> list[dict[str, Any]]:
         """返回指定用户拥有的服务组。"""
@@ -1285,12 +1456,10 @@ class JsonDataStore:
                         {
                             "serviceName": service["name"],
                             "childServiceType": child_service["type"],
-                            "unitId": unit["id"],
-                            "unitName": unit["name"],
-                            "role": unit["role"],
-                            "containerIp": unit["containerIp"],
-                            "healthStatus": unit["healthStatus"],
-                            "containerStatus": unit["containerStatus"],
+            "unitName": unit["name"],
+            "containerIp": unit["containerIp"],
+            "healthStatus": unit["healthStatus"],
+            "containerStatus": unit["containerStatus"],
                         }
                     )
         return units
@@ -1651,7 +1820,7 @@ class JsonDataStore:
                 "requiresUserInput": False,
             },
         ]
-        if service_type in {"mysql", "upsql", "tidb"}:
+        if service_type in {"mysql", "tidb"}:
             fields.append(
                 {
                     "name": "options.compressMode",
@@ -1778,8 +1947,8 @@ class JsonDataStore:
             return {"data_volume_gb": 0.0, "log_volume_gb": 0.0}
         storage = units[0]["storage"]
         return {
-            "data_volume_gb": float(storage["data"]["size"]),
-            "log_volume_gb": float(storage["log"]["size"]),
+            "data_volume_gb": float(storage["data"].get("sizeGB", storage["data"].get("size"))),
+            "log_volume_gb": float(storage["log"].get("sizeGB", storage["log"].get("size"))),
         }
 
     def _resource_capacity_errors(
@@ -1857,7 +2026,8 @@ class JsonDataStore:
                     continue
                 volume = unit["storage"][volume_name]
                 disk = host["_diskById"][volume["diskId"]]
-                next_used = float(disk["used"]) - float(volume["size"]) + float(target_size)
+                current_size = float(volume.get("sizeGB", volume.get("size")) or 0.0)
+                next_used = float(disk["used"]) - current_size + float(target_size)
                 if next_used > float(disk["capacity"]):
                     return [
                         {
@@ -1902,18 +2072,18 @@ class JsonDataStore:
             return str(int(value))
         return str(round(value, 1))
 
-    def _select_target_units(self, target_services: list[dict[str, Any]], unit_ids: list[str] | None) -> list[dict[str, Any]]:
+    def _select_target_units(self, target_services: list[dict[str, Any]], unit_names: list[str] | None) -> list[dict[str, Any]]:
         """返回本次任务要操作的单元列表。"""
 
         units = [unit for child_service in target_services for unit in child_service.get("units", [])]
-        if unit_ids is None:
+        if unit_names is None:
             return units
 
-        units_by_id = {unit["id"]: unit for unit in units}
-        missing_unit_ids = [unit_id for unit_id in unit_ids if unit_id not in units_by_id]
-        if missing_unit_ids:
-            raise ServiceUnitNotFoundError(", ".join(missing_unit_ids))
-        return [units_by_id[unit_id] for unit_id in unit_ids]
+        units_by_name = {unit["name"]: unit for unit in units}
+        missing_unit_names = [unit_name for unit_name in unit_names if unit_name not in units_by_name]
+        if missing_unit_names:
+            raise ServiceUnitNotFoundError(", ".join(missing_unit_names))
+        return [units_by_name[unit_name] for unit_name in unit_names]
 
     def _start_task_worker(self, task_id: str) -> None:
         """启动后台任务执行线程。"""
@@ -1951,18 +2121,21 @@ class JsonDataStore:
     def _run_service_image_upgrade_task(self, task_id: str, operation: dict[str, Any]) -> None:
         """后台逐个执行镜像升级任务。"""
 
-        for unit_id in operation["unitIds"]:
+        for unit_name in operation["unitNames"]:
             time.sleep(self.task_unit_interval_seconds)
             with self._lock:
                 task = self._get_task_for_update(task_id)
-                unit = self._get_unit_by_id(
+                unit = self._get_unit_by_name(
                     task["resourceName"],
                     operation["childServiceType"],
-                    unit_id,
+                    unit_name,
                 )
                 unit["image"] = operation["image"]
                 if operation["version"] is not None:
-                    unit["version"] = operation["version"]
+                    unit["version"] = self._unit_upgrade_version(
+                        operation["version"],
+                        current_version=unit.get("version"),
+                    )
                 task["message"] = "image upgrade running"
                 task["updatedAt"] = self._utcnow()
 
@@ -1973,10 +2146,22 @@ class JsonDataStore:
             task["updatedAt"] = self._utcnow()
             task["result"] = {
                 "childServiceType": operation["childServiceType"],
-                "unitIds": operation["unitIds"],
+                "unitNames": operation["unitNames"],
                 "image": operation["image"],
                 "version": operation["version"],
             }
+
+    def _unit_upgrade_version(self, target_version: str, *, current_version: Any) -> str:
+        """把三段目标版本转换为 unit 使用的四段版本。"""
+
+        parts = target_version.split(".")
+        if len(parts) >= 4:
+            return ".".join(parts[:4])
+
+        current_parts = str(current_version or "").split(".")
+        suffix = current_parts[3] if len(current_parts) >= 4 and current_parts[3] else "1"
+        padded = [*parts, *("0" for _ in range(max(0, 3 - len(parts))))]
+        return ".".join([*padded[:3], suffix])
 
     def _run_service_backup_task(self, task_id: str, operation: dict[str, Any]) -> None:
         """后台完成手动备份任务，并更新对应 backup records。"""
@@ -2039,15 +2224,15 @@ class JsonDataStore:
             raise TaskNotFoundError(task_id)
         return task
 
-    def _get_unit_by_id(self, name: str, child_service_type: str, unit_id: str) -> dict[str, Any]:
+    def _get_unit_by_name(self, name: str, child_service_type: str, unit_name: str) -> dict[str, Any]:
         """返回指定子服务中的目标单元。"""
 
         target_services = self._get_target_child_services(name, child_service_type)
         for child_service in target_services:
             for unit in child_service.get("units", []):
-                if unit.get("id") == unit_id:
+                if unit.get("name") == unit_name:
                     return unit
-        raise ServiceUnitNotFoundError(unit_id)
+        raise ServiceUnitNotFoundError(unit_name)
 
     def _public_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """返回对外暴露的任务结构。"""

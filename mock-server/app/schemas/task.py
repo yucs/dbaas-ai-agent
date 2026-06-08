@@ -24,7 +24,7 @@ class Task(ApiSchema):
     message: str | None = Field(default=None, description="任务当前状态说明")
     reason: str | None = Field(default=None, description="任务失败原因，成功或执行中时为空")
     resourceType: str = Field(description="任务操作的资源类型，例如 service")
-    resourceName: str = Field(description="任务操作的资源名称，例如 mysql-xf2")
+    resourceName: str = Field(description="任务操作的资源名称，例如 payad001")
     result: dict[str, Any] | None = Field(default=None, description="任务成功后的业务结果")
     createdAt: str = Field(description="任务创建时间，UTC ISO8601 格式")
     updatedAt: str = Field(description="任务最近更新时间，UTC ISO8601 格式")

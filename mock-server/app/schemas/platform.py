@@ -65,9 +65,7 @@ class HostUnitSummary(ApiSchema):
 
     serviceName: str = Field(description="所属服务组名称")
     childServiceType: str = Field(description="所属子服务类型")
-    unitId: str = Field(description="单元唯一标识")
     unitName: str = Field(description="单元名称")
-    role: str = Field(description="单元角色")
     containerIp: str = Field(description="容器 IP")
     healthStatus: str = Field(description="单元健康状态")
     containerStatus: str = Field(description="容器状态")

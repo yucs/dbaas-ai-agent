@@ -40,7 +40,7 @@ class DbaasSchemaTests(unittest.TestCase):
 
         self.assertEqual(summary["schema_version"], "services.admin.v1")
         self.assertEqual(summary["top_level_type"], "array")
-        self.assertTrue(any(field["name"] == "healthStatus" for field in summary["fields"]))
+        self.assertTrue(any(field["name"] == "runningStatus" for field in summary["fields"]))
 
     def test_describe_schema_returns_user_projection_for_regular_user(self) -> None:
         summary = describe_schema(
@@ -107,21 +107,21 @@ class DbaasSyncTests(unittest.TestCase):
                 config,
                 "payment-team",
                 [
-                    _service("mysql-a", "payment-team", health_status="HEALTHY"),
-                    _service("mysql-b", "payment-team", health_status="UNHEALTHY"),
+                    _service("mysql-a", "payment-team", running_status="passing"),
+                    _service("mysql-b", "payment-team", running_status="critical"),
                 ],
             )
 
             result = query_dbaas_service_data(
                 config,
                 Identity(user_id="alice", role="user", user="payment-team"),
-                jq_filter='[.[] | select(.healthStatus != "HEALTHY") | {name, healthStatus}]',
+                jq_filter='[.[] | select(.runningStatus != "passing") | {name, runningStatus}]',
                 max_preview_items=10,
             )
 
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["scope"], "user")
-            self.assertEqual(result["preview"], [{"name": "mysql-b", "healthStatus": "UNHEALTHY"}])
+            self.assertEqual(result["preview"], [{"name": "mysql-b", "runningStatus": "critical"}])
             self.assertIsInstance(result["synced_at"], str)
             self.assertIsInstance(result["expires_at"], str)
             self.assertEqual(result["ttl_seconds"], config.ttl_seconds)
@@ -158,8 +158,8 @@ class DbaasSyncTests(unittest.TestCase):
             _write_fresh_admin_snapshot(
                 config,
                 [
-                    _service("mysql-a", "payment-team", health_status="HEALTHY"),
-                    _service("mysql-b", "payment-team", health_status="UNHEALTHY"),
+                    _service("mysql-a", "payment-team", running_status="passing"),
+                    _service("mysql-b", "payment-team", running_status="critical"),
                 ],
             )
 
@@ -178,7 +178,7 @@ class DbaasSyncTests(unittest.TestCase):
             result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+                jq_filter='[.[] | select(.runningStatus != "passing")] | length',
             )
 
             self.assertEqual(result["status"], "success")
@@ -208,7 +208,7 @@ class DbaasSyncTests(unittest.TestCase):
                 _write_fresh_user_snapshot(
                     config,
                     user,
-                    [_service("mysql-a", user, health_status="UNHEALTHY")],
+                    [_service("mysql-a", user, running_status="critical")],
                 )
                 return {"status": "fresh"}
 
@@ -216,7 +216,7 @@ class DbaasSyncTests(unittest.TestCase):
                 result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    jq_filter='[.[] | {name, healthStatus}]',
+                    jq_filter='[.[] | {name, runningStatus}]',
                 )
 
             self.assertEqual(result["status"], "success")
@@ -230,7 +230,7 @@ class DbaasSyncTests(unittest.TestCase):
             def _refresh() -> dict[str, object]:
                 _write_fresh_admin_snapshot(
                     config,
-                    [_service("mysql-a", "payment-team", health_status="UNHEALTHY")],
+                    [_service("mysql-a", "payment-team", running_status="critical")],
                 )
                 workspace = DbaasWorkspace(config)
                 return {
@@ -243,13 +243,13 @@ class DbaasSyncTests(unittest.TestCase):
                 result = query_dbaas_service_data(
                     config,
                     Identity(user_id="admin", role="admin", user=None),
-                    jq_filter='[.[] | {name, healthStatus}]',
+                    jq_filter='[.[] | {name, runningStatus}]',
                     refresh=True,
                 )
 
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["scope"], "admin")
-            self.assertEqual(result["preview"], [{"name": "mysql-a", "healthStatus": "UNHEALTHY"}])
+            self.assertEqual(result["preview"], [{"name": "mysql-a", "runningStatus": "critical"}])
             refresh_admin.assert_called_once()
 
     def test_query_refresh_for_user_triggers_force_refresh(self) -> None:
@@ -262,7 +262,7 @@ class DbaasSyncTests(unittest.TestCase):
                 _write_fresh_user_snapshot(
                     config,
                     user,
-                    [_service("mysql-a", user, health_status="UNHEALTHY")],
+                    [_service("mysql-a", user, running_status="critical")],
                 )
                 workspace = DbaasWorkspace(config)
                 paths = workspace.paths(SERVICES_KIND, scope="user", user=user)
@@ -278,13 +278,13 @@ class DbaasSyncTests(unittest.TestCase):
                 result = query_dbaas_service_data(
                     config,
                     Identity(user_id="alice", role="user", user="payment-team"),
-                    jq_filter='[.[] | {name, healthStatus}]',
+                    jq_filter='[.[] | {name, runningStatus}]',
                     refresh=True,
                 )
 
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["scope"], "user")
-            self.assertEqual(result["preview"], [{"name": "mysql-a", "healthStatus": "UNHEALTHY"}])
+            self.assertEqual(result["preview"], [{"name": "mysql-a", "runningStatus": "critical"}])
             refresh_user.assert_called_once()
 
     def test_query_user_stale_snapshot_does_not_trigger_refresh(self) -> None:
@@ -340,20 +340,32 @@ class DbaasSyncTests(unittest.TestCase):
             config = _config(tmpdir)
             _write_fresh_admin_snapshot(
                 config,
-                [_service("mysql-old", "payment-team", health_status="HEALTHY")],
+                [_service("mysql-old", "payment-team", running_status="passing")],
             )
 
-            result = query_dbaas_service_data(
-                config,
-                Identity(user_id="admin", role="admin", user=None),
-                jq_filter='[.[] | {name, healthStatus}]',
-                refresh=True,
-            )
+            with patch.object(
+                DbaasServiceSynchronizer,
+                "force_refresh_admin_services",
+                return_value={
+                    "status": "error",
+                    "scope": "admin",
+                    "error_type": "snapshot_unavailable",
+                    "last_refresh_status": "error",
+                    "last_error": "forced refresh failed",
+                },
+            ) as refresh_admin:
+                result = query_dbaas_service_data(
+                    config,
+                    Identity(user_id="admin", role="admin", user=None),
+                    jq_filter='[.[] | {name, runningStatus}]',
+                    refresh=True,
+                )
 
             self.assertEqual(result["status"], "error")
             self.assertEqual(result["error_type"], "snapshot_unavailable")
             self.assertIsNone(result["data_path"])
             self.assertIn("当前无法刷新 DBAAS 服务数据视图", result["message"])
+            refresh_admin.assert_called_once()
 
     def test_query_error_message_is_suitable_for_user_answer_when_snapshot_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -362,7 +374,7 @@ class DbaasSyncTests(unittest.TestCase):
             result = query_dbaas_service_data(
                 config,
                 Identity(user_id="admin", role="admin", user=None),
-                jq_filter='[.[] | select(.healthStatus != "HEALTHY")] | length',
+                jq_filter='[.[] | select(.runningStatus != "passing")] | length',
             )
 
             self.assertEqual(result["status"], "error")
@@ -646,30 +658,25 @@ def _storage_precheck_response(blocking_errors: list[dict] | None = None) -> dic
     }
 
 
-def _service(name: str, user: str, *, health_status: str = "HEALTHY") -> dict:
+def _service(name: str, user: str, *, running_status: str = "passing") -> dict:
     return {
         "name": name,
         "type": "mysql",
         "user": user,
-        "subsystem": "payment",
-        "environment": "prod",
-        "siteId": "site-prod-sh-01",
-        "siteName": "prod-sh-01",
-        "region": "cn-east-1",
-        "zone": "cn-east-1a",
-        "architecture": "mysql",
+        "ownerAccount": "03331025",
+        "ownerName": "ops-owner",
+        "businessSystemName": "payment-system",
+        "businessSubsystemName": "payment-db",
+        "subsystem": "payment-db",
+        "siteId": "1",
+        "siteName": "上海PIT站",
+        "areaName": "转接区",
         "sharding": False,
-        "healthStatus": health_status,
-        "network": {
-            "vpcId": "vpc-prod-cn-east-1",
-            "subnetId": "subnet-site-prod-sh-01-03",
-            "cidr": "192.168.13.0/24",
-            "gateway": "192.168.13.1",
-        },
-        "services": [],
+        "runningStatus": running_status,
+        "replicationStatus": "passing",
+        "childServices": [],
         "backupStrategy": None,
     }
-
 
 def _write_fresh_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> None:
     workspace = DbaasWorkspace(config)
