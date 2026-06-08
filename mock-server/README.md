@@ -58,7 +58,7 @@
 管理员查询任意服务：
 
 ```bash
-curl http://127.0.0.1:8000/services/mysql-xf2 \
+curl http://127.0.0.1:8000/services/payad001 \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin'
@@ -122,7 +122,7 @@ curl http://127.0.0.1:8000/services
 最新监控记录结构：
 
 ```json
-{"service_name":"mysql-xf2","unit_name":"mysql-primary-01","service_type":"mysql","value":72.5}
+{"service_name":"payad001","unit_name":"aaa8ee1f_payad001","service_type":"mysql","value":72.5}
 ```
 
 ## 快速启动
@@ -173,7 +173,7 @@ curl http://127.0.0.1:8000/healthz
 查询服务组：
 
 ```bash
-curl http://127.0.0.1:8000/services/mysql-xf2 \
+curl http://127.0.0.1:8000/services/payad001 \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin'
@@ -251,7 +251,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
-    "service_name": "mysql-xf2",
+    "service_name": "payad001",
     "child_service_type": "mysql",
     "target_cpu_cores": 16,
     "target_memory_gb": 64
@@ -267,7 +267,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-storage-update \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
-    "service_name": "mysql-xf2",
+    "service_name": "payad001",
     "child_service_type": "mysql",
     "target_data_volume_gb": 1024,
     "target_log_volume_gb": 200
@@ -285,7 +285,7 @@ precheck 联调触发 `blocking_errors` 的固定阈值：
 更新资源规格：
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
+curl -X PUT http://127.0.0.1:8000/services/payad001/resource \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
@@ -294,14 +294,14 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/resource \
     "childServiceType": "mysql",
     "platformAuto": false,
     "cpu": 16,
-    "memory": 64
+    "memoryGB": 64
   }'
 ```
 
 更新存储规格：
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
+curl -X PUT http://127.0.0.1:8000/services/payad001/storage \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
@@ -310,8 +310,12 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
     "childServiceType": "mysql",
     "platformAuto": false,
     "storage": {
-      "dataVolumeSize": 1024,
-      "logVolumeSize": 200
+      "data": {
+        "sizeGB": 1024
+      },
+      "log": {
+        "sizeGB": 200
+      }
     }
   }'
 ```
@@ -319,7 +323,7 @@ curl -X PUT http://127.0.0.1:8000/services/mysql-xf2/storage \
 创建镜像升级任务：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
+curl -X POST http://127.0.0.1:8000/services/payad001/image-upgrade \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
@@ -328,14 +332,14 @@ curl -X POST http://127.0.0.1:8000/services/mysql-xf2/image-upgrade \
     "childServiceType": "mysql",
     "image": "mysql:8.0.37",
     "version": "8.0.37",
-    "unitIds": ["mysql-primary-01"]
+    "unitNames": ["aaa8ee1f_payad001"]
   }'
 ```
 
 查询通用任务：
 
 ```bash
-curl http://127.0.0.1:8000/tasks/task-service-image-upgrade-mysql-xf2-mysql-a3f9c2 \
+curl http://127.0.0.1:8000/tasks/task-service-image-upgrade-payad001-mysql-a3f9c2 \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin'
@@ -353,7 +357,7 @@ curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
 普通用户查询自己服务的最新监控：
 
 ```bash
-curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.mem.usagePercent&service_name=mysql-xf2' \
+curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.mem.usagePercent&service_name=payad001' \
   -H 'Authorization: Bearer user' \
   -H 'X-DBAAS-Actor-User: payment-platform-team' \
   -H 'X-DBAAS-Actor-Role: user'
@@ -371,7 +375,7 @@ curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
 查询真实单元历史监控：
 
 ```bash
-curl 'http://127.0.0.1:8000/units/mysql-primary-01/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200' \
+curl 'http://127.0.0.1:8000/units/aaa8ee1f_payad001/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200' \
   -H 'Authorization: Bearer admin' \
   -H 'X-DBAAS-Actor-User: admin' \
   -H 'X-DBAAS-Actor-Role: admin'
@@ -432,18 +436,18 @@ mock-server/
 - `site` 下的 `clusters`、`serviceGroups`，`cluster` 下的 `hosts`、`serviceGroupCount` 等都在内存加载后动态聚合
 - `services.json` 保留服务组自身字段和 unit 到 host/disk 的引用关系
 - `backupStrategy` 直接内嵌在服务组对象中
-- 服务接口响应会补齐 `environment`、`siteName`、`region`、`zone`
-- 服务组、子服务、单元都会返回 `healthStatus`
-- 单元会额外返回 `containerStatus`
-- 单元会返回 `hostId`、`hostName`、`hostIp`、`containerIp`
-- 单元存储固定包含 `data`、`log` 两个 volume，并映射到主机磁盘
+- `/services` 是面向 AI Agent 的服务查询视图；`/platform` 保留平台资源视图字段，例如 `healthStatus`、`containerIp`
+- 服务接口响应会补齐 `siteName`、`areaName`、`architectureName`
+- 服务组、子服务、单元都会返回 `runningStatus`
+- 单元会返回 `hostName`、`hostIp`、`ip`、`ipv6`
+- 单元存储固定包含 `data`、`log` 两个 volume，对外容量字段使用 `sizeGB`
 - 当前 seed 规模为 12 个站点、48 个集群、1920 台主机、2208 个服务组
 - 最新监控数据在接口调用时动态生成，管理员全量查询和普通用户指定服务查询默认返回 100000 条记录，普通用户查询自己全部服务默认返回 5000 条记录
 - 数据加载到内存后供接口查询使用
 - 运行期间的 update 动作只修改内存
 - 不回写本地 `data` 文件
 - 服务重启后恢复为 seed 数据初始状态
-- 如果 seed 数据里缺失这些状态字段，加载时会自动补默认值：`healthStatus=HEALTHY`、`containerStatus=RUNNING`
+- 如果 seed 数据里缺失这些状态字段，加载时会自动补默认值，并在服务接口中投影为 `runningStatus=passing`
 
 ## 当前示例数据
 
@@ -456,11 +460,11 @@ mock-server/
 
 当前样例包括：
 
-- 服务组：`mysql-xf2`
-- 服务组：`tidb-oltp`
+- 服务组：`payad001`
+- 服务组：`ordad002`
 - 服务组：`kafka-stream`
 - 服务组：`influxdb-monitor`
-- 服务组：`redis-cache`
+- 服务组：`sesad003`
 - 服务组：`mongodb-docs`
 - 服务组：`elasticsearch-search`
 - 服务组：`clickhouse-warehouse`
@@ -469,9 +473,10 @@ mock-server/
 
 - `childServiceType` 为必填项，只能操作指定类型的子服务
 - 只有 body 中明确传入的字段才会被更新，未传字段保持不变
-- `resource` 接口更新该子服务下所有 units 的 `cpu`、`memory`
-- `storage` 接口更新该子服务下所有 units 的 `storage.data.size`、`storage.log.size`
+- `resource` 接口更新该子服务下所有 units 的 `cpu`、`memoryGB`
+- `storage` 接口更新该子服务下所有 units 的 `storage.data.sizeGB`、`storage.log.sizeGB`
 - `platformAuto` 更新在子服务层
+- `image-upgrade` 接口通过 `unitNames` 指定真实单元名称；不传 `unitNames` 时升级该子服务下所有单元
 - 服务组不存在时返回 `404`
 - 服务组存在但 `childServiceType` 不存在时返回 `502`
 - 请求体缺少有效更新字段时返回 `422`
@@ -480,7 +485,7 @@ mock-server/
 
 - 所有异步接口都应返回 `taskId`
 - 统一通过 `GET /tasks/{taskId}` 查询任务状态
-- mock-server 生成的 `taskId` 包含动作、服务名、子服务类型和随机后缀，例如 `task-service-image-upgrade-mysql-xf2-mysql-a3f9c2`
+- mock-server 生成的 `taskId` 包含动作、服务名、子服务类型和随机后缀，例如 `task-service-image-upgrade-payad001-mysql-a3f9c2`
 - 当前通用任务字段包括 `taskId`、`type`、`status`、`message`、`reason`、`resourceType`、`resourceName`、`result`、`createdAt`、`updatedAt`
 - 当前任务状态使用 `RUNNING`、`SUCCESS`、`FAILED`
 - `POST /services/{name}/image-upgrade` 会创建 `service.image.upgrade` 类型任务

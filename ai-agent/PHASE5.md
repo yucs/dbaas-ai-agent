@@ -474,7 +474,7 @@ query_dbaas_service_data_tool(jq_filter, max_preview_items)
 ```json
 {
   "kind": "services",
-  "jq_filter": ".[] | select(.healthStatus != \"HEALTHY\") | {name, type, user, healthStatus}",
+  "jq_filter": ".[] | select(.runningStatus != \"passing\") | {name, type, user, runningStatus}",
   "max_preview_items": 50
 }
 ```
@@ -578,7 +578,7 @@ search_dbaas_data_tool
 示例：
 
 ```jq
-.[] | select(.name == "mysql-xf2")
+.[] | select(.name == "payad001")
 ```
 
 如果后续发现单服务详情查询成为高频需求，
@@ -776,7 +776,7 @@ tool 描述
 - 业务含义不完全显然的字段必须写描述
   - 例如 `status`、`role`、`resource_status`、`health_score`
 - 涉及单位的字段必须写清楚单位
-  - 例如 `cpu`、`memory`、`storage.data.size`、`storage.log.size`
+  - 例如 `cpu`、`memoryGB`、`storage.data.sizeGB`、`storage.log.sizeGB`
 - ID 和名称类字段可以使用短描述
   - 例如 `name` 写成“服务组名称。”
 - 普通用户 schema 不应包含普通用户不可见字段

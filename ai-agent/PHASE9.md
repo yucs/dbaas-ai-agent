@@ -79,11 +79,11 @@ DBAAS `/backups` 应直接返回 agent-facing backup record 数组。
   {
     "backup_id": "7d034e16d18c8b89f9b173b00f210054",
     "task_id": "task-001",
-    "service_name": "upsql_7197",
-    "service_type": "upsql",
+    "service_name": "payad001",
+    "service_type": "mysql",
     "child_service_name": "mysql-shard-01",
     "child_service_type": "mysql",
-    "unit_name": "mysql-primary-01",
+    "unit_name": "aaa8ee1f_payad001",
     "backup_type": "ddl",
     "size_bytes": 2269646,
     "storage_type": "NAS",
@@ -575,7 +575,7 @@ create_service_backup_task_tool(...)
 ```jq
 [
   .[]
-  | select(.service_name == "upsql_7197"
+  | select(.service_name == "payad001"
        and .task_status == "succeeded")
 ]
 ```
@@ -585,7 +585,7 @@ create_service_backup_task_tool(...)
 ```jq
 [
   .[]
-  | select(.service_name == "upsql_7197"
+  | select(.service_name == "payad001"
        and .task_status == "succeeded"
        and .finished_at != null)
 ]
@@ -599,7 +599,7 @@ create_service_backup_task_tool(...)
 ```jq
 [
   .[]
-  | select(.service_name == "upsql_7197"
+  | select(.service_name == "payad001"
        and .child_service_name == "mysql-shard-01")
 ]
 ```

@@ -360,8 +360,8 @@ boolean
 
 ```json
 {
-  "service_name": "mysql-xf2",
-  "unit_name": "mysql-prod-0",
+  "service_name": "payad001",
+  "unit_name": "aaa8ee1f_payad001",
   "service_type": "mysql",
   "value": 72.5
 }
@@ -381,10 +381,10 @@ boolean
 查询指定服务时，
 模型应使用记录中的 `service_name` 精确匹配。
 
-例如查询服务 `mysql-xf2` 的单元：
+例如查询服务 `payad001` 的单元：
 
 ```jq
-[.[] | select(.service_name == "mysql-xf2")]
+[.[] | select(.service_name == "payad001")]
 ```
 
 不要根据 `unit_name` 前缀猜测服务归属，
@@ -425,8 +425,8 @@ Catalog：
 
 ```json
 [
-  {"service_name": "mysql-xf2", "unit_name": "mysql-0", "service_type": "mysql", "value": 72.5},
-  {"service_name": "mysql-xf2", "unit_name": "mysql-1", "service_type": "mysql", "value": 48}
+  {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": 72.5},
+  {"service_name": "payad001", "unit_name": "b7c1a390_payad001", "service_type": "mysql", "value": 48}
 ]
 ```
 
@@ -463,8 +463,8 @@ Catalog：
 
 ```json
 [
-  {"service_name": "mysql-xf2", "unit_name": "mysql-0", "service_type": "mysql", "value": 8589934592},
-  {"service_name": "mysql-xf2", "unit_name": "mysql-1", "service_type": "mysql", "value": 4294967296}
+  {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": 8589934592},
+  {"service_name": "payad001", "unit_name": "b7c1a390_payad001", "service_type": "mysql", "value": 4294967296}
 ]
 ```
 
@@ -501,8 +501,8 @@ Catalog：
 
 ```json
 [
-  {"service_name": "mysql-xf2", "unit_name": "mysql-0", "service_type": "mysql", "value": "8.0.36"},
-  {"service_name": "mysql-xf2", "unit_name": "mysql-1", "service_type": "mysql", "value": "5.7.44"}
+  {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": "8.0.36"},
+  {"service_name": "payad001", "unit_name": "b7c1a390_payad001", "service_type": "mysql", "value": "5.7.44"}
 ]
 ```
 
@@ -543,8 +543,8 @@ Catalog：
 
 ```json
 [
-  {"service_name": "mysql-xf2", "unit_name": "mysql-0", "service_type": "mysql", "value": "passing"},
-  {"service_name": "mysql-xf2", "unit_name": "mysql-1", "service_type": "mysql", "value": "critical"}
+  {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": "passing"},
+  {"service_name": "payad001", "unit_name": "b7c1a390_payad001", "service_type": "mysql", "value": "critical"}
 ]
 ```
 
@@ -804,8 +804,8 @@ tool 调用该接口时必须携带当前用户身份。
 
 ```json
 [
-  {"service_name": "mysql-xf2", "unit_name": "mysql-prod-0", "service_type": "mysql", "value": 72.5},
-  {"service_name": "redis-cache", "unit_name": "redis-prod-0", "service_type": "redis", "value": 41}
+  {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": 72.5},
+  {"service_name": "sesad003", "unit_name": "c83a4d2e_sesad003", "service_type": "redis", "value": 41}
 ]
 ```
 
@@ -871,7 +871,7 @@ tool 不单独保存每次 jq 查询结果，
   "status": "success",
   "jq_filter": "[.[] | select((.value | type) == \"number\" and .value > 60)]",
   "preview": [
-    {"service_name": "mysql-xf2", "unit_name": "mysql-prod-0", "service_type": "mysql", "value": 72.5}
+    {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": 72.5}
   ],
   "preview_count": 1,
   "truncated": false,
@@ -924,8 +924,8 @@ tool 返回中的 `preview` 可以是数字：
 ```json
 {
   "preview": [
-    {"service_name": "mysql-xf2", "unit_name": "mysql-prod-0", "service_type": "mysql", "value": 72.5},
-    {"service_name": "redis-cache", "unit_name": "redis-prod-0", "service_type": "redis", "value": 68.1}
+    {"service_name": "payad001", "unit_name": "aaa8ee1f_payad001", "service_type": "mysql", "value": 72.5},
+    {"service_name": "sesad003", "unit_name": "c83a4d2e_sesad003", "service_type": "redis", "value": 68.1}
   ],
   "preview_count": 2,
   "truncated": true
@@ -1124,8 +1124,8 @@ tool 调用 DBAAS 监控接口时必须携带用户身份，
 
 ```json
 {
-  "service_name": "mysql-xf2",
-  "unit_name": "mysql-prod-0",
+  "service_name": "payad001",
+  "unit_name": "aaa8ee1f_payad001",
   "service_type": "mysql",
   "value": 72.5
 }
@@ -1326,7 +1326,7 @@ Phase6 history 相对时间换算仍优先使用 `now_ts`；
 模型流程示例：
 
 ```text
-用户问“查看 mysql-prod-0 最近一小时 CPU”
+用户问“查看 aaa8ee1f_payad001 最近一小时 CPU”
 1. 调用 get_current_time_tool 获取 now_ts
 2. 计算 start_ts = now_ts - 3600，end_ts = now_ts
 3. 调用 query_unit_metric_history_tool
@@ -1389,10 +1389,10 @@ runtime/dbaas_workspace/users/{safe_user}/metrics_history/{safe_unit_name}__{met
 示例：
 
 ```text
-runtime/dbaas_workspace/admin/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.json
-runtime/dbaas_workspace/admin/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
-runtime/dbaas_workspace/users/payment-platform-team/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.json
-runtime/dbaas_workspace/users/payment-platform-team/metrics_history/mysql-primary-01__container.cpu.use__1777437600__1777441200.meta.json
+runtime/dbaas_workspace/admin/metrics_history/aaa8ee1f_payad001__container.cpu.use__1777437600__1777441200.json
+runtime/dbaas_workspace/admin/metrics_history/aaa8ee1f_payad001__container.cpu.use__1777437600__1777441200.meta.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_history/aaa8ee1f_payad001__container.cpu.use__1777437600__1777441200.json
+runtime/dbaas_workspace/users/payment-platform-team/metrics_history/aaa8ee1f_payad001__container.cpu.use__1777437600__1777441200.meta.json
 ```
 
 同一个 `scope + user + unit_name + metric_key + start_ts + end_ts` 命中本地历史缓存时，

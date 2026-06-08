@@ -128,7 +128,7 @@ POST /api/v1/prechecks/service-resource-update
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "target_cpu_cores": 8,
   "target_memory_gb": 16
@@ -139,7 +139,7 @@ POST /api/v1/prechecks/service-resource-update
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "current_spec": {
     "cpu_cores": 2,
@@ -162,7 +162,7 @@ POST /api/v1/prechecks/service-resource-update
     "running_count": 3,
     "abnormal_units": [
       {
-        "unit_name": "mysql-2",
+        "unit_name": "c9287aa4_payad001",
         "status": "stopped"
       }
     ]
@@ -171,7 +171,7 @@ POST /api/v1/prechecks/service-resource-update
     "time_window": "1d",
     "units": [
       {
-        "unit_name": "mysql-0",
+        "unit_name": "aaa8ee1f_payad001",
         "cpu": {
           "latest": "82.5%",
           "max": "96.8%",
@@ -210,7 +210,7 @@ POST /api/v1/prechecks/service-storage-update
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "target_data_volume_gb": 1024,
   "target_log_volume_gb": 200
@@ -221,7 +221,7 @@ POST /api/v1/prechecks/service-storage-update
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "current_storage": {
     "data_volume_gb": 500,
@@ -235,7 +235,7 @@ POST /api/v1/prechecks/service-storage-update
   "metrics": {
     "units": [
       {
-        "unit_name": "mysql-0",
+        "unit_name": "aaa8ee1f_payad001",
         "data_usage": "78.5%",
         "log_usage": "42.1%"
       }

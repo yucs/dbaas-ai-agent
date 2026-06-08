@@ -139,20 +139,20 @@ Proposal 是给用户和前端看的展示结构，不包含原始 `tool_name` �
       "targets": [
         {
           "kind": "service",
-          "id": "mysql-xf2",
-          "name": "mysql-xf2",
+          "id": "payad001",
+          "name": "payad001",
           "qualifiers": {
             "child_service_type": "mysql"
           }
         }
       ],
-      "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+      "summary": "将 payad001/mysql 内存调整为 15GB",
       "risk_level": "medium",
       "required_role": "user",
       "execution_mode": "sync",
       "parameters": [
         {
-          "key": "memory",
+          "key": "memory_gb",
           "label": "内存",
           "current_value": 8,
           "current_unit": "GB",
@@ -315,8 +315,8 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
   "targets": [
     {
       "kind": "service",
-      "id": "mysql-xf2",
-      "name": "mysql-xf2",
+      "id": "payad001",
+      "name": "payad001",
       "qualifiers": {
         "child_service_type": "mysql"
       }
@@ -324,19 +324,19 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
   ],
   "execution_mode": "sync",
   "status": "succeeded",
-  "summary": "已将 mysql-xf2/mysql 内存调整为 15GB。",
+  "summary": "已将 payad001/mysql 内存调整为 15GB。",
   "task": null,
   "changes": [
     {
       "target": {
         "kind": "service",
-        "id": "mysql-xf2",
-        "name": "mysql-xf2",
+        "id": "payad001",
+        "name": "payad001",
         "qualifiers": {
           "child_service_type": "mysql"
         }
       },
-      "field": "memory",
+      "field": "memory_gb",
       "label": "内存",
       "before": 8,
       "after": 15,
@@ -362,8 +362,8 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
   "targets": [
     {
       "kind": "service",
-      "id": "mysql-xf2",
-      "name": "mysql-xf2",
+      "id": "payad001",
+      "name": "payad001",
       "qualifiers": {
         "child_service_type": "mysql"
       }
@@ -371,7 +371,7 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
   ],
   "execution_mode": "async",
   "status": "task_created",
-  "summary": "已创建 mysql-xf2/mysql 镜像升级任务 task-0001。",
+  "summary": "已创建 payad001/mysql 镜像升级任务 task-0001。",
   "task": {
     "task_id": "task-0001",
     "type": "service.image.upgrade",
@@ -396,7 +396,7 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
   "changes": [],
   "error": {
     "error_type": "dbaas_request_failed",
-    "message": "DBAAS 控制面返回错误：service 'mysql-xf2' not found"
+    "message": "DBAAS 控制面返回错误：service 'payad001' not found"
   },
   "details": {}
 }
@@ -430,7 +430,7 @@ DeepAgent 使用的 human-in-the-loop middleware 会把同一条 AI message 中�
 示例：
 
 ```text
-mysql-xf2/mysql
+payad001/mysql
 内存：8GB -> 15GB
 变化：扩容
 ```
@@ -634,20 +634,20 @@ approve 当前 approval -> resume 后再次触发新 interrupt -> 创建 next_ap
         "targets": [
           {
             "kind": "service",
-            "id": "mysql-xf2",
-            "name": "mysql-xf2",
+            "id": "payad001",
+            "name": "payad001",
             "qualifiers": {
               "child_service_type": "mysql"
             }
           }
         ],
-        "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+        "summary": "将 payad001/mysql 内存调整为 15GB",
         "risk_level": "medium",
         "required_role": "user",
         "execution_mode": "sync",
         "parameters": [
           {
-            "key": "memory",
+            "key": "memory_gb",
             "label": "内存",
             "value": 15,
             "unit": "GB"
@@ -664,9 +664,9 @@ approve 当前 approval -> resume 后再次触发新 interrupt -> 创建 next_ap
       "tool_call_id": "call_xxx",
       "tool_name": "update_service_resource_tool",
       "tool_args": {
-        "service_name": "mysql-xf2",
+        "service_name": "payad001",
         "child_service_type": "mysql",
-        "memory": 15
+        "memory_gb": 15
       }
     }
   ],
@@ -1855,8 +1855,8 @@ tasks.jsonl      按 task_id 折叠，返回最新状态
     "targets": [
       {
         "kind": "service",
-        "id": "mysql-xf2",
-        "name": "mysql-xf2",
+        "id": "payad001",
+        "name": "payad001",
         "qualifiers": {
           "child_service_type": "mysql"
         }
@@ -1864,7 +1864,7 @@ tasks.jsonl      按 task_id 折叠，返回最新状态
     ],
     "execution_mode": "sync",
     "status": "succeeded",
-    "summary": "已将 mysql-xf2/mysql 内存调整为 15GB。",
+    "summary": "已将 payad001/mysql 内存调整为 15GB。",
     "task": null,
     "changes": [],
     "error": null,
@@ -1898,12 +1898,12 @@ DBAAS 是任务状态事实源，本地记录保存 last known status。
   "operation_id": "op_xxx",
   "session_id": "sess_xxx",
   "action": "service.image.upgrade",
-  "operation_conflict_key": "service.image.upgrade|service:mysql-xf2:child_service_type=mysql",
+  "operation_conflict_key": "service.image.upgrade|service:payad001:child_service_type=mysql",
   "targets": [
     {
       "kind": "service",
-      "id": "mysql-xf2",
-      "name": "mysql-xf2",
+      "id": "payad001",
+      "name": "payad001",
       "qualifiers": {
         "child_service_type": "mysql"
       }
@@ -2017,12 +2017,12 @@ data: {
       "items": [
         {
           "action": "service.resource.update",
-          "summary": "将 mysql-xf2/mysql 内存调整为 15GB",
+          "summary": "将 payad001/mysql 内存调整为 15GB",
           "targets": [
             {
               "kind": "service",
-              "id": "mysql-xf2",
-              "name": "mysql-xf2",
+              "id": "payad001",
+              "name": "payad001",
               "qualifiers": {
                 "child_service_type": "mysql"
               }
@@ -2030,7 +2030,7 @@ data: {
           ],
           "parameters": [
             {
-              "key": "memory",
+              "key": "memory_gb",
               "label": "内存",
               "value": 15,
               "unit": "GB"
@@ -2373,19 +2373,19 @@ POST /api/v1/sessions/{session_id}/approvals/{approval_id}/decision
 
 ```text
 运行中
-- 镜像升级 mysql-xf2/mysql
+- 镜像升级 payad001/mysql
   状态：running
   task_id：task-0001
   最近更新：10:05:12
   信息：image upgrade running
 
 已完成
-- 镜像升级 mysql-xf2/mysql
+- 镜像升级 payad001/mysql
   状态：succeeded
   完成时间：10:08:30
 
 失败
-- 重启 mysql-xf2/mysql
+- 重启 payad001/mysql
   状态：failed
   原因：DBAAS 返回 xxx
 ```
@@ -2596,11 +2596,11 @@ details
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "platform_auto": null,
   "cpu": 16,
-  "memory": 64
+  "memory_gb": 64
 }
 ```
 
@@ -2626,11 +2626,11 @@ PUT /services/{name}/resource
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "platform_auto": null,
-  "data_volume_size": 500,
-  "log_volume_size": 200
+  "data_volume_size_gb": 500,
+  "log_volume_size_gb": 200
 }
 ```
 
@@ -2656,11 +2656,11 @@ PUT /services/{name}/storage
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "image": "mysql:8.0.37",
   "version": "8.0.37",
-  "unit_ids": null
+  "unit_names": null
 }
 ```
 
@@ -2750,7 +2750,7 @@ GET /tasks/{task_id}
 
 ```json
 {
-  "service_name": "mysql-xf2",
+  "service_name": "payad001",
   "child_service_type": "mysql",
   "action": "restart",
   "unit_ids": null

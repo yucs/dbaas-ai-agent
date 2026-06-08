@@ -93,8 +93,8 @@ capability 可以返回轻量 `runtimeHints`，用于提示当前目标是否已
 
 ```text
 GET /backup-task-capabilities?serviceType=mysql
-GET /backup-task-capabilities?serviceName=mysql-xf2
-GET /backup-task-capabilities?unitName=mysql-primary-01
+GET /backup-task-capabilities?serviceName=payad001
+GET /backup-task-capabilities?unitName=aaa8ee1f_payad001
 ```
 
 字段含义：
@@ -123,7 +123,7 @@ GET /backup-task-capabilities?unitName=mysql-primary-01
   "serviceType": "mysql",
   "supported": true,
   "resolvedTarget": {
-    "serviceName": "mysql-xf2",
+    "serviceName": "payad001",
     "scope": "service",
     "unitName": null
   },
@@ -192,7 +192,7 @@ GET /backup-task-capabilities?unitName=mysql-primary-01
       {
         "taskId": "task-001",
         "scope": "service",
-        "serviceName": "mysql-xf2",
+        "serviceName": "payad001",
         "childServiceName": null,
         "childServiceType": null,
         "unitName": null,
@@ -277,7 +277,7 @@ DBAAS 拒绝创建时，ai-agent 应将 operation 记录为 `failed`，不创建
 ```json
 {
   "errorType": "backup_task_not_allowed",
-  "message": "服务 mysql-xf2 已有备份任务 task-001 正在运行。",
+  "message": "服务 payad001 已有备份任务 task-001 正在运行。",
   "details": {
     "taskId": "task-001",
     "reason": "backup_task_running"
@@ -294,7 +294,7 @@ DBAAS 拒绝创建时，ai-agent 应将 operation 记录为 `failed`，不创建
 请求示例：
 
 ```text
-POST /services/mysql-xf2/backup
+POST /services/payad001/backup
 ```
 
 ```json
@@ -320,13 +320,13 @@ POST /services/mysql-xf2/backup
 请求示例：
 
 ```text
-POST /services/mysql-xf2/backup
+POST /services/payad001/backup
 ```
 
 ```json
 {
   "scope": "unit",
-  "unitName": "mysql-primary-01",
+  "unitName": "aaa8ee1f_payad001",
   "backupType": "full",
   "retentionDays": 7,
   "options": {},
@@ -460,8 +460,8 @@ user
 ```text
 操作：发起备份
 范围：整个服务 / 指定单元
-服务：mysql-xf2
-单元：mysql-primary-01
+服务：payad001
+单元：aaa8ee1f_payad001
 备份类型：full
 保留天数：7 天
 参数：compressMode=gzip
@@ -494,10 +494,10 @@ DBAAS `POST /services/{serviceName}/backup` 返回：
   {
     "backup_id": "backup-001",
     "task_id": "task-xxx",
-    "service_name": "mysql-xf2",
+    "service_name": "payad001",
     "child_service_name": "mysql-primary",
     "child_service_type": "mysql",
-    "unit_name": "mysql-primary-01",
+    "unit_name": "aaa8ee1f_payad001",
     "backup_type": "full",
     "finished_at": null,
     "expires_at": null,
@@ -515,10 +515,10 @@ DBAAS `POST /services/{serviceName}/backup` 返回：
   {
     "backup_id": "backup-001",
     "task_id": "task-xxx",
-    "service_name": "mysql-xf2",
+    "service_name": "payad001",
     "child_service_name": "mysql-primary",
     "child_service_type": "mysql",
-    "unit_name": "mysql-primary-01",
+    "unit_name": "aaa8ee1f_payad001",
     "backup_type": "full",
     "expires_at": "2026-06-11 10:00:00",
     "task_status": "succeeded",
@@ -527,10 +527,10 @@ DBAAS `POST /services/{serviceName}/backup` 返回：
   {
     "backup_id": "backup-002",
     "task_id": "task-xxx",
-    "service_name": "mysql-xf2",
+    "service_name": "payad001",
     "child_service_name": "mysql-replica",
     "child_service_type": "mysql",
-    "unit_name": "mysql-replica-01",
+    "unit_name": "6adbd13b_payad001",
     "backup_type": "full",
     "expires_at": "2026-06-11 10:00:00",
     "task_status": "succeeded",
