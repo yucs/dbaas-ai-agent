@@ -53,6 +53,8 @@ streaming、checkpoint、上下文压缩等能力，都优先围绕 DeepAgent �
   - 当前页面与后端之间的接口契约
 - [FRONTEND.md](./FRONTEND.md)
   - 前端页面需求、交互规则和当前展示边界
+- [FUTURE.md](./FUTURE.md)
+  - 已讨论但短期不实现的长期设计备忘，不占用 Phase 编号
 - [PHASE1.md](./PHASE1.md)
   - 本地登录、多用户、多 Session、Session 文件投影和前端基座
 - [PHASE2.md](./PHASE2.md)
