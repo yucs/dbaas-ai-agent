@@ -95,8 +95,8 @@ def main() -> None:
     clusters = build_clusters(sites)
     hosts = build_hosts(sites, clusters)
     services = build_services(sites, clusters, hosts)
-    backups = build_backups(services)
     public_services = public_service_seed_data(services, sites, hosts)
+    backups = build_backups(public_services)
 
     write_json(DATA_DIR / "sites.json", sites)
     write_json(DATA_DIR / "clusters.json", clusters)
@@ -1173,8 +1173,8 @@ def build_mysql_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     """Build curated MySQL backups used by real-agent backup questions."""
 
     targets = build_backup_targets(service)
-    mysql_primary = select_backup_target(targets, child_service_type="mysql", role="primary")
-    mysql_replica = select_backup_target(targets, child_service_type="mysql", role="replica")
+    mysql_primary = select_backup_target(targets, child_service_type="mysql", occurrence=1)
+    mysql_replica = select_backup_target(targets, child_service_type="mysql", occurrence=2)
     return [
         make_backup_record(
             service=service,
@@ -1414,7 +1414,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
     """Build curated Redis backups with mixed statuses."""
 
     targets = build_backup_targets(service)
-    redis_primary = select_backup_target(targets, child_service_type="redis", role="primary")
+    redis_primary = select_backup_target(targets, child_service_type="redis", occurrence=1)
     return [
         make_backup_record(
             service=service,
@@ -1435,7 +1435,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=select_backup_target(targets, child_service_type="redis", role="replica", occurrence=1),
+            target=select_backup_target(targets, child_service_type="redis", occurrence=2),
             backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-002",
             backup_type="snapshot",
             started_at=datetime(2026, 5, 29, 1, 20, 0),
@@ -1452,7 +1452,7 @@ def build_redis_anchor_backups(service: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         make_backup_record(
             service=service,
-            target=select_backup_target(targets, child_service_type="redis", role="replica", occurrence=2),
+            target=select_backup_target(targets, child_service_type="redis", occurrence=3),
             backup_id=f"backup-{REDIS_ANCHOR_SERVICE_NAME}-003",
             backup_type="full",
             started_at=datetime(2026, 5, 22, 0, 30, 0),
@@ -1595,33 +1595,34 @@ def build_backup_targets(service: dict[str, Any]) -> list[dict[str, str]]:
 
     preferred_types = backup_capable_child_types(service["type"])
     targets: list[dict[str, str]] = []
-    for child_service in service["services"]:
+    child_services = service.get("childServices") or service.get("services") or []
+    for child_service in child_services:
         child_type = child_service["type"]
         if preferred_types and child_type not in preferred_types:
             continue
         for unit_index, unit in enumerate(child_service["units"], start=1):
             targets.append(
                 {
-                    "child_service_name": derive_child_service_name(child_type, unit["name"], unit_index),
+                    "child_service_name": child_service.get("name")
+                    or derive_child_service_name(child_type, unit["name"], unit_index),
                     "child_service_type": child_type,
-                    "unit_id": unit["id"],
                     "unit_name": unit["name"],
-                    "role": unit["role"],
+                    "role": unit.get("role"),
                 }
             )
 
     if targets:
         return targets
 
-    first_child = service["services"][0]
+    first_child = child_services[0]
     first_unit = first_child["units"][0]
     return [
         {
-            "child_service_name": derive_child_service_name(first_child["type"], first_unit["name"], 1),
+            "child_service_name": first_child.get("name")
+            or derive_child_service_name(first_child["type"], first_unit["name"], 1),
             "child_service_type": first_child["type"],
-            "unit_id": first_unit["id"],
             "unit_name": first_unit["name"],
-            "role": first_unit["role"],
+            "role": first_unit.get("role"),
         }
     ]
 

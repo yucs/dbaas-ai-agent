@@ -4,8 +4,8 @@ __pycache__/
 *.py[cod]
 data/
 !mock-server/data/
-!mock-server/data/backups.json
 ai-agent/data/
 ai-agent/backend/.venv/
 ai-agent/.env
 ai-agent/config.toml
+/mock-server/data/backups.json
