@@ -19,14 +19,18 @@ def build_metric_tools(settings: Settings, require_identity: Callable[[], Identi
 
     @tool("describe_unit_metric_catalog_tool")
     def describe_unit_metric_catalog_tool(
-        query: str,
-        service_type: str | None = None,
-        limit: int | None = 10,
+        service_type: str,
+        query: str | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
-        """按关键词、服务类型或 metric_key 搜索 DBAAS 单元监控项 catalog。
+        """按服务类型列出或搜索 DBAAS 单元监控项 catalog。
 
         监控查询必须先通过该工具定位 metric_key、value_type、unit、枚举语义和 latest/history 数据结构。
-        不要猜测 metric_key、监控值类型或异常枚举含义。
+        不要猜测 metric_key、监控值类型或异常枚举含义。service_type 必填；query 为空时列出该
+        service_type 下可用的监控指标，query 非空时按关键词或 metric_key 搜索。
+        service_type=container 表示所有单元通用的容器级指标；用户询问 mysql/redis 等服务的 CPU、
+        内存、磁盘、网络资源时，应接受返回结果中的 container 指标，并在监控数据 jq 中按
+        item.service_type 过滤目标服务类型。
         """
 
         require_identity()

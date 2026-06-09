@@ -29,7 +29,6 @@ class MetricCatalogEntry:
             "service_type": self.service_type,
             "value_type": self.value_type,
             "unit": self.unit,
-            "aliases": list(self.aliases),
         }
         if self.description:
             payload["description"] = self.description
