@@ -297,6 +297,9 @@ metric 查询 tool 使用唯一 `metric_key`，
 - `service_type`
   - 适用服务类型或监控域，例如 `container`、`host`、`mysql`、`redis`
   - 一个 `metric_key` 只归属一个 `service_type`
+  - `container` 是所有 DBAAS 单元通用的容器级监控指标域，不表示只适用于名为 container 的业务服务
+  - `host` 是主机级监控指标域，不等同于单元所属业务服务类型
+  - `mysql`、`redis` 等是实例或组件级监控指标域
 - `value_type`
   - 监控值类型
 - `unit`
@@ -330,6 +333,53 @@ metric 查询 tool 使用唯一 `metric_key`，
 
 也就是说，当前不在 catalog 条目中单独维护 `supports_latest` 或 `supports_history`，
 避免模型误以为某个指标只能用于其中一种查询。
+
+### 6.1 service_type 语义
+
+Catalog 条目的 `service_type` 表示监控项所属的指标域，
+不一定等于监控数据记录中的业务服务类型。
+
+其中：
+
+- `container`
+  - 所有 DBAAS 单元通用的容器级监控指标域
+  - CPU、内存、磁盘、网络等资源指标通常属于该域
+  - 用户问 “mysql CPU 超过 80 的单元” 或 “redis 内存使用率” 时，
+    catalog 可以返回 `service_type=container` 的通用单元指标
+  - 查询 latest 数据后，再在 jq 中用数据项的 `.service_type` 过滤真实业务服务类型
+- `host`
+  - 主机级监控指标域
+  - 不等同于单元所属业务服务类型
+- `mysql`、`redis` 等
+  - 实例或组件级监控指标域
+  - 适合运行状态、复制状态、连接数、buffer pool 等组件语义
+
+例如用户问：
+
+```text
+mysql CPU 超过 80 的单元有哪些？
+```
+
+Catalog 可能返回：
+
+```json
+{
+  "metric_key": "container.docker.cpu.avg_usage",
+  "display_name": "CPU使用率",
+  "service_type": "container",
+  "value_type": "number",
+  "unit": "%"
+}
+```
+
+此时模型不应因为 catalog item 的 `service_type=container`
+就认为该指标不能用于 mysql 单元。
+正确做法是使用该通用指标查询 latest 数据，
+再生成 jq 过滤数据项中的业务服务类型：
+
+```jq
+[.[] | select(.service_type == "mysql" and (.value | type) == "number" and .value > 80)]
+```
 
 ## 7. Value Type
 
@@ -600,6 +650,7 @@ describe_unit_metric_catalog_tool(
   - 可选，例如 `container`、`host`、`mysql`、`redis`
   - 如果用户问题明确包含服务类型或监控域，应传入该字段
   - 如果用户问题不明确，可以不传，让 catalog 返回候选
+  - 当传入 `mysql`、`redis` 等业务服务类型时，工具仍可返回 `container` 通用单元指标，用于 CPU、内存、磁盘、网络等资源查询
 - `limit`
   - 可选，限制返回候选数量，避免返回过多 catalog 条目
 
@@ -665,6 +716,10 @@ Catalog 搜索当前使用简单打分规则，
 如果传入 `service_type`，
 应优先返回 `service_type` 等于该值的条目。
 不匹配的服务类型可以过滤掉。
+例外是 `service_type=container` 的通用单元指标：
+即使用户传入的是 `mysql`、`redis` 等业务服务类型，
+这些通用指标也可以作为候选返回。
+模型应根据工具返回的 `catalog_semantics` 判断该语义。
 
 对于可能在多个服务类型中重复出现的监控项语义，
 例如运行时状态、复制状态、健康状态等，
