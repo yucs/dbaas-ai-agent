@@ -105,7 +105,9 @@ class MetricCatalogTests(unittest.TestCase):
         item = items_by_key[MYSQL_REPLICATION_STATUS_METRIC_KEY]
         self.assertEqual(item["service_type"], "mysql")
         self.assertEqual(item["value_type"], "enum")
-        self.assertEqual(item["normal_values"], ["passing"])
+        self.assertEqual(item["enum_values"], ["passing", "warning", "critical", "unknown"])
+        self.assertNotIn("normal_values", item)
+        self.assertNotIn("abnormal_values", item)
 
     def test_catalog_search_matches_normalized_product_terms(self) -> None:
         result = describe_unit_metric_catalog("Redis 内存使用率", service_type="redis", app_root=APP_ROOT)

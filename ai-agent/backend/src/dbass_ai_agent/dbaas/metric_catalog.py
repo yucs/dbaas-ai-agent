@@ -207,8 +207,6 @@ def _entry_from_raw(raw: Any, index: int) -> MetricCatalogEntry:
         aliases=tuple(aliases),
         description=_optional_string(raw, "description", index),
         enum_values=tuple(enum_values),
-        normal_values=tuple(_string_list(raw, "normal_values", index, required=False)),
-        abnormal_values=tuple(_string_list(raw, "abnormal_values", index, required=False)),
     )
 
 
@@ -264,8 +262,7 @@ def _score_entry(entry: MetricCatalogEntry, query: str, *, service_type: str | N
         return 60
     if _all_query_terms_match(entry, query_cf):
         return 45
-    enum_terms = [*entry.enum_values, *entry.normal_values, *entry.abnormal_values]
-    if any(query_cf in term.casefold() for term in enum_terms):
+    if any(query_cf in term.casefold() for term in entry.enum_values):
         return 40
     return 0
 
@@ -300,8 +297,6 @@ def _all_query_terms_match(entry: MetricCatalogEntry, query_cf: str) -> bool:
             *(entry.aliases),
             entry.description or "",
             *(entry.enum_values),
-            *(entry.normal_values),
-            *(entry.abnormal_values),
         ]
     ).casefold()
     return all(term in searchable for term in terms)

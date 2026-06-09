@@ -19,8 +19,6 @@ class MetricCatalogEntry:
     aliases: tuple[str, ...]
     description: str | None = None
     enum_values: tuple[str, ...] = ()
-    normal_values: tuple[str, ...] = ()
-    abnormal_values: tuple[str, ...] = ()
 
     def compact(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -34,10 +32,6 @@ class MetricCatalogEntry:
             payload["description"] = self.description
         if self.enum_values:
             payload["enum_values"] = list(self.enum_values)
-        if self.normal_values:
-            payload["normal_values"] = list(self.normal_values)
-        if self.abnormal_values:
-            payload["abnormal_values"] = list(self.abnormal_values)
         return payload
 
 
