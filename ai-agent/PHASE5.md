@@ -3,7 +3,7 @@
 ## 0. 当前状态
 
 - 状态：已实现第一版，后续扩展未做
-- 当前代码状态：services 快照、admin/user 身份隔离、schema 校验、后台同步、普通用户 prewarm/lease 和受控 jq 查询工具已落地
+- 当前代码状态：services 快照、admin/user 身份隔离、LLM schema 描述、后台同步、普通用户 prewarm/lease 和受控 jq 查询工具已落地
 - 本文档作用：说明 DBAAS services 快照机制、身份隔离、schema 和 `query_dbaas_service_data_tool` 的设计与实现边界
 - 仍有效内容：原始 DBAAS 数据不直接进模型上下文，查询走当前身份快照和 jq，普通用户不能 fallback 到 admin 快照，过期快照不能用于回答
 - 后续关注：hosts、clusters、realtime_status 等 kind 仍是后续扩展；services 与 metric jq 公共抽象可在稳定后再做
@@ -197,7 +197,7 @@ admin 和普通用户应复用同一套 services snapshot refresh 状态机。
 - 如果当前没有 fresh 快照，或旧快照已经 stale，
   删除旧 `services.json`，写入 `status: "error"` 的 `services.meta.json`，
   其中 `data_path` 必须为 `null`，`last_refresh_status` 为 `error`，
-  `last_error` 记录本次 DBAAS 请求或 schema 校验失败原因。
+  `last_error` 记录本次 DBAAS 请求失败原因。
 - 会话关闭、lease 过期或用户不活跃属于正常回收，
   直接删除普通用户的 `services.json` 和 `services.meta.json`，
   不写 `status: "error"` 的 meta。
@@ -455,10 +455,10 @@ data/runtime/dbaas_workspace/admin/.services.json.3zrmm9ds.tmp
 query_dbaas_service_data_tool(jq_filter, max_preview_items)
 ```
 
-`jq_filter` 可以由大模型根据用户问题和 schema 摘要生成。
+`jq_filter` 可以由大模型根据用户问题和完整 schema 内容生成。
 
 每个 session 首次查询某一类 DBAAS 数据前，
-必须先调用 `describe_dbaas_schema_tool(kind=...)` 获取该 kind 的结构定义，
+必须先调用 `describe_dbaas_schema_tool(kind=...)` 获取该 kind 的完整结构定义，
 再生成 `jq_filter`。
 
 同一 session 中，如果已经针对相同 kind 调用过 schema 工具，
@@ -698,18 +698,19 @@ mock-server / 真实 DBAAS 在普通用户身份下返回的 `/services`
 
 `services.json` 的结构体定义不建议只写在 tool 描述里。
 
-更推荐将结构定义放在独立 JSON Schema 文件中，
-tool 描述只保留简短摘要和 schema 引用。
+更推荐将结构定义放在独立 schema 文件中。
+schema 文件面向大模型理解 jq 字段路径，不再作为严格 JSON Schema 校验契约。
+tool 描述只保留简短行为说明，字段结构由 `describe_dbaas_schema_tool` 完整返回。
 
 快照 schema 由本项目维护，
-作为随代码提交、测试和版本管理的静态契约。
+作为随代码提交、测试和版本管理的静态 LLM 字段契约。
 
 不建议每次 tool 调用时从 `dbaas-mock-server` 动态获取 schema。
 `dbaas-mock-server` 只提供业务数据；
 本项目负责维护 DBAAS 数据 schema。
-`dbaas-mock-server` 返回的数据必须直接符合当前身份对应的 schema。
-后台同步逻辑只做 schema 校验，不做随意字段映射或结构规整；
-如果校验失败，则本次同步失败，不覆盖旧快照。
+`dbaas-mock-server` 返回的数据应尽量直接符合当前身份对应的 schema。
+后台同步逻辑不再做严格 schema 校验，也不做随意字段映射或结构规整；
+schema 主要用于让模型知道字段含义、枚举值和嵌套路径。
 
 建议分层：
 
@@ -736,7 +737,7 @@ tool 描述
 - `services.user.v1.schema.json`
   - 普通用户 services 结构定义和字段说明；它是 admin schema 的安全字段投影，只包含普通用户可见字段
 - tool 描述
-  - 只写常用字段、查询约定和 schema 引用
+  - 只写查询约定；字段结构通过 schema tool 完整返回
 
 管理员 `services.meta.json` 可以增加：
 
@@ -764,7 +765,7 @@ tool 描述
 }
 ```
 
-字段描述建议使用 JSON Schema 的 `description` 字段。
+字段描述建议使用 schema 的 `description` 字段。
 
 稳定快照结构里的字段建议都保留一句描述，
 但明显字段可以写得很短。
@@ -775,8 +776,8 @@ tool 描述
   - 例如 array schema、服务组对象、嵌套对象的 description
 - 业务含义不完全显然的字段必须写描述
   - 例如 `status`、`role`、`resource_status`、`health_score`
-- 涉及单位的字段必须写清楚单位
-  - 例如 `cpu`、`memoryGB`、`storage.data.sizeGB`、`storage.log.sizeGB`
+- 字段名已包含单位时，description 不重复写单位
+  - 例如 `memoryGB`、`storage.data.sizeGB`、`storage.log.sizeGB`
 - ID 和名称类字段可以使用短描述
   - 例如 `name` 写成“服务组名称。”
 - 普通用户 schema 不应包含普通用户不可见字段
@@ -787,19 +788,18 @@ tool 描述
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "services.user.v1",
   "title": "ServicesUserV1",
   "description": "DBAAS 普通用户服务列表快照。该 schema 是管理员 services schema 的安全字段投影，只包含普通用户可见字段。",
   "type": "array",
   "items": {
-    "$ref": "#/$defs/ServiceDetailResponse"
-  },
-  "$defs": {
-    "ServiceDetailResponse": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "GET /services/{name} 的响应模型；GET /services 返回该对象数组。"
+    "type": "object",
+    "description": "服务组详情。",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "服务组名称"
+      }
     }
   }
 }
@@ -811,8 +811,8 @@ tool 描述
 describe_dbaas_schema_tool(kind="services")
 ```
 
-它只返回 schema 字段说明摘要，
-用于回答“这个字段是什么意思”之类的问题，
+它返回当前身份可见的完整 schema 内容，
+用于确认字段含义、嵌套结构、枚举值和 jq 查询路径，
 不读取完整业务快照数据。
 该工具不接受 `role` 参数；
 它应根据后端 session / request identity 自动选择 `services.admin.v1` 或 `services.user.v1`。
@@ -877,7 +877,7 @@ config/schemas/
 - `dbaas/snapshot_meta.py`
   - 快照元数据时间、过期判断和 meta 读取等公共 helper
 - `dbaas/schema.py`
-  - 根据身份加载 admin/user JSON Schema、校验 dbaas-server 响应、生成 schema 字段说明摘要
+  - 根据身份加载 admin/user schema，并向 schema tool 返回完整 schema 内容
 - `dbaas/service_sync.py`
   - 调用 `dbaas-server` HTTP 接口、刷新 admin 全量快照、刷新普通用户可见快照、临时文件写入、过期文件删除、原子替换发布
 - `dbaas/service_query.py`

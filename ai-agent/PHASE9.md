@@ -34,7 +34,7 @@ Phase9 第一版实现 DBAAS 备份文件查询能力。
 
 - 按当前身份查询 DBAAS 当前可见的备份文件列表
 - 将备份列表原样落盘为本地快照
-- 使用统一 backups JSON Schema 描述查询字段
+- 使用统一 backups schema 描述查询字段
 - 使用 jq 查询本地备份快照
 - 支持模型在用户明确要求最新数据时强制刷新备份快照
 - 明确备份字段、枚举值和时间格式，避免模型猜测字段含义
@@ -390,13 +390,13 @@ backups.v1
 
 第一版 schema 目标：
 
-- 面向大模型描述 backups 查询字段、类型、枚举和 nullable 规则
-- 本文定义的字段固定存在；未知或不适用时使用 `null`，不要省略字段
+- 面向大模型描述 backups 查询字段、类型、枚举和时间格式
+- 本文定义的字段固定存在；未知或不适用时可以返回 `null`，不要省略字段
 - 描述 `backup_type`、`storage_type`、`compress_mode`、`task_status`、`valid_status` 等枚举
 - `task_status` 必须是非空字符串枚举，不允许为 `null`
-- `started_at`、`finished_at`、`expires_at` 类型为字符串或 `null`
-- `size_bytes` 和 `duration_seconds` 为数字或允许的 `null`
-- 第一版允许额外字段，不使用 `additionalProperties=false` 卡死 DBAAS 对接
+- `started_at`、`finished_at`、`expires_at` 使用字符串时间格式；未知或未完成时业务数据可以为 `null`
+- `size_bytes` 和 `duration_seconds` 使用数值字段；未知或未完成时业务数据可以为 `null`
+- schema 文件不使用 `additionalProperties` 卡死 DBAAS 对接
 - 第一版不做跨字段强约束，不校验时间正则、不校验 `duration_seconds` 和时间差一致
 - 第一版不把严格 schema 校验作为落盘前置条件，避免 DBAAS 临时新增字段或枚举导致备份列表不可查询
 
@@ -428,7 +428,7 @@ remark
 `finished_at`、`expires_at`、`duration_seconds`、`task_error`、`valid_status`、`remark` 等字段可按业务状态返回 `null`。
 
 ai-agent 仍不做业务转换。
-schema 主要用于让模型知道字段含义、枚举值和 nullable 规则，帮助稳定生成 jq。
+schema 主要用于让模型知道字段含义、枚举值、嵌套结构和时间格式，帮助稳定生成 jq。
 
 刷新落盘前只做轻量结构检查：
 
@@ -440,13 +440,13 @@ schema 主要用于让模型知道字段含义、枚举值和 nullable 规则，
 枚举、时间格式、nullable 细节或额外字段不应导致落盘失败。
 
 模型不会直接读取 schema 文件。
-ai-agent 应通过现有 schema 描述工具向模型暴露 backups schema 摘要：
+ai-agent 应通过现有 schema 描述工具向模型暴露 backups 完整 schema 内容：
 
 ```text
 describe_dbaas_schema_tool(kind="backups")
 ```
 
-模型在生成 backups jq 前，应先调用该工具确认字段名、枚举值、nullable 字段和时间格式。
+模型在生成 backups jq 前，应先调用该工具确认字段名、枚举值、嵌套结构和时间格式。
 同一 session 中如果已获取相同 schema version，可以复用已有 schema 上下文。
 
 ## 8. Refresh 策略
@@ -630,7 +630,7 @@ create_service_backup_task_tool(...)
 
 模型查询备份时应遵守：
 
-- 生成 jq 前先调用 `describe_dbaas_schema_tool(kind="backups")`，确认字段名、枚举值和 nullable 规则
+- 生成 jq 前先调用 `describe_dbaas_schema_tool(kind="backups")`，确认字段名、枚举值、嵌套结构和时间格式
 - 使用结构化字段过滤，不要从路径字符串推断服务、时间、类型或存储类型
 - 服务级问题应先按 `service_name` 过滤
 - 子服务或分片问题应结合 `child_service_name` 和 `child_service_type`
@@ -672,6 +672,7 @@ GET /backups
 - 不要求返回 `backup_path`
 
 ai-agent 第一版使用统一 `backups.v1` schema 向模型描述字段。
+该 schema 面向大模型生成 jq，不作为严格 JSON Schema 校验契约；
 落盘前只做轻量 JSON 结构检查，不做严格 schema 校验。
 
 ## 14. 后续阶段

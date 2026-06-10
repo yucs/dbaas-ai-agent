@@ -1,120 +1,143 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "backups.v1",
   "title": "BackupsV1",
-  "description": "DBAAS 备份列表快照。顶层为备份记录数组，字段用于大模型生成 jq 查询，不作为严格落盘校验前置条件。",
+  "description": "DBAAS 备份列表快照。顶层为备份记录数组。",
   "type": "array",
   "items": {
-    "$ref": "#/$defs/BackupRecord"
-  },
-  "$defs": {
-    "BackupRecord": {
-      "type": "object",
-      "description": "单条备份记录。",
-      "required": [
-        "backup_id",
-        "task_id",
-        "service_name",
-        "service_type",
-        "child_service_name",
-        "child_service_type",
-        "unit_name",
-        "backup_type",
-        "size_bytes",
-        "storage_type",
-        "compress_mode",
-        "started_at",
-        "finished_at",
-        "expires_at",
-        "duration_seconds",
-        "task_status",
-        "task_error",
-        "valid_status",
-        "remark"
-      ],
-      "additionalProperties": true,
-      "properties": {
-        "backup_id": {
-          "type": "string",
-          "description": "单个备份文件唯一 ID"
-        },
-        "task_id": {
-          "type": "string",
-          "description": "产生该备份记录的 DBAAS 任务 ID"
-        },
-        "service_name": {
-          "type": "string",
-          "description": "服务组名称"
-        },
-        "service_type": {
-          "type": "string",
-          "description": "服务组类型"
-        },
-        "child_service_name": {
-          "type": "string",
-          "description": "子服务名称"
-        },
-        "child_service_type": {
-          "type": "string",
-          "description": "子服务类型，例如 mysql、tidb、tikv"
-        },
-        "unit_name": {
-          "type": "string",
-          "description": "备份所属或执行的单元名称"
-        },
-        "backup_type": {
-          "type": "string",
-          "enum": ["full", "incremental", "ddl", "snapshot", "rdb", "table", "encrypt"],
-          "description": "备份类型枚举"
-        },
-        "size_bytes": {
-          "type": "integer",
-          "description": "备份文件大小，单位 byte"
-        },
-        "storage_type": {
-          "type": ["string", "null"],
-          "enum": ["NAS", "S3", null],
-          "description": "存储类型枚举"
-        },
-        "compress_mode": {
-          "type": ["string", "null"],
-          "enum": ["none", "gzip", "zstd", null],
-          "description": "压缩模式枚举"
-        },
-        "started_at": {
-          "type": ["string", "null"],
-          "description": "备份开始时间，格式 YYYY-MM-DD HH:mm:ss"
-        },
-        "finished_at": {
-          "type": ["string", "null"],
-          "description": "备份结束时间，未完成时为 null"
-        },
-        "expires_at": {
-          "type": ["string", "null"],
-          "description": "备份过期时间，未设置过期时间时为 null"
-        },
-        "duration_seconds": {
-          "type": ["integer", "null"],
-          "description": "备份耗时，单位秒，未完成时为 null"
-        },
-        "task_status": {
-          "type": "string",
-          "enum": ["created", "running", "stopped", "canceled", "succeeded", "timed_out", "failed", "unknown"],
-          "description": "备份任务状态枚举"
-        },
-        "task_error": {
-          "type": ["string", "null"],
-          "description": "任务错误信息，没有错误时为 null"
-        },
-        "valid_status": {
-          "type": ["string", "null"],
-          "enum": ["unchecked", "checking", "valid", "invalid", "unknown", null],
-          "description": "备份有效性校验状态"
-        },
-        "remark": {
-          "type": ["string", "null"],
-          "description": "备注"
-        }
+    "type": "object",
+    "description": "单条备份记录。",
+    "required": [
+      "backup_id",
+      "task_id",
+      "service_name",
+      "service_type",
+      "child_service_name",
+      "child_service_type",
+      "unit_name",
+      "backup_type",
+      "size_bytes",
+      "storage_type",
+      "compress_mode",
+      "started_at",
+      "finished_at",
+      "expires_at",
+      "duration_seconds",
+      "task_status",
+      "task_error",
+      "valid_status",
+      "remark"
+    ],
+    "properties": {
+      "backup_id": {
+        "type": "string",
+        "description": "单个备份文件唯一 ID"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "产生该备份记录的 DBAAS 任务 ID"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "服务组名称"
+      },
+      "service_type": {
+        "type": "string",
+        "description": "服务组类型"
+      },
+      "child_service_name": {
+        "type": "string",
+        "description": "子服务名称"
+      },
+      "child_service_type": {
+        "type": "string",
+        "description": "子服务类型"
+      },
+      "unit_name": {
+        "type": "string",
+        "description": "备份所属或执行的单元名称"
+      },
+      "backup_type": {
+        "type": "string",
+        "enum": [
+          "full",
+          "incremental",
+          "ddl",
+          "snapshot",
+          "rdb",
+          "table",
+          "encrypt"
+        ],
+        "description": "备份类型"
+      },
+      "size_bytes": {
+        "type": "integer",
+        "description": "备份文件大小"
+      },
+      "storage_type": {
+        "type": "string",
+        "enum": [
+          "NAS",
+          "S3"
+        ],
+        "description": "存储类型"
+      },
+      "compress_mode": {
+        "type": "string",
+        "enum": [
+          "none",
+          "gzip",
+          "zstd"
+        ],
+        "description": "压缩模式"
+      },
+      "started_at": {
+        "type": "string",
+        "description": "备份开始时间，格式 YYYY-MM-DD HH:mm:ss"
+      },
+      "finished_at": {
+        "type": "string",
+        "description": "备份结束时间"
+      },
+      "expires_at": {
+        "type": "string",
+        "description": "备份过期时间"
+      },
+      "duration_seconds": {
+        "type": "integer",
+        "description": "备份耗时"
+      },
+      "task_status": {
+        "type": "string",
+        "enum": [
+          "created",
+          "running",
+          "stopped",
+          "canceled",
+          "succeeded",
+          "timed_out",
+          "failed",
+          "unknown"
+        ],
+        "description": "备份任务状态"
+      },
+      "task_error": {
+        "type": "string",
+        "description": "任务错误信息"
+      },
+      "valid_status": {
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "checking",
+          "valid",
+          "invalid",
+          "unknown"
+        ],
+        "description": "备份有效性校验状态"
+      },
+      "remark": {
+        "type": "string",
+        "description": "备注"
       }
     }
   }

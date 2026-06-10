@@ -14,7 +14,7 @@ from dbass_ai_agent.identity.models import Identity
 from .auth import dbaas_identity_headers, dbaas_system_headers, dbaas_user_headers
 from .config import DbaasConfig
 from .constants import ADMIN_SCOPE, SERVICES_ENDPOINT, SERVICES_KIND, USER_SCOPE
-from .schema import DbaasSchemaError, schema_path, schema_version, validate_payload
+from .schema import schema_path, schema_version
 from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import (
     DbaasSnapshotPaths,
@@ -100,11 +100,6 @@ class DbaasServiceSynchronizer:
         identity: Identity | None = None,
     ) -> dict[str, Any]:
         payload = self._fetch_services(paths, identity=identity)
-        try:
-            validate_payload(SERVICES_KIND, payload, app_root=self.app_root, scope=paths.scope)
-        except DbaasSchemaError:
-            logger.exception("dbaas services schema validation failed scope=%s user=%s", paths.scope, paths.user)
-            raise
 
         now = utcnow()
         record_count = len(payload) if isinstance(payload, list) else 0

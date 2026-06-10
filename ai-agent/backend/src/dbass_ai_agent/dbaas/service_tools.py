@@ -39,10 +39,10 @@ def build_service_tools(settings: Settings, require_identity: Callable[[], Ident
 
     @tool("describe_dbaas_schema_tool")
     def describe_dbaas_schema_tool(kind: str = SERVICES_KIND) -> dict[str, Any]:
-        """返回 DBAAS schema 字段说明。
+        """返回 DBAAS schema 完整内容。
 
         当前支持 kind=services 和 kind=backups。
-        用于确认 DBAAS 字段含义、可用字段和 jq 查询路径。
+        用于确认 DBAAS 字段含义、可用字段、嵌套结构和 jq 查询路径。
         """
 
         return describe_schema(kind, app_root=APP_ROOT, identity=require_identity())

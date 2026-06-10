@@ -1,275 +1,279 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "services.user.v1",
   "title": "ServicesUserV1",
   "description": "DBAAS 普通用户服务列表快照。该 schema 是管理员 services schema 的安全字段投影，只包含普通用户可见字段。",
   "type": "array",
   "items": {
-    "$ref": "#/$defs/ServiceDetailResponse"
-  },
-  "$defs": {
-    "BackupStrategySummary": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "服务组对应的备份策略摘要。",
-      "required": ["enabled"],
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "是否启用备份"
-        },
-        "type": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "备份类型"
-        },
-        "cronExpression": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "备份 cron 表达式"
-        },
-        "retention": {
-          "type": ["integer", "null"],
-          "default": null,
-          "description": "备份保留天数"
-        },
-        "compressMode": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "压缩模式"
-        },
-        "sendAlarm": {
-          "type": ["boolean", "null"],
-          "default": null,
-          "description": "是否发送告警"
-        }
-      }
-    },
-    "ChildService": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "服务组中的子服务信息。",
-      "required": ["name", "type", "runningStatus"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "子服务名称"
-        },
-        "type": {
-          "type": "string",
-          "description": "子服务类型，例如 mysql、proxy"
-        },
-        "version": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "子服务基线版本，通常为三段版本，例如 2.7.7"
-        },
-        "port": {
-          "type": ["integer", "null"],
-          "default": null,
-          "description": "服务端口"
-        },
-        "runningStatus": {
-          "type": "string",
-          "enum": ["passing", "warning", "critical"],
-          "description": "子服务运行状态，例如 passing、warning、critical"
-        },
-        "units": {
-          "type": "array",
-          "default": [],
-          "description": "子服务下的单元列表",
-          "items": {
-            "$ref": "#/$defs/ServiceUnit"
-          }
-        }
-      }
-    },
-    "ServiceDetailResponse": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "服务组详情。",
-      "required": [
-        "name",
-        "type",
-        "siteName",
-        "runningStatus",
-        "childServices"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "服务组名称"
-        },
-        "type": {
-          "type": "string",
-          "description": "服务组类型，例如 mysql、redis、tidb"
-        },
-        "user": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "服务组所属用户或租户"
-        },
-        "businessSystemName": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "服务所属业务系统名称"
-        },
-        "businessSubsystemName": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "服务所属业务子系统名称"
-        },
-        "subsystem": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "服务组所属子系统"
-        },
-        "siteName": {
-          "type": "string",
-          "description": "服务组所属站点名称"
-        },
-        "areaName": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "服务组所属区域名称，例如转接区"
-        },
-        "sharding": {
-          "type": ["boolean", "null"],
-          "default": null,
-          "description": "是否为分片结构"
-        },
-        "runningStatus": {
-          "type": "string",
-          "enum": ["passing", "warning", "critical"],
-          "description": "服务组运行状态，例如 passing、warning、critical"
-        },
-        "replicationStatus": {
-          "type": ["string", "null"],
-          "enum": ["passing", "warning", "critical", null],
-          "default": null,
-          "description": "复制或同步状态，例如 passing、warning、critical"
-        },
-        "childServices": {
-          "type": "array",
-          "default": [],
-          "description": "服务组下的子服务列表",
-          "items": {
-            "$ref": "#/$defs/ChildService"
-          }
-        },
-        "backupStrategy": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/BackupStrategySummary"
-            },
-            {
-              "type": "null"
-            }
+    "type": "object",
+    "additionalProperties": false,
+    "description": "服务组详情。",
+    "required": [
+      "name",
+      "type",
+      "siteName",
+      "runningStatus",
+      "childServices"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "服务组名称"
+      },
+      "type": {
+        "type": "string",
+        "description": "服务组类型"
+      },
+      "user": {
+        "type": "string",
+        "description": "服务组所属用户或租户"
+      },
+      "businessSystemName": {
+        "type": "string",
+        "description": "服务所属业务系统名称"
+      },
+      "businessSubsystemName": {
+        "type": "string",
+        "description": "服务所属业务子系统名称"
+      },
+      "subsystem": {
+        "type": "string",
+        "description": "服务组所属子系统"
+      },
+      "siteName": {
+        "type": "string",
+        "description": "服务组所属站点名称"
+      },
+      "areaName": {
+        "type": "string",
+        "description": "服务组所属区域名称"
+      },
+      "sharding": {
+        "type": "boolean",
+        "description": "是否为分片结构"
+      },
+      "runningStatus": {
+        "type": "string",
+        "enum": [
+          "passing",
+          "warning",
+          "critical"
+        ],
+        "description": "服务组运行状态"
+      },
+      "replicationStatus": {
+        "type": "string",
+        "enum": [
+          "passing",
+          "warning",
+          "critical"
+        ],
+        "description": "复制或同步状态"
+      },
+      "childServices": {
+        "type": "array",
+        "default": [],
+        "description": "服务组下的子服务列表",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "服务组中的子服务信息。",
+          "required": [
+            "name",
+            "type",
+            "runningStatus"
           ],
-          "default": null,
-          "description": "服务组备份策略摘要"
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "子服务名称"
+            },
+            "type": {
+              "type": "string",
+              "description": "子服务类型"
+            },
+            "version": {
+              "type": "string",
+              "description": "子服务基线版本"
+            },
+            "port": {
+              "type": "integer",
+              "description": "服务端口"
+            },
+            "runningStatus": {
+              "type": "string",
+              "enum": [
+                "passing",
+                "warning",
+                "critical"
+              ],
+              "description": "子服务运行状态"
+            },
+            "units": {
+              "type": "array",
+              "default": [],
+              "description": "子服务下的单元列表",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "子服务下的单元信息。",
+                "required": [
+                  "name",
+                  "type",
+                  "cpuArchitecture",
+                  "cpuArchitectureDisplayName",
+                  "runningStatus",
+                  "ip",
+                  "storage"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "单元名称"
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "单元类型"
+                  },
+                  "cpuArchitecture": {
+                    "type": "string",
+                    "description": "单元所在主机的机器可读 CPU 架构"
+                  },
+                  "cpuArchitectureDisplayName": {
+                    "type": "string",
+                    "description": "单元所在主机的用户可读 CPU 架构名称"
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "单元真实部署版本"
+                  },
+                  "runningStatus": {
+                    "type": "string",
+                    "enum": [
+                      "passing",
+                      "warning",
+                      "critical"
+                    ],
+                    "description": "单元运行状态"
+                  },
+                  "ip": {
+                    "type": "string",
+                    "description": "单元服务 IPv4 地址"
+                  },
+                  "ipv6": {
+                    "type": "string",
+                    "description": "单元服务 IPv6 地址"
+                  },
+                  "cpu": {
+                    "type": "number",
+                    "description": "CPU 核数"
+                  },
+                  "memoryGB": {
+                    "type": "number",
+                    "description": "内存大小"
+                  },
+                  "storage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "单元存储规格",
+                    "required": [
+                      "data",
+                      "log"
+                    ],
+                    "properties": {
+                      "data": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "additionalProperties": false,
+                        "description": "数据卷",
+                        "required": [
+                          "sizeGB",
+                          "type"
+                        ],
+                        "properties": {
+                          "sizeGB": {
+                            "type": "number",
+                            "description": "容量大小"
+                          },
+                          "type": {
+                            "type": "string",
+                            "description": "磁盘类型",
+                            "enum": [
+                              "local:SSD",
+                              "local:HDD",
+                              "SAN"
+                            ]
+                          }
+                        }
+                      },
+                      "log": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "additionalProperties": false,
+                        "description": "日志卷",
+                        "required": [
+                          "sizeGB",
+                          "type"
+                        ],
+                        "properties": {
+                          "sizeGB": {
+                            "type": "number",
+                            "description": "容量大小"
+                          },
+                          "type": {
+                            "type": "string",
+                            "description": "磁盘类型",
+                            "enum": [
+                              "local:SSD",
+                              "local:HDD",
+                              "SAN"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
-      }
-    },
-    "ServiceStorageSpec": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "单元存储规格，容量统一使用 GB。",
-      "required": ["data", "log"],
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ServiceVolumeSpec"
-        },
-        "log": {
-          "$ref": "#/$defs/ServiceVolumeSpec"
-        }
-      }
-    },
-    "ServiceUnit": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "子服务下的单元信息。",
-      "required": [
-        "name",
-        "type",
-        "cpuArchitecture",
-        "cpuArchitectureDisplayName",
-        "runningStatus",
-        "ip",
-        "storage"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "单元名称"
-        },
-        "type": {
-          "type": "string",
-          "description": "单元类型，例如 mysql、proxy、redis"
-        },
-        "cpuArchitecture": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "单元所在主机的机器可读 CPU 架构，例如 amd64、arm64"
-        },
-        "cpuArchitectureDisplayName": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "单元所在主机的用户可读 CPU 架构名称，例如 X86、ARM"
-        },
-        "version": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "单元真实部署版本，例如 2.7.7.1"
-        },
-        "runningStatus": {
-          "type": "string",
-          "enum": ["passing", "warning", "critical"],
-          "description": "单元运行状态，例如 passing、warning、critical"
-        },
-        "ip": {
-          "type": "string",
-          "description": "单元服务 IPv4 地址"
-        },
-        "ipv6": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "单元服务 IPv6 地址"
-        },
-        "cpu": {
-          "type": ["number", "null"],
-          "default": null,
-          "description": "CPU 核数"
-        },
-        "memoryGB": {
-          "type": ["number", "null"],
-          "default": null,
-          "description": "内存大小，单位 GB，例如 32 表示 32GB"
-        },
-        "storage": {
-          "$ref": "#/$defs/ServiceStorageSpec"
-        }
-      }
-    },
-    "ServiceVolumeSpec": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "单元 volume 规格，容量统一使用 GB。",
-      "required": ["sizeGB", "type"],
-      "properties": {
-        "sizeGB": {
-          "type": "number",
-          "description": "容量大小，单位 GB，例如 50 表示 50GB"
-        },
-        "type": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "机器可读磁盘类型，例如 local:SSD"
-        },
-        "typeDisplayName": {
-          "type": ["string", "null"],
-          "default": null,
-          "description": "用户可读磁盘类型名称，例如 本地固态盘"
+      },
+      "backupStrategy": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "服务组备份策略摘要",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用备份"
+          },
+          "type": {
+            "type": "string",
+            "description": "备份类型"
+          },
+          "cronExpression": {
+            "type": "string",
+            "description": "备份 cron 表达式"
+          },
+          "retention": {
+            "type": "integer",
+            "description": "备份保留天数"
+          },
+          "compressMode": {
+            "type": "string",
+            "description": "压缩模式"
+          },
+          "sendAlarm": {
+            "type": "boolean",
+            "description": "是否发送告警"
+          }
         }
       }
     }

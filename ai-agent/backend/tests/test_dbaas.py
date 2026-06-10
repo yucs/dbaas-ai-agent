@@ -20,7 +20,7 @@ from dbass_ai_agent.dbaas.auth import dbaas_identity_headers, dbaas_system_heade
 from dbass_ai_agent.dbaas.config import DbaasConfig  # noqa: E402
 from dbass_ai_agent.dbaas.constants import SERVICES_KIND  # noqa: E402
 from dbass_ai_agent.dbaas.service_query import query_dbaas_service_data  # noqa: E402
-from dbass_ai_agent.dbaas.schema import describe_schema, validate_payload  # noqa: E402
+from dbass_ai_agent.dbaas.schema import describe_schema  # noqa: E402
 from dbass_ai_agent.dbaas.service_sync import DbaasServiceSynchronizer  # noqa: E402
 from dbass_ai_agent.dbaas.snapshot_meta import isoformat, utcnow  # noqa: E402
 from dbass_ai_agent.dbaas.tools import (  # noqa: E402
@@ -32,15 +32,12 @@ from dbass_ai_agent.identity.models import Identity  # noqa: E402
 
 
 class DbaasSchemaTests(unittest.TestCase):
-    def test_services_schema_accepts_service_list(self) -> None:
-        validate_payload(SERVICES_KIND, [_service("mysql-xf2", "payment-team")], app_root=APP_ROOT)
-
-    def test_describe_schema_returns_top_level_summary(self) -> None:
+    def test_describe_schema_returns_full_services_schema(self) -> None:
         summary = describe_schema(SERVICES_KIND, app_root=APP_ROOT)
 
         self.assertEqual(summary["schema_version"], "services.admin.v1")
-        self.assertEqual(summary["top_level_type"], "array")
-        self.assertTrue(any(field["name"] == "runningStatus" for field in summary["fields"]))
+        self.assertEqual(summary["schema"]["type"], "array")
+        self.assertIn("runningStatus", summary["schema"]["items"]["properties"])
 
     def test_describe_schema_returns_user_projection_for_regular_user(self) -> None:
         summary = describe_schema(
@@ -50,8 +47,7 @@ class DbaasSchemaTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["schema_version"], "services.user.v1")
-        fields = {field["name"] for field in summary["fields"]}
-        self.assertNotIn("siteId", fields)
+        self.assertNotIn("siteId", summary["schema"]["items"]["properties"])
 
 
 class DbaasSyncTests(unittest.TestCase):

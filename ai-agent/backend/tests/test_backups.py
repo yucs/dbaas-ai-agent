@@ -25,16 +25,15 @@ from dbass_ai_agent.identity.models import Identity  # noqa: E402
 
 
 class BackupSchemaTests(unittest.TestCase):
-    def test_describe_schema_returns_backups_field_summary(self) -> None:
+    def test_describe_schema_returns_full_backups_schema(self) -> None:
         summary = describe_schema(BACKUPS_KIND, app_root=APP_ROOT)
 
         self.assertEqual(summary["schema_version"], "backups.v1")
-        self.assertEqual(summary["top_level_type"], "array")
-        fields = {field["name"]: field for field in summary["fields"]}
-        self.assertEqual(fields["task_status"]["type"], "string")
-        self.assertFalse(fields["task_status"]["nullable"])
-        self.assertIn("succeeded", fields["task_status"]["enum_values"])
-        self.assertTrue(fields["finished_at"]["nullable"])
+        self.assertEqual(summary["schema"]["type"], "array")
+        properties = summary["schema"]["items"]["properties"]
+        self.assertEqual(properties["task_status"]["type"], "string")
+        self.assertIn("succeeded", properties["task_status"]["enum"])
+        self.assertEqual(properties["finished_at"]["type"], "string")
 
 
 class BackupQueryTests(unittest.TestCase):
