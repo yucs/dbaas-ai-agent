@@ -80,7 +80,7 @@ def test_list_services_returns_all_loaded_service_groups() -> None:
     assert len(payload) == 2208
     assert all(item["runningStatus"] in {"passing", "warning", "critical"} for item in payload)
     assert any(item["runningStatus"] != "passing" for item in payload)
-    assert all(item["siteId"].startswith("site-") for item in payload)
+    assert all(1 <= int(item["siteId"]) <= 4294967295 for item in payload)
     service_names = {item["name"] for item in payload}
     assert "payad001" in service_names
     assert "ordad002" in service_names
@@ -163,7 +163,7 @@ def test_get_service_can_load_additional_seed_samples() -> None:
     assert payload["runningStatus"] == "passing"
     assert payload["businessSystemName"]
     assert payload["businessSubsystemName"]
-    assert payload["siteId"].startswith("site-")
+    assert 1 <= int(payload["siteId"]) <= 4294967295
     assert payload["siteName"]
     assert "architecture" not in payload
     assert "architectureName" not in payload

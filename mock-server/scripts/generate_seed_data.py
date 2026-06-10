@@ -16,6 +16,10 @@ DATA_DIR = ROOT / "data"
 RNG = random.Random(20260421)
 HOST_BY_ID: dict[str, dict[str, Any]] = {}
 UNIT_IDS: set[str] = set()
+SITE_IDS: set[str] = set()
+HOST_IDS: set[str] = set()
+CLUSTER_IDS: set[str] = set()
+AREA_IDS: set[str] = set()
 BACKUP_IDS: set[str] = set()
 TASK_IDS: set[str] = set()
 
@@ -92,13 +96,22 @@ SERVICE_PATTERNS: list[dict[str, Any]] = [
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UNIT_IDS.clear()
+    SITE_IDS.clear()
+    HOST_IDS.clear()
+    CLUSTER_IDS.clear()
+    AREA_IDS.clear()
 
     sites = build_sites()
     clusters = build_clusters(sites)
     hosts = build_hosts(sites, clusters)
     services = build_services(sites, clusters, hosts)
+    refresh_host_seed_allocations(hosts, services)
     public_services = public_service_seed_data(services, sites, hosts)
     backups = build_backups(public_services)
+    for site in sites:
+        site.pop("_logicalId", None)
+    for host in hosts:
+        host.pop("_logicalId", None)
 
     write_json(DATA_DIR / "sites.json", sites)
     write_json(DATA_DIR / "clusters.json", clusters)
@@ -129,8 +142,10 @@ def build_sites() -> list[dict[str, Any]]:
     for sequence, (site_id, name, environment, region, zone) in enumerate(site_rows):
         sites.append(
             {
-                "id": site_id,
+                "id": random_u32_decimal_id(SITE_IDS),
+                "_logicalId": site_id,
                 "name": name,
+                "areaId": random_u32_decimal_id(AREA_IDS),
                 "environment": environment,
                 "region": region,
                 "zone": zone,
@@ -153,12 +168,11 @@ def build_clusters(sites: list[dict[str, Any]]) -> list[dict[str, Any]]:
         site_sequence = int(site["sequence"])
         for cluster_index in range(CLUSTERS_PER_SITE):
             sequence = site_sequence * CLUSTERS_PER_SITE + cluster_index + 1
-            cluster_id = f"cluster-{site['id']}-{cluster_index + 1:02d}"
             cluster_type = ("KUBERNETES", "KUBERNETES", "BAREMETAL", "KUBERNETES")[cluster_index]
             scheduler = {"KUBERNETES": "K8S", "BAREMETAL": "SYSTEMD"}[cluster_type]
             clusters.append(
                 {
-                    "id": cluster_id,
+                    "id": random_u32_decimal_id(CLUSTER_IDS),
                     "name": f"{site['name']} Cluster {cluster_index + 1:02d}",
                     "siteId": site["id"],
                     "sequence": sequence,
@@ -182,64 +196,130 @@ def build_hosts(sites: list[dict[str, Any]], clusters: list[dict[str, Any]]) -> 
         site = site_by_id[cluster["siteId"]]
         cluster_sequence = int(cluster["sequence"])
         for host_index in range(HOSTS_PER_CLUSTER):
-            host_id = f"host-{cluster_sequence:02d}-{host_index + 1:02d}"
+            logical_host_id = f"host-{cluster_sequence:02d}-{host_index + 1:02d}"
+            host_id = random_u32_decimal_id(HOST_IDS)
             ip = f"192.18.{10 + cluster_sequence}.{10 + host_index + 1}"
-            cpu_capacity = (32.0, 48.0, 64.0, 96.0)[host_index % 4]
-            memory_capacity = {32.0: 128.0, 48.0: 192.0, 64.0: 256.0, 96.0: 384.0}[cpu_capacity]
-            host_status, health_status = compute_host_runtime_state(cluster_sequence, host_index)
+            cpu_capacity = float(RNG.choice((24, 32, 48, 64, 96, 128)))
+            memory_capacity = round(cpu_capacity * RNG.choice((4.0, 5.0, 6.0, 8.0)), 1)
+            cpu_allocated = round(cpu_capacity * RNG.uniform(0.04, 0.38), 1)
+            memory_allocated = round(memory_capacity * RNG.uniform(0.05, 0.42), 1)
+            status, health_status = compute_host_runtime_state(cluster_sequence, host_index)
+            arch, arch_name, _build_suffix = choose_architecture(host_id)
+            creator, creator_name = choose_owner(f"host:{host_id}")
+            created_at = (
+                datetime(2026, 4, 1, 9, 0, 0)
+                + timedelta(days=stable_index(f"host-created-day:{host_id}") % 55)
+                + timedelta(minutes=stable_index(f"host-created-minute:{host_id}") % 480)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            cpu_resource = build_resource_summary(cpu_capacity, cpu_allocated)
+            memory_resource = build_resource_summary(
+                memory_capacity,
+                memory_allocated,
+                capacity_key="capacityGB",
+                allocated_key="allocatedGB",
+                available_key="availableGB",
+            )
+            storage = build_host_storage(host_id)
             hosts.append(
                 {
                     "id": host_id,
+                    "_logicalId": logical_host_id,
                     "name": f"syn47{cluster_sequence:02d}{host_index + 1000:04d}",
                     "ip": ip,
+                    "sshPort": RNG.choice((22, 2222)),
+                    "siteId": site["id"],
+                    "siteName": site["name"],
                     "clusterId": cluster["id"],
-                    "hostStatus": host_status,
+                    "clusterEnabled": True,
+                    "areaId": site["areaId"],
+                    "areaName": site["areaName"],
+                    "room": f"{site['region'].upper()}-ROOM-{(host_index // 20) + 1:02d}",
+                    "seat": f"{site['region'].upper()}-{(host_index // 10) + 1:02d}-{host_index % 10 + 1:02d}",
+                    "networkPartition": f"ha-{chr(ord('a') + host_index % 3)}",
+                    "status": status,
                     "healthStatus": health_status,
-                    "cpuCapacity": cpu_capacity,
-                    "memoryCapacity": memory_capacity,
-                    "osName": "Alibaba Cloud Linux 3",
-                    "kernelVersion": f"5.10.134-{cluster_sequence:02d}",
-                    "arch": "x86_64",
-                    "rack": f"rack-{site['region']}-{(host_index // 10) + 1:02d}",
-                    "serialNumber": f"SN-{cluster_sequence:02d}-{host_index + 1:02d}-{site['environment'].upper()}",
-                    "agentVersion": "2.7.3",
-                    "disks": build_host_disks(host_id, host_index),
+                    "cpuArchitecture": arch,
+                    "cpuArchitectureName": arch_name,
+                    "cpuCapacityCores": cpu_resource["capacityCores"],
+                    "cpuAllocatedCores": cpu_resource["allocatedCores"],
+                    "cpuAvailableCores": cpu_resource["availableCores"],
+                    "cpuAllocationPercent": cpu_resource["allocationPercent"],
+                    "memoryCapacityGB": memory_resource["capacityGB"],
+                    "memoryAllocatedGB": memory_resource["allocatedGB"],
+                    "memoryAvailableGB": memory_resource["availableGB"],
+                    "memoryAllocationPercent": memory_resource["allocationPercent"],
+                    "hdd": storage["hdd"],
+                    "ssd": storage["ssd"],
+                    "sanName": storage["sanName"],
+                    "maxUnitCount": int(RNG.choice((40, 50, 60, 80, 100))),
+                    "maxUsagePercent": float(RNG.choice((80, 85, 90, 95, 100))),
+                    "unitCount": 0,
+                    "createdAt": created_at,
+                    "creator": creator,
+                    "creatorName": creator_name,
                 }
             )
     return hosts
 
 
-def build_host_disks(host_id: str, host_index: int) -> list[dict[str, Any]]:
-    """Build per-host disk inventory."""
+def build_resource_summary(
+    capacity: float,
+    allocated: float,
+    *,
+    capacity_key: str = "capacityCores",
+    allocated_key: str = "allocatedCores",
+    available_key: str = "availableCores",
+) -> dict[str, float]:
+    """Build a resource summary with stable rounded values."""
 
-    base = float(110 + host_index * 3)
-    disks = [
-        {
-            "diskId": f"{host_id}-disk-ssd-01",
-            "name": "ssd-01",
-            "type": "data",
-            "mediaType": "SSD",
-            "mountPoint": "/data-ssd",
-            "capacity": 4096.0,
-            "used": 1200.0 + host_index * 6.0,
-            "healthStatus": "HEALTHY",
-            "filesystem": "xfs",
-            "raidType": "RAID10",
-        },
-        {
-            "diskId": f"{host_id}-disk-hdd-01",
-            "name": "hdd-01",
-            "type": "log",
-            "mediaType": "HDD",
-            "mountPoint": "/data-hdd",
-            "capacity": 12288.0,
-            "used": 1800.0 + host_index * 8.0,
-            "healthStatus": "HEALTHY",
-            "filesystem": "ext4",
-            "raidType": "RAID10",
-        },
-    ]
-    return disks
+    allocated = min(capacity, allocated)
+    available = max(0.0, capacity - allocated)
+    return {
+        capacity_key: round(capacity, 1),
+        allocated_key: round(allocated, 1),
+        available_key: round(available, 1),
+        "allocationPercent": round(allocated / capacity * 100, 1) if capacity else 0.0,
+    }
+
+
+def build_storage_device(device: str, capacity_options: tuple[float, ...], used_ratio: tuple[float, float]) -> dict[str, float | str]:
+    """Build one host storage device summary."""
+
+    capacity = float(RNG.choice(capacity_options))
+    used = round(capacity * RNG.uniform(*used_ratio), 1)
+    available = max(0.0, capacity - used)
+    return {
+        "device": device,
+        "capacityGB": round(capacity, 1),
+        "usedGB": used,
+        "availableGB": round(available, 1),
+        "usagePercent": round(used / capacity * 100, 1) if capacity else 0.0,
+    }
+
+
+def build_host_storage(host_id: str) -> dict[str, Any]:
+    """Build host storage summary."""
+
+    profile = stable_index(f"storage:{host_id}") % 10
+    hdd = None
+    ssd = None
+    if profile % 2 == 0:
+        hdd = build_storage_device(
+            "/dev/sdb",
+            (2048.0, 4096.0, 8192.0, 12288.0, 16384.0),
+            (0.08, 0.36),
+        )
+    else:
+        ssd = build_storage_device(
+            "/dev/nvme0n1",
+            (1024.0, 2048.0, 4096.0, 8192.0),
+            (0.06, 0.32),
+        )
+    return {
+        "hdd": hdd,
+        "ssd": ssd,
+        "sanName": f"san-{host_id[-5:]}" if profile == 7 else None,
+    }
 
 
 def build_services(
@@ -250,9 +330,11 @@ def build_services(
     """Build raw service-group seed data."""
 
     site_by_id = {site["id"]: site for site in sites}
+    site_by_logical_id = {site["_logicalId"]: site for site in sites}
     cluster_by_id = {cluster["id"]: cluster for cluster in clusters}
     global HOST_BY_ID
     host_by_id = {host["id"]: host for host in hosts}
+    host_by_logical_id = {host["_logicalId"]: host for host in hosts}
     HOST_BY_ID = host_by_id
     host_ids_by_site: dict[str, list[str]] = {site["id"]: [] for site in sites}
     for host in hosts:
@@ -280,35 +362,38 @@ def build_services(
             host_id
             for host_id in host_ids_by_site[site_id]
             if host_by_id[host_id]["healthStatus"] == "HEALTHY"
-            and host_by_id[host_id]["hostStatus"] == "RUNNING"
+            and host_by_id[host_id]["status"] == "enabled"
         ]
         offset = sum(ord(char) for char in key) % len(eligible_host_ids)
         return host_by_id[eligible_host_ids[offset]]
+
+    def host_id_for_logical_id(logical_id: str) -> str:
+        return str(host_by_logical_id[logical_id]["id"])
 
     services: list[dict[str, Any]] = []
 
     services.append(
         build_mysql_service(
             name=MYSQL_ANCHOR_SERVICE_NAME,
-            site=site_by_id["site-prod-sh-01"],
+            site=site_by_logical_id["site-prod-sh-01"],
             user="payment-platform-team",
             subsystem="payment-platform",
             next_container_ip=next_container_ip,
             choose_host=choose_healthy_host,
             allow_anomalies=False,
             explicit_hosts={
-                "mysql-primary-01": "host-01-01",
-                "mysql-replica-01": "host-01-05",
-                "proxy-01": "host-02-03",
-                "proxy-02": "host-02-04",
-                "sm-01": "host-02-05",
+                "mysql-primary-01": host_id_for_logical_id("host-01-01"),
+                "mysql-replica-01": host_id_for_logical_id("host-01-05"),
+                "proxy-01": host_id_for_logical_id("host-02-03"),
+                "proxy-02": host_id_for_logical_id("host-02-04"),
+                "sm-01": host_id_for_logical_id("host-02-05"),
             },
         )
     )
     services.append(
         build_tidb_service(
             name=TIDB_ANCHOR_SERVICE_NAME,
-            site=site_by_id["site-prod-sh-02"],
+            site=site_by_logical_id["site-prod-sh-02"],
             user="db-platform-team",
             subsystem="tidb-platform",
             next_container_ip=next_container_ip,
@@ -321,7 +406,7 @@ def build_services(
     services.append(
         build_kafka_service(
             name="stmad004",
-            site=site_by_id["site-prod-sh-01"],
+            site=site_by_logical_id["site-prod-sh-01"],
             user="streaming-platform-team",
             subsystem="stream-platform",
             next_container_ip=next_container_ip,
@@ -332,7 +417,7 @@ def build_services(
     services.append(
         build_influxdb_service(
             name="monad005",
-            site=site_by_id["site-prod-sh-01"],
+            site=site_by_logical_id["site-prod-sh-01"],
             user="observability-platform-team",
             subsystem="monitor-platform",
             next_container_ip=next_container_ip,
@@ -343,7 +428,7 @@ def build_services(
     services.append(
         build_redis_service(
             name=REDIS_ANCHOR_SERVICE_NAME,
-            site=site_by_id["site-prod-sh-01"],
+            site=site_by_logical_id["site-prod-sh-01"],
             user="cache-platform-team",
             subsystem="cache-platform",
             next_container_ip=next_container_ip,
@@ -354,7 +439,7 @@ def build_services(
     services.append(
         build_mongodb_service(
             name="cntad006",
-            site=site_by_id["site-staging-sh-01"],
+            site=site_by_logical_id["site-staging-sh-01"],
             user="content-platform-team",
             subsystem="content-platform",
             next_container_ip=next_container_ip,
@@ -365,7 +450,7 @@ def build_services(
     services.append(
         build_elasticsearch_service(
             name="seaad007",
-            site=site_by_id["site-staging-sh-01"],
+            site=site_by_logical_id["site-staging-sh-01"],
             user="search-platform-team",
             subsystem="search-platform",
             next_container_ip=next_container_ip,
@@ -376,7 +461,7 @@ def build_services(
     services.append(
         build_clickhouse_service(
             name="whsad008",
-            site=site_by_id["site-prod-bj-01"],
+            site=site_by_logical_id["site-prod-bj-01"],
             user="warehouse-platform-team",
             subsystem="warehouse-platform",
             next_container_ip=next_container_ip,
@@ -959,16 +1044,20 @@ def compute_host_runtime_state(cluster_sequence: int, host_index: int) -> tuple[
 
     # Keep the early hosts in the first clusters healthy for stable anchor examples.
     if cluster_sequence <= 2 and host_index < 8:
-        return "RUNNING", "HEALTHY"
+        return "enabled", "HEALTHY"
 
     score = (cluster_sequence * 37 + host_index * 17) % 100
     if score < 3:
-        return "FAILED", "UNHEALTHY"
+        return "disabled", "UNHEALTHY"
     if score < 8:
-        return "MAINTENANCE", "WARN"
+        return "maintenance", "WARN"
+    if score < 12:
+        return "onboarding", "WARN"
+    if score < 16:
+        return "offboarding", "WARN"
     if score < 18:
-        return "RUNNING", "WARN"
-    return "RUNNING", "HEALTHY"
+        return "enabled", "WARN"
+    return "enabled", "HEALTHY"
 
 
 def compute_unit_runtime_state(
@@ -984,11 +1073,11 @@ def compute_unit_runtime_state(
     if not allow_anomalies:
         return "HEALTHY", "RUNNING"
 
-    host_status = host["hostStatus"]
+    host_status = host["status"]
     host_health = host["healthStatus"]
-    if host_status == "FAILED":
+    if host_status == "disabled":
         return "UNHEALTHY", "FAILED"
-    if host_status == "MAINTENANCE":
+    if host_status in {"maintenance", "onboarding", "offboarding"}:
         return "WARN", "STOPPED"
     if host_health == "WARN":
         return "WARN", "RUNNING"
@@ -1048,12 +1137,100 @@ def apply_runtime_health(service: dict[str, Any], *, allow_anomalies: bool) -> d
 def pick_host_disk(host: dict[str, Any], *, disk_types: set[str], preferred_media: tuple[str, ...]) -> dict[str, Any]:
     """Pick a disk on the host for a volume."""
 
-    candidates = [disk for disk in host["disks"] if disk["type"] in disk_types]
+    candidates = [disk for disk in host_storage_disks(host) if disk["type"] in disk_types]
     for media_type in preferred_media:
         for disk in candidates:
             if disk["mediaType"] == media_type:
                 return disk
     return candidates[0]
+
+
+def host_storage_disks(host: dict[str, Any]) -> list[dict[str, str | float]]:
+    """Return internal disk-like entries derived from the public host storage fields."""
+
+    disks: list[dict[str, str | float]] = []
+    ssd = host.get("ssd")
+    if isinstance(ssd, dict):
+        disks.append(
+            {
+                "diskId": f"{host['id']}-disk-ssd-01",
+                "storageKey": "ssd",
+                "type": "data",
+                "mediaType": "SSD",
+                "capacity": float(ssd["capacityGB"]),
+            }
+        )
+    hdd = host.get("hdd")
+    if isinstance(hdd, dict):
+        disks.append(
+            {
+                "diskId": f"{host['id']}-disk-hdd-01",
+                "storageKey": "hdd",
+                "type": "data",
+                "mediaType": "HDD",
+                "capacity": float(hdd["capacityGB"]),
+            }
+        )
+    if not disks:
+        raise ValueError(f"host '{host['id']}' has no local storage device")
+    return disks
+
+
+def refresh_host_seed_allocations(hosts: list[dict[str, Any]], services: list[dict[str, Any]]) -> None:
+    """Backfill host unit count and allocated resources from generated service units."""
+
+    host_by_id = {host["id"]: host for host in hosts}
+    disk_by_host_id = {host["id"]: {str(disk["diskId"]): disk for disk in host_storage_disks(host)} for host in hosts}
+
+    for host in hosts:
+        host["unitCount"] = 0
+        host["cpuAllocatedCores"] = 0.0
+        host["memoryAllocatedGB"] = 0.0
+
+    for service in services:
+        for child_service in service.get("services", []):
+            for unit in child_service.get("units", []):
+                host = host_by_id[unit["hostId"]]
+                host["unitCount"] += 1
+                host["cpuAllocatedCores"] += float(unit.get("cpu") or 0.0)
+                host["memoryAllocatedGB"] += float(unit.get("memory") or 0.0)
+                for volume_name in ("data", "log"):
+                    volume = unit["storage"][volume_name]
+                    disk = disk_by_host_id[host["id"]][volume["diskId"]]
+                    device = host[str(disk["storageKey"])]
+                    if isinstance(device, dict):
+                        device["usedGB"] = min(
+                            float(device["capacityGB"]),
+                            float(device["usedGB"]) + float(volume.get("sizeGB", volume.get("size")) or 0.0),
+                        )
+
+    for host in hosts:
+        cpu_capacity = float(host["cpuCapacityCores"])
+        cpu_allocated = min(cpu_capacity, float(host["cpuAllocatedCores"]))
+        host["cpuAllocatedCores"] = round(cpu_allocated, 1)
+        host["cpuAvailableCores"] = round(max(0.0, cpu_capacity - cpu_allocated), 1)
+        host["cpuAllocationPercent"] = round(cpu_allocated / cpu_capacity * 100, 1) if cpu_capacity else 0.0
+
+        memory_capacity = float(host["memoryCapacityGB"])
+        memory_allocated = min(memory_capacity, float(host["memoryAllocatedGB"]))
+        host["memoryAllocatedGB"] = round(memory_allocated, 1)
+        host["memoryAvailableGB"] = round(max(0.0, memory_capacity - memory_allocated), 1)
+        host["memoryAllocationPercent"] = round(memory_allocated / memory_capacity * 100, 1) if memory_capacity else 0.0
+        observed_allocation_percent = max(host["cpuAllocationPercent"], host["memoryAllocationPercent"])
+        host["maxUsagePercent"] = round(max(float(host["maxUsagePercent"]), observed_allocation_percent), 1)
+
+        for storage_key in ("hdd", "ssd"):
+            device = host.get(storage_key)
+            if not isinstance(device, dict):
+                continue
+            capacity = float(device["capacityGB"])
+            used = min(capacity, float(device["usedGB"]))
+            device["usedGB"] = round(used, 1)
+            device["availableGB"] = round(max(0.0, capacity - used), 1)
+            device["usagePercent"] = round(used / capacity * 100, 1) if capacity else 0.0
+
+        if host["unitCount"] > host["maxUnitCount"]:
+            host["maxUnitCount"] = host["unitCount"] + 5
 
 
 def data_media_preference(child_service_type: str) -> tuple[str, ...]:
@@ -1150,6 +1327,16 @@ def random_unit_id() -> str:
         value = f"{secrets.randbits(32):08x}"
         if value not in UNIT_IDS:
             UNIT_IDS.add(value)
+            return value
+
+
+def random_u32_decimal_id(used_ids: set[str]) -> str:
+    """Return a globally unique 32-bit decimal ID for seed data."""
+
+    while True:
+        value = str(secrets.randbelow(2**32 - 1) + 1)
+        if value not in used_ids:
+            used_ids.add(value)
             return value
 
 

@@ -47,17 +47,14 @@ class ClusterSummary(ApiSchema):
     serviceGroupCount: int = Field(description="集群相关服务组数量")
 
 
-class HostDisk(ApiSchema):
-    """主机磁盘信息。"""
+class HostStorageDevice(ApiSchema):
+    """主机存储设备摘要。"""
 
-    diskId: str = Field(description="磁盘唯一标识")
-    name: str = Field(description="磁盘名称")
-    type: str = Field(description="磁盘用途，例如 system、data、log")
-    mediaType: str = Field(description="磁盘介质类型，例如 SSD、HDD")
-    mountPoint: str = Field(description="主机侧挂载点")
-    capacity: float = Field(description="磁盘总容量")
-    used: float = Field(description="磁盘已使用容量")
-    healthStatus: str = Field(description="磁盘健康状态")
+    device: str = Field(description="主机侧设备路径")
+    capacityGB: float = Field(description="存储总容量，单位 GB")
+    usedGB: float = Field(description="已使用容量，单位 GB")
+    availableGB: float = Field(description="可用容量，单位 GB")
+    usagePercent: float = Field(description="容量使用率")
 
 
 class HostUnitSummary(ApiSchema):
@@ -77,19 +74,37 @@ class HostSummary(ApiSchema):
     id: str = Field(description="主机唯一标识")
     name: str = Field(description="主机名称")
     ip: str = Field(description="主机 IP")
+    sshPort: int = Field(description="SSH 端口")
     siteId: str = Field(description="主机所属站点 ID")
     siteName: str = Field(description="主机所属站点名称")
+    areaId: str = Field(description="主机所属区域 ID")
+    areaName: str = Field(description="主机所属区域名称")
     clusterId: str = Field(description="主机所属集群 ID")
     clusterName: str = Field(description="主机所属集群名称")
-    environment: str = Field(description="主机所在环境")
-    region: str = Field(description="主机所在区域")
-    zone: str = Field(description="主机所在可用区")
-    hostStatus: str = Field(description="主机运行状态")
+    room: str = Field(description="主机所在机房")
+    seat: str = Field(description="主机所在机位")
+    networkPartition: str = Field(description="主机 HA 网络分区")
+    status: str = Field(description="主机管控状态")
     healthStatus: str = Field(description="主机健康状态")
-    cpuCapacity: float = Field(description="主机 CPU 总容量")
-    memoryCapacity: float = Field(description="主机内存总容量")
-    unitCount: int = Field(description="主机承载单元数量")
-    disks: list[HostDisk] = Field(default_factory=list, description="主机磁盘列表")
+    cpuArchitecture: str = Field(description="CPU 架构")
+    cpuArchitectureName: str = Field(description="CPU 架构显示名称")
+    cpuCapacityCores: float = Field(description="CPU 总核数")
+    cpuAllocatedCores: float = Field(description="已分配 CPU 核数")
+    cpuAvailableCores: float = Field(description="可分配 CPU 核数")
+    cpuAllocationPercent: float = Field(description="CPU 分配率")
+    memoryCapacityGB: float = Field(description="内存总容量，单位 GB")
+    memoryAllocatedGB: float = Field(description="已分配内存，单位 GB")
+    memoryAvailableGB: float = Field(description="可分配内存，单位 GB")
+    memoryAllocationPercent: float = Field(description="内存分配率")
+    hdd: HostStorageDevice | None = Field(default=None, description="HDD 存储设备")
+    ssd: HostStorageDevice | None = Field(default=None, description="SSD 存储设备")
+    sanName: str | None = Field(default=None, description="SAN 存储名称")
+    maxUnitCount: int = Field(description="主机最大承载单元数量")
+    maxUsagePercent: float = Field(description="主机最大资源使用率")
+    unitCount: int = Field(description="主机当前承载单元数量")
+    createdAt: str = Field(description="主机记录创建时间")
+    creator: str = Field(description="主机记录创建人账号")
+    creatorName: str = Field(description="主机记录创建人姓名")
 
 
 class SiteDetailResponse(SiteSummary):

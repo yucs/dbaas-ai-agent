@@ -734,27 +734,41 @@ class JsonDataStore:
             if not isinstance(cluster_id, str) or not cluster_id:
                 raise DataValidationError(f"host '{host_id}' must have a non-empty 'clusterId'")
             normalized_host = deepcopy(host)
-            normalized_host.setdefault("hostStatus", "RUNNING")
+            normalized_host.setdefault("status", "enabled")
             normalized_host.setdefault("healthStatus", "HEALTHY")
-            normalized_host["unitCount"] = 0
-            disks = normalized_host.get("disks")
-            if not isinstance(disks, list) or not disks:
-                raise DataValidationError(f"host '{host_id}' must contain a non-empty 'disks' list")
-            disk_by_id: dict[str, dict[str, Any]] = {}
-            for disk in disks:
-                if not isinstance(disk, dict):
-                    raise DataValidationError(f"host '{host_id}' disks must be objects")
-                disk_id = disk.get("diskId")
-                if not isinstance(disk_id, str) or not disk_id:
-                    raise DataValidationError(f"host '{host_id}' contains a disk without a valid 'diskId'")
-                disk.setdefault("healthStatus", "HEALTHY")
-                disk.setdefault("used", 0.0)
-                disk["_baseUsed"] = float(disk["used"])
-                disk_by_id[disk_id] = disk
+            normalized_host.setdefault("unitCount", 0)
+            disk_by_id = self._host_disk_index(normalized_host)
             normalized_host["_clusterId"] = cluster_id
             normalized_host["_diskById"] = disk_by_id
             hosts_by_id[host_id] = normalized_host
         return hosts_by_id
+
+    def _host_disk_index(self, host: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """从对外 Host 存储字段派生内部磁盘索引。"""
+
+        host_id = host["id"]
+        disk_by_id: dict[str, dict[str, Any]] = {}
+        for storage_key, media_type in (("ssd", "SSD"), ("hdd", "HDD")):
+            device = host.get(storage_key)
+            if device is None:
+                continue
+            if not isinstance(device, dict):
+                raise DataValidationError(f"host '{host_id}' field '{storage_key}' must be an object or null")
+            capacity = float(device.get("capacityGB") or 0.0)
+            used = float(device.get("usedGB") or 0.0)
+            disk_id = f"{host_id}-disk-{storage_key}-01"
+            disk_by_id[disk_id] = {
+                "diskId": disk_id,
+                "storageKey": storage_key,
+                "type": "data",
+                "mediaType": media_type,
+                "capacity": capacity,
+                "used": used,
+                "_baseUsed": used,
+            }
+        if not disk_by_id:
+            raise DataValidationError(f"host '{host_id}' must contain at least one of 'hdd' or 'ssd'")
+        return disk_by_id
 
     def _load_services(self) -> dict[str, dict[str, Any]]:
         """加载服务组原始数据。"""
@@ -1056,9 +1070,10 @@ class JsonDataStore:
 
         requested_type = str(volume.get("type") or "")
         requested_media = requested_type.split(":", 1)[1] if ":" in requested_type else ""
+        disks = list(host.get("_diskById", {}).values())
         candidates = [
             disk
-            for disk in host.get("disks", [])
+            for disk in disks
             if disk.get("type") == volume_name or (volume_name == "log" and disk.get("type") == "data")
         ]
         if requested_media:
@@ -1067,7 +1082,6 @@ class JsonDataStore:
                 return str(media_matches[0]["diskId"])
         if candidates:
             return str(candidates[0]["diskId"])
-        disks = host.get("disks", [])
         if disks:
             return str(disks[0]["diskId"])
         raise DataValidationError(f"host '{host.get('id')}' has no disks for volume '{volume_name}'")
@@ -1153,9 +1167,7 @@ class JsonDataStore:
             host["_siteId"] = site["id"]
             host["_siteName"] = site["name"]
             host["_clusterName"] = cluster["name"]
-            host["_environment"] = site["environment"]
-            host["_region"] = site["region"]
-            host["_zone"] = site["zone"]
+            host["_clusterEnabled"] = bool(cluster.get("enabled", True))
 
         for service_name, service in self._services_by_name.items():
             site_id = service["siteId"]
@@ -1202,7 +1214,9 @@ class JsonDataStore:
 
         for host in self._hosts_by_id.values():
             host["unitCount"] = 0
-            for disk in host["disks"]:
+            host["_allocatedCpu"] = 0.0
+            host["_allocatedMemory"] = 0.0
+            for disk in host["_diskById"].values():
                 disk["used"] = float(disk.get("_baseUsed", 0.0))
 
         for cluster in self._clusters_by_id.values():
@@ -1223,6 +1237,8 @@ class JsonDataStore:
                     host = self._hosts_by_id[unit["hostId"]]
                     cluster = self._clusters_by_id[host["_clusterId"]]
                     host["unitCount"] += 1
+                    host["_allocatedCpu"] += float(unit.get("cpu") or 0.0)
+                    host["_allocatedMemory"] += float(unit.get("memory") or 0.0)
                     cluster["unitCount"] += 1
                     cluster_service_names[cluster["id"]].add(service["name"])
                     service_cluster_ids.add(cluster["id"])
@@ -1235,6 +1251,9 @@ class JsonDataStore:
                 cluster_health_inputs[cluster_id].append(service["healthStatus"])
             site_health_inputs[service["siteId"]].append(service["healthStatus"])
 
+        for host in self._hosts_by_id.values():
+            self._refresh_host_capacity_fields(host)
+
         for cluster_id, cluster in self._clusters_by_id.items():
             cluster["serviceGroupCount"] = len(cluster_service_names[cluster_id])
             cluster["healthStatus"] = self._aggregate_health_status(cluster_health_inputs[cluster_id])
@@ -1243,6 +1262,31 @@ class JsonDataStore:
         for site_id, site in self._sites_by_id.items():
             site["serviceGroupCount"] = len(site_service_names[site_id])
             site["healthStatus"] = self._aggregate_health_status(site_health_inputs[site_id])
+
+    def _refresh_host_capacity_fields(self, host: dict[str, Any]) -> None:
+        """根据当前单元和卷分配刷新主机资源摘要。"""
+
+        cpu_capacity = float(host.get("cpuCapacityCores") or 0.0)
+        cpu_allocated = min(cpu_capacity, float(host.get("_allocatedCpu") or 0.0))
+        host["cpuAllocatedCores"] = round(cpu_allocated, 1)
+        host["cpuAvailableCores"] = round(max(0.0, cpu_capacity - cpu_allocated), 1)
+        host["cpuAllocationPercent"] = round(cpu_allocated / cpu_capacity * 100, 1) if cpu_capacity else 0.0
+
+        memory_capacity = float(host.get("memoryCapacityGB") or 0.0)
+        memory_allocated = min(memory_capacity, float(host.get("_allocatedMemory") or 0.0))
+        host["memoryAllocatedGB"] = round(memory_allocated, 1)
+        host["memoryAvailableGB"] = round(max(0.0, memory_capacity - memory_allocated), 1)
+        host["memoryAllocationPercent"] = round(memory_allocated / memory_capacity * 100, 1) if memory_capacity else 0.0
+
+        for disk in host["_diskById"].values():
+            device = host.get(disk["storageKey"])
+            if not isinstance(device, dict):
+                continue
+            capacity = float(device.get("capacityGB") or 0.0)
+            used = min(capacity, float(disk.get("used") or 0.0))
+            device["usedGB"] = round(used, 1)
+            device["availableGB"] = round(max(0.0, capacity - used), 1)
+            device["usagePercent"] = round(used / capacity * 100, 1) if capacity else 0.0
 
     def _public_site_summary(self, site_id: str) -> dict[str, Any]:
         """返回站点摘要。"""
@@ -1290,18 +1334,15 @@ class JsonDataStore:
         public_host["siteName"] = host["_siteName"]
         public_host["clusterId"] = host["_clusterId"]
         public_host["clusterName"] = host["_clusterName"]
-        public_host["environment"] = host["_environment"]
-        public_host["region"] = host["_region"]
-        public_host["zone"] = host["_zone"]
-        public_host["disks"] = [self._public_disk(disk) for disk in public_host["disks"]]
+        public_host["clusterEnabled"] = host["_clusterEnabled"]
         public_host.pop("_siteId", None)
         public_host.pop("_siteName", None)
         public_host.pop("_clusterId", None)
         public_host.pop("_clusterName", None)
-        public_host.pop("_environment", None)
-        public_host.pop("_region", None)
-        public_host.pop("_zone", None)
+        public_host.pop("_clusterEnabled", None)
         public_host.pop("_diskById", None)
+        public_host.pop("_allocatedCpu", None)
+        public_host.pop("_allocatedMemory", None)
         return public_host
 
     def _public_disk(self, disk: dict[str, Any]) -> dict[str, Any]:
@@ -2034,7 +2075,7 @@ class JsonDataStore:
             usage = host_usage[unit["hostId"]]
             next_cpu = usage["cpu"] - float(unit.get("cpu") or 0.0) + float(target_cpu_cores or unit.get("cpu") or 0.0)
             next_memory = usage["memory"] - float(unit.get("memory") or 0.0) + float(target_memory_gb or unit.get("memory") or 0.0)
-            if next_cpu > float(host["cpuCapacity"]) or next_memory > float(host["memoryCapacity"]):
+            if next_cpu > float(host["cpuCapacityCores"]) or next_memory > float(host["memoryCapacityGB"]):
                 return [
                     {
                         "code": "insufficient_capacity",
