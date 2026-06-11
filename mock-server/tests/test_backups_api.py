@@ -106,6 +106,8 @@ def test_create_service_backup_task_creates_running_records_then_completes() -> 
     assert HEX_ID_PATTERN.fullmatch(created[0]["backup_id"])
     assert created[0]["task_status"] == "running"
     assert created[0]["unit_name"] == "aaa8ee1f_payad001"
+    assert created[0]["siteId"]
+    assert created[0]["siteName"]
 
     task_payload = wait_for_task_completion(client, task_id)
     assert task_payload["type"] == "service.backup.create"
@@ -186,8 +188,12 @@ def test_admin_can_query_all_existing_backups_including_expired_but_not_deleted(
     assert len(payload) >= 6_200
     assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in payload)
     assert all(item.get("deleted") is not True for item in payload)
+    assert all(item["siteId"] and item["siteName"] for item in payload)
     assert any(item["service_name"] == "payad001" for item in payload)
     assert any(item["service_name"] == "ordad002" for item in payload)
+    payad_backup = next(item for item in payload if item["service_name"] == "payad001")
+    assert payad_backup["siteId"] == "585430486"
+    assert payad_backup["siteName"] == "上海PIT站"
     expired = next(item for item in payload if item["service_name"] == "payad001" and item["remark"] == "已过期但未删除")
     assert expired["remark"] == "已过期但未删除"
     statuses = {item["task_status"] for item in payload}
@@ -203,6 +209,7 @@ def test_non_admin_can_only_query_owned_backups() -> None:
     payload = response.json()
     assert len(payload) == 7
     assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in payload)
+    assert all(item["siteId"] and item["siteName"] for item in payload)
     assert {item["service_name"] for item in payload} == {"payad001"}
     assert all("owner_user" not in item for item in payload)
 

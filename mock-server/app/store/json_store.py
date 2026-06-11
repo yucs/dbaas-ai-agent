@@ -551,6 +551,8 @@ class JsonDataStore:
                     {
                         "backup_id": backup_id,
                         "task_id": task_id,
+                        "siteId": service["siteId"],
+                        "siteName": service.get("siteName") or self._sites_by_id[service["siteId"]]["name"],
                         "service_name": name,
                         "service_type": service["type"],
                         "child_service_name": item["child_service"].get("name") or item["child_service"].get("type"),
@@ -822,6 +824,8 @@ class JsonDataStore:
         required_fields = {
             "backup_id",
             "task_id",
+            "siteId",
+            "siteName",
             "service_name",
             "service_type",
             "child_service_name",
@@ -850,14 +854,30 @@ class JsonDataStore:
                 raise DataValidationError("each backup item must have a non-empty 'backup_id'")
             if backup_id in seen_ids:
                 raise DataValidationError(f"duplicate backup_id '{backup_id}' in backups.json")
-            missing = [field for field in required_fields if field not in item]
+            normalized_item = deepcopy(item)
+            self._fill_backup_site_fields(normalized_item, backup_id=backup_id)
+            missing = [field for field in required_fields if field not in normalized_item]
             if missing:
                 raise DataValidationError(
                     f"backup_id '{backup_id}' is missing required fields: {', '.join(sorted(missing))}"
                 )
             seen_ids.add(backup_id)
-            normalized.append(deepcopy(item))
+            normalized.append(normalized_item)
         return normalized
+
+    def _fill_backup_site_fields(self, backup: dict[str, Any], *, backup_id: str) -> None:
+        """补齐备份记录所在站点字段。"""
+
+        service_name = backup.get("service_name")
+        if not isinstance(service_name, str) or not service_name:
+            raise DataValidationError(f"backup_id '{backup_id}' must have a non-empty 'service_name'")
+        service = self._services_by_name.get(service_name)
+        if service is None:
+            raise DataValidationError(f"backup_id '{backup_id}' references unknown service '{service_name}'")
+        site_id = service["siteId"]
+        site = self._sites_by_id[site_id]
+        backup["siteId"] = site_id
+        backup["siteName"] = service.get("siteName") or site["name"]
 
     def _load_array_file(self, file_path: Path, *, resource_name: str) -> list[Any]:
         """从 JSON 文件中读取数组。"""
@@ -966,6 +986,8 @@ class JsonDataStore:
         public_fields = {
             "backup_id",
             "task_id",
+            "siteId",
+            "siteName",
             "service_name",
             "service_type",
             "child_service_name",
@@ -984,11 +1006,19 @@ class JsonDataStore:
             "valid_status",
             "remark",
         }
-        return {
+        public_backup = {
             key: deepcopy(value)
             for key, value in backup.items()
             if key in public_fields
         }
+        service_name = backup.get("service_name")
+        if isinstance(service_name, str):
+            service = self._services_by_name.get(service_name)
+            if service is not None:
+                site = self._sites_by_id[service["siteId"]]
+                public_backup["siteId"] = service["siteId"]
+                public_backup["siteName"] = service.get("siteName") or site["name"]
+        return public_backup
 
     def _backup_owner_user(self, backup: dict[str, Any]) -> str | None:
         """返回备份记录所属用户。"""

@@ -9,6 +9,8 @@
     "required": [
       "backup_id",
       "task_id",
+      "siteId",
+      "siteName",
       "service_name",
       "service_type",
       "child_service_name",
@@ -36,25 +38,33 @@
         "type": "string",
         "description": "产生该备份记录的 DBAAS 任务 ID"
       },
+      "siteId": {
+        "type": "string",
+        "description": "备份所在站点 ID"
+      },
+      "siteName": {
+        "type": "string",
+        "description": "备份所在站点名称"
+      },
       "service_name": {
         "type": "string",
-        "description": "服务组名称"
+        "description": "备份所属服务组名称"
       },
       "service_type": {
         "type": "string",
-        "description": "服务组类型"
+        "description": "备份所属服务组类型"
       },
       "child_service_name": {
         "type": "string",
-        "description": "子服务名称"
+        "description": "备份所属子服务名称"
       },
       "child_service_type": {
         "type": "string",
-        "description": "子服务类型"
+        "description": "备份所属子服务类型"
       },
       "unit_name": {
         "type": "string",
-        "description": "备份所属或执行的单元名称"
+        "description": "备份所属单元名称"
       },
       "backup_type": {
         "type": "string",

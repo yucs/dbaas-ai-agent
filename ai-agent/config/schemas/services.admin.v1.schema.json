@@ -106,7 +106,7 @@
             },
             "version": {
               "type": "string",
-              "description": "子服务基线版本"
+              "description": "子服务基线版本，通常为三段版本，例如 11.3.1"
             },
             "port": {
               "type": "integer",
@@ -159,7 +159,7 @@
                   },
                   "version": {
                     "type": "string",
-                    "description": "单元真实部署版本"
+                    "description": "单元真实部署版本，通常为四段版本，例如 11.3.1.2；最后一段表示主机架构对应的镜像版本"
                   },
                   "runningStatus": {
                     "type": "string",

@@ -31,9 +31,14 @@ class BackupSchemaTests(unittest.TestCase):
         self.assertEqual(summary["schema_version"], "backups.v1")
         self.assertEqual(summary["schema"]["type"], "array")
         properties = summary["schema"]["items"]["properties"]
+        required = summary["schema"]["items"]["required"]
         self.assertEqual(properties["task_status"]["type"], "string")
         self.assertIn("succeeded", properties["task_status"]["enum"])
         self.assertEqual(properties["finished_at"]["type"], "string")
+        self.assertEqual(properties["siteId"]["type"], "string")
+        self.assertEqual(properties["siteName"]["type"], "string")
+        self.assertIn("siteId", required)
+        self.assertIn("siteName", required)
 
 
 class BackupQueryTests(unittest.TestCase):
@@ -279,6 +284,36 @@ class BackupQueryTests(unittest.TestCase):
             self.assertEqual(result["preview"], 3)
 
     @unittest.skipUnless(shutil.which("jq"), "jq is required for backup query tests")
+    def test_query_filters_backups_by_site(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _config(tmpdir)
+            _write_fresh_admin_snapshot(
+                config,
+                [
+                    _backup("backup-site-shanghai", "mysql-xf2", site_id="585430486", site_name="上海PIT站"),
+                    _backup(
+                        "backup-site-beijing",
+                        "redis-cache",
+                        service_type="redis",
+                        child_service_name="redis-primary",
+                        child_service_type="redis",
+                        unit_name="redis-primary-01",
+                        site_id="589053177",
+                        site_name="北京亦庄站",
+                    ),
+                ],
+            )
+
+            result = query_dbaas_backup_data(
+                config,
+                Identity(user_id="admin", role="admin", user=None),
+                jq_filter='[.[] | select(.siteId == "585430486") | {backup_id, siteName}]',
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["preview"], [{"backup_id": "backup-site-shanghai", "siteName": "上海PIT站"}])
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is required for backup query tests")
     def test_query_finds_expired_but_not_deleted_backups(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = _config(tmpdir)
@@ -457,6 +492,8 @@ def _backup(
     service_name: str,
     *,
     service_type: str = "mysql",
+    site_id: str = "585430486",
+    site_name: str = "上海PIT站",
     child_service_name: str = "mysql-primary",
     child_service_type: str = "mysql",
     unit_name: str = "mysql-primary-01",
@@ -477,6 +514,8 @@ def _backup(
     return {
         "backup_id": backup_id,
         "task_id": f"task-{backup_id}",
+        "siteId": site_id,
+        "siteName": site_name,
         "service_name": service_name,
         "service_type": service_type,
         "child_service_name": child_service_name,
