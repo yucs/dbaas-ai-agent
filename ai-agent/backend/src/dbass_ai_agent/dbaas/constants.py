@@ -5,10 +5,12 @@ from pathlib import Path
 
 SERVICES_KIND = "services"
 BACKUPS_KIND = "backups"
-SUPPORTED_SCHEMA_KINDS = {SERVICES_KIND, BACKUPS_KIND}
+HOSTS_KIND = "hosts"
+SUPPORTED_SCHEMA_KINDS = {SERVICES_KIND, BACKUPS_KIND, HOSTS_KIND}
 
 SERVICES_ENDPOINT = "/services"
 BACKUPS_ENDPOINT = "/backups"
+HOSTS_ENDPOINT = "/hosts"
 
 ADMIN_SCOPE = "admin"
 USER_SCOPE = "user"
@@ -19,10 +21,12 @@ METRIC_CATALOG_FILE = CONFIG_ROOT / "dbaas_metric_catalog.json"
 DATA_FILE_NAMES = {
     SERVICES_KIND: "services.json",
     BACKUPS_KIND: "backups.json",
+    HOSTS_KIND: "hosts.json",
 }
 META_FILE_NAMES = {
     SERVICES_KIND: "services.meta.json",
     BACKUPS_KIND: "backups.meta.json",
+    HOSTS_KIND: "hosts.meta.json",
 }
 
 SCHEMA_FILES = {
@@ -30,10 +34,12 @@ SCHEMA_FILES = {
     (SERVICES_KIND, USER_SCOPE): SCHEMA_ROOT / "services.user.v1.schema.json",
     (BACKUPS_KIND, ADMIN_SCOPE): SCHEMA_ROOT / "backups.v1.schema.json",
     (BACKUPS_KIND, USER_SCOPE): SCHEMA_ROOT / "backups.v1.schema.json",
+    (HOSTS_KIND, ADMIN_SCOPE): SCHEMA_ROOT / "hosts.v1.schema.json",
 }
 SCHEMA_VERSIONS = {
     (SERVICES_KIND, ADMIN_SCOPE): "services.admin.v1",
     (SERVICES_KIND, USER_SCOPE): "services.user.v1",
     (BACKUPS_KIND, ADMIN_SCOPE): "backups.v1",
     (BACKUPS_KIND, USER_SCOPE): "backups.v1",
+    (HOSTS_KIND, ADMIN_SCOPE): "hosts.v1",
 }

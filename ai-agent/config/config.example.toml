@@ -73,9 +73,17 @@ approval_current_value_timeout_seconds = 5
 # DBAAS 工作目录；用于保存快照和临时文件。
 dir = "./data/runtime/dbaas_workspace"
 # 后台同步服务数据的间隔，单位秒。
-sync_interval_seconds = 8
-# 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
-ttl_seconds = 30
+service_sync_interval_seconds = 8
+# services 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
+service_snapshot_ttl_seconds = 30
+# backups 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
+backup_snapshot_ttl_seconds = 30
+# 后台同步主机数据的间隔，单位秒；主机资产变化较慢，默认长于 services。
+host_sync_interval_seconds = 60
+# 主机快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
+host_snapshot_ttl_seconds = 120
+# 同一个 host snapshot 刷新锁最多等待多久，单位秒。
+host_refresh_lock_timeout_seconds = 10
 # 普通用户会话多久没有续约后停止用户 services 快照同步，单位秒。
 user_active_idle_timeout_seconds = 300
 # 普通用户 services 快照缺失时，query 最多等待 prewarm/refresh 多久，单位秒。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,9 @@ import httpx
 from dbass_ai_agent.config import APP_ROOT
 from dbass_ai_agent.identity.models import Identity
 
-from .auth import dbaas_identity_headers
+from .auth import dbaas_identity_headers, dbaas_system_headers
 from .config import DbaasConfig
-from .constants import ADMIN_SCOPE, BACKUPS_ENDPOINT, BACKUPS_KIND, USER_SCOPE
+from .constants import ADMIN_SCOPE, HOSTS_ENDPOINT, HOSTS_KIND
 from .schema import schema_path, schema_version
 from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import (
@@ -26,93 +27,94 @@ from .workspace import (
 
 
 logger = logging.getLogger(__name__)
-_refresh_locks: dict[str, threading.Lock] = {}
-_refresh_locks_guard = threading.Lock()
+_refresh_lock = threading.Lock()
 
 
-class DbaasBackupSynchronizer:
+class DbaasHostSynchronizer:
     def __init__(self, config: DbaasConfig, *, app_root: Path = APP_ROOT) -> None:
         self.config = config
         self.workspace = DbaasWorkspace(config)
         self.app_root = app_root
 
     def ensure_snapshot(self, identity: Identity, *, refresh: bool = False) -> dict[str, Any]:
-        if identity.role != ADMIN_SCOPE and not identity.user:
+        if identity.role != ADMIN_SCOPE:
             return self._snapshot_unavailable(
-                None,
-                "当前用户身份缺少可见范围，无法查询备份列表。",
+                self._paths(),
+                "当前身份无权查询平台主机资产。",
                 error_type="permission_denied",
-                scope=USER_SCOPE,
-                user=None,
             )
-
-        scope = ADMIN_SCOPE if identity.role == ADMIN_SCOPE else USER_SCOPE
-        paths = self.workspace.paths(BACKUPS_KIND, scope=scope, user=identity.user)
         if refresh:
-            return self._refresh_under_lock(paths, identity, force=True)
+            return self.force_refresh_admin_hosts(identity=identity, error_type="refresh_failed")
 
+        paths = self._paths()
         current = read_meta(paths.meta_path)
         if self._is_snapshot_fresh(paths, current):
             assert current is not None
             return self._snapshot(paths, current)
-        return self._refresh_under_lock(paths, identity, force=False)
+        return self.force_refresh_admin_hosts(identity=identity, force=False)
 
-    def _refresh_under_lock(
+    def force_refresh_admin_hosts(
         self,
-        paths: DbaasSnapshotPaths,
-        identity: Identity,
         *,
-        force: bool,
+        identity: Identity | None = None,
+        error_type: str = "snapshot_unavailable",
+        force: bool = True,
     ) -> dict[str, Any]:
-        lock = _lock_for(paths.key)
-        acquired = lock.acquire(timeout=self.config.user_snapshot_refresh_wait_seconds)
+        paths = self._paths()
+        acquired = _refresh_lock.acquire(timeout=self.config.host_refresh_lock_timeout_seconds)
         if not acquired:
-            return self._snapshot_unavailable(paths, "当前 DBAAS 备份数据视图正在刷新，等待超时。")
+            return self._snapshot_unavailable(paths, "当前 DBAAS 主机数据视图正在刷新，等待超时。", error_type=error_type)
         try:
             current = read_meta(paths.meta_path)
             if not force and self._is_snapshot_fresh(paths, current):
                 assert current is not None
                 return self._snapshot(paths, current)
 
-            result = self._refresh_backups(paths, identity)
+            result = self._refresh_hosts(paths, identity=identity)
             if result.get("status") == "fresh":
                 return result
 
-            message = str(result.get("message") or "DBAAS 备份数据视图刷新失败。")
-            error_type = str(result.get("error_type") or "snapshot_unavailable")
-            if force and current is not None and self._is_snapshot_fresh(paths, current):
+            message = str(result.get("last_error") or result.get("message") or "DBAAS 主机数据视图刷新失败。")
+            refresh_error_type = str(result.get("error_type") or error_type)
+            if current is not None and self._is_snapshot_fresh(paths, current):
                 self._write_fresh_error_meta(paths, current, message)
             else:
                 delete_if_exists(paths.data_path)
-                self._write_unavailable_meta(paths, message, error_type=error_type)
+                self._write_unavailable_meta(paths, message, error_type=refresh_error_type)
             return self._snapshot_unavailable(paths, message, error_type=error_type)
         finally:
-            lock.release()
+            _refresh_lock.release()
 
-    def _refresh_backups(self, paths: DbaasSnapshotPaths, identity: Identity) -> dict[str, Any]:
-        url = f"{self.config.server_base_url}{BACKUPS_ENDPOINT}"
+    def _refresh_hosts(
+        self,
+        paths: DbaasSnapshotPaths,
+        *,
+        identity: Identity | None,
+    ) -> dict[str, Any]:
+        url = f"{self.config.server_base_url}{HOSTS_ENDPOINT}"
+        headers = dbaas_identity_headers(identity) if identity is not None else dbaas_system_headers()
         try:
             with httpx.Client(timeout=self.config.request_timeout_seconds, trust_env=False) as client:
-                response = client.get(url, headers=dbaas_identity_headers(identity))
+                response = client.get(url, headers=headers)
         except httpx.HTTPError as exc:
-            logger.exception("dbaas backups request failed scope=%s user=%s", paths.scope, paths.user)
-            return self._snapshot_unavailable(paths, f"请求 DBAAS 备份接口失败：{exc}", error_type="dbaas_request_failed")
+            logger.exception("dbaas hosts request failed")
+            return self._snapshot_unavailable(paths, f"请求 DBAAS 主机接口失败：{exc}", error_type="dbaas_request_failed")
 
         if response.status_code in {401, 403}:
-            return self._snapshot_unavailable(paths, "当前用户无权访问备份列表。", error_type="permission_denied")
+            return self._snapshot_unavailable(paths, "当前身份无权访问主机列表。", error_type="permission_denied")
         if response.status_code < 200 or response.status_code >= 300:
             return self._snapshot_unavailable(
                 paths,
-                f"DBAAS 备份接口返回异常状态：{response.status_code}",
+                f"DBAAS 主机接口返回异常状态：{response.status_code}",
                 error_type="dbaas_request_failed",
             )
 
         try:
             payload = response.json()
         except ValueError as exc:
-            return self._snapshot_unavailable(paths, f"DBAAS 备份接口返回非 JSON 数据：{exc}", error_type="dbaas_request_failed")
+            return self._snapshot_unavailable(paths, f"DBAAS 主机接口返回非 JSON 数据：{exc}", error_type="dbaas_request_failed")
 
-        shape_error = _validate_backup_payload_shape(payload)
+        shape_error = _validate_host_payload_shape(payload)
         if shape_error is not None:
             return self._snapshot_unavailable(paths, shape_error, error_type="snapshot_unavailable")
 
@@ -122,58 +124,51 @@ class DbaasBackupSynchronizer:
         try:
             data_tmp_path, bytes_written = write_json_temp(paths.data_path, payload)
             meta = {
-                "kind": BACKUPS_KIND,
-                "scope": paths.scope,
-                "user": paths.user,
+                "kind": HOSTS_KIND,
+                "scope": ADMIN_SCOPE,
+                "user": None,
                 "version": 1,
                 "data_path": str(paths.data_path),
                 "meta_path": str(paths.meta_path),
                 "status": "fresh",
                 "synced_at": isoformat(now),
-                "expires_at": isoformat(now + self._ttl_delta()),
-                "ttl_seconds": self.config.backup_snapshot_ttl_seconds,
+                "expires_at": isoformat(now + timedelta(seconds=self.config.host_snapshot_ttl_seconds)),
+                "ttl_seconds": self.config.host_snapshot_ttl_seconds,
                 "record_count": len(payload),
                 "bytes": bytes_written,
                 "source": "dbaas-server",
-                "source_endpoint": BACKUPS_ENDPOINT,
-                "schema_version": schema_version(BACKUPS_KIND, scope=paths.scope),
-                "schema_path": str(schema_path(BACKUPS_KIND, app_root=self.app_root, scope=paths.scope)),
+                "source_endpoint": HOSTS_ENDPOINT,
+                "schema_version": schema_version(HOSTS_KIND, scope=ADMIN_SCOPE),
+                "schema_path": str(schema_path(HOSTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
                 "last_refresh_status": "success",
                 "last_error": None,
             }
             meta_tmp_path, _ = write_json_temp(paths.meta_path, meta)
             replace_file_atomic(data_tmp_path, paths.data_path)
             replace_file_atomic(meta_tmp_path, paths.meta_path)
-            logger.info(
-                "dbaas backups snapshot refreshed scope=%s user=%s records=%s bytes=%s",
-                paths.scope,
-                paths.user or "-",
-                meta["record_count"],
-                bytes_written,
-            )
+            logger.info("dbaas hosts snapshot refreshed records=%s bytes=%s", meta["record_count"], bytes_written)
             return meta
         except Exception as exc:  # noqa: BLE001
             if data_tmp_path is not None:
                 delete_if_exists(data_tmp_path)
             if meta_tmp_path is not None:
                 delete_if_exists(meta_tmp_path)
-            logger.exception("dbaas backups snapshot write failed scope=%s user=%s", paths.scope, paths.user)
-            return self._snapshot_unavailable(paths, f"写入 DBAAS 备份数据失败：{exc}", error_type="snapshot_unavailable")
+            logger.exception("dbaas hosts snapshot write failed")
+            return self._snapshot_unavailable(paths, f"写入 DBAAS 主机数据失败：{exc}", error_type="snapshot_unavailable")
 
-    def _ttl_delta(self):
-        from datetime import timedelta
-
-        return timedelta(seconds=self.config.backup_snapshot_ttl_seconds)
+    def _paths(self) -> DbaasSnapshotPaths:
+        return self.workspace.paths(HOSTS_KIND, scope=ADMIN_SCOPE)
 
     def _is_snapshot_fresh(self, paths: DbaasSnapshotPaths, meta: dict[str, Any] | None) -> bool:
         return (
             meta is not None
             and is_meta_fresh(meta)
-            and meta.get("scope") == paths.scope
-            and meta.get("user") == paths.user
+            and meta.get("kind") == HOSTS_KIND
+            and meta.get("scope") == ADMIN_SCOPE
+            and meta.get("user") is None
             and meta.get("data_path") == str(paths.data_path)
-            and meta.get("schema_version") == schema_version(BACKUPS_KIND, scope=paths.scope)
-            and meta.get("schema_path") == str(schema_path(BACKUPS_KIND, app_root=self.app_root, scope=paths.scope))
+            and meta.get("schema_version") == schema_version(HOSTS_KIND, scope=ADMIN_SCOPE)
+            and meta.get("schema_path") == str(schema_path(HOSTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE))
             and paths.data_path.exists()
             and paths.meta_path.exists()
         )
@@ -181,9 +176,9 @@ class DbaasBackupSynchronizer:
     def _snapshot(self, paths: DbaasSnapshotPaths, meta: dict[str, Any]) -> dict[str, Any]:
         return {
             **meta,
-            "kind": BACKUPS_KIND,
-            "scope": paths.scope,
-            "user": paths.user,
+            "kind": HOSTS_KIND,
+            "scope": ADMIN_SCOPE,
+            "user": None,
             "status": "fresh",
             "data_path": str(paths.data_path),
             "meta_path": str(paths.meta_path),
@@ -198,24 +193,25 @@ class DbaasBackupSynchronizer:
         write_meta_atomic(paths.meta_path, meta)
 
     def _write_unavailable_meta(self, paths: DbaasSnapshotPaths, message: str, *, error_type: str) -> None:
+        now = utcnow()
         meta = {
-            "kind": BACKUPS_KIND,
-            "scope": paths.scope,
-            "user": paths.user,
+            "kind": HOSTS_KIND,
+            "scope": ADMIN_SCOPE,
+            "user": None,
             "version": 1,
             "status": "error",
             "error_type": error_type,
             "data_path": None,
             "meta_path": str(paths.meta_path),
-            "synced_at": isoformat(utcnow()),
-            "expires_at": isoformat(utcnow() + self._ttl_delta()),
-            "ttl_seconds": self.config.backup_snapshot_ttl_seconds,
+            "synced_at": isoformat(now),
+            "expires_at": isoformat(now + timedelta(seconds=self.config.host_snapshot_ttl_seconds)),
+            "ttl_seconds": self.config.host_snapshot_ttl_seconds,
             "record_count": 0,
             "bytes": 0,
             "source": "dbaas-server",
-            "source_endpoint": BACKUPS_ENDPOINT,
-            "schema_version": schema_version(BACKUPS_KIND, scope=paths.scope),
-            "schema_path": str(schema_path(BACKUPS_KIND, app_root=self.app_root, scope=paths.scope)),
+            "source_endpoint": HOSTS_ENDPOINT,
+            "schema_version": schema_version(HOSTS_KIND, scope=ADMIN_SCOPE),
+            "schema_path": str(schema_path(HOSTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
             "last_refresh_status": "error",
             "last_error": message,
             "message": message,
@@ -224,38 +220,28 @@ class DbaasBackupSynchronizer:
 
     def _snapshot_unavailable(
         self,
-        paths: DbaasSnapshotPaths | None,
+        paths: DbaasSnapshotPaths,
         message: str,
         *,
         error_type: str = "snapshot_unavailable",
-        scope: str | None = None,
-        user: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "kind": BACKUPS_KIND,
-            "scope": paths.scope if paths is not None else scope,
-            "user": paths.user if paths is not None else user,
+            "kind": HOSTS_KIND,
+            "scope": ADMIN_SCOPE,
+            "user": None,
             "status": "error",
             "error_type": error_type,
             "data_path": None,
-            "meta_path": str(paths.meta_path) if paths is not None else None,
-            "message": f"当前没有可用的 DBAAS 备份数据视图，暂时无法获得准确数据：{message}",
+            "meta_path": str(paths.meta_path),
+            "last_error": message,
+            "message": f"当前没有可用的 DBAAS 主机数据视图，暂时无法获得准确数据：{message}",
         }
 
 
-def _validate_backup_payload_shape(payload: Any) -> str | None:
+def _validate_host_payload_shape(payload: Any) -> str | None:
     if not isinstance(payload, list):
-        return "DBAAS 备份接口返回结构不是数组。"
+        return "DBAAS 主机接口返回结构不是数组。"
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
-            return f"DBAAS 备份接口第 {index} 条记录不是对象。"
+            return f"DBAAS 主机接口第 {index} 条记录不是对象。"
     return None
-
-
-def _lock_for(key: str) -> threading.Lock:
-    with _refresh_locks_guard:
-        lock = _refresh_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _refresh_locks[key] = lock
-        return lock

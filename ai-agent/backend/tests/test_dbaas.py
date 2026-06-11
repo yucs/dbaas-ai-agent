@@ -120,7 +120,7 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["preview"], [{"name": "mysql-b", "runningStatus": "critical"}])
             self.assertIsInstance(result["synced_at"], str)
             self.assertIsInstance(result["expires_at"], str)
-            self.assertEqual(result["ttl_seconds"], config.ttl_seconds)
+            self.assertEqual(result["ttl_seconds"], config.service_snapshot_ttl_seconds)
 
     def test_tool_identity_context_can_exit_from_different_context(self) -> None:
         manager = dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None))
@@ -569,8 +569,9 @@ def _config(tmpdir: str) -> DbaasConfig:
         server_base_url="http://127.0.0.1:9000",
         request_timeout_seconds=1,
         workspace_dir=Path(tmpdir) / "workspace",
-        sync_interval_seconds=5,
-        ttl_seconds=30,
+        service_sync_interval_seconds=5,
+        service_snapshot_ttl_seconds=30,
+        backup_snapshot_ttl_seconds=30,
         user_active_idle_timeout_seconds=300,
         user_snapshot_refresh_wait_seconds=3,
         jq_timeout_seconds=2,
@@ -686,8 +687,8 @@ def _write_fresh_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> Non
             "scope": "admin",
             "status": "fresh",
             "synced_at": isoformat(now),
-            "expires_at": isoformat(now + timedelta(seconds=config.ttl_seconds)),
-            "ttl_seconds": config.ttl_seconds,
+            "expires_at": isoformat(now + timedelta(seconds=config.service_snapshot_ttl_seconds)),
+            "ttl_seconds": config.service_snapshot_ttl_seconds,
             "record_count": len(payload),
             "bytes": bytes_written,
             "data_path": str(data_path),
@@ -709,9 +710,9 @@ def _write_expired_admin_snapshot(config: DbaasConfig, payload: list[dict]) -> N
             "kind": SERVICES_KIND,
             "scope": "admin",
             "status": "fresh",
-            "synced_at": isoformat(now - timedelta(seconds=config.ttl_seconds * 2)),
+            "synced_at": isoformat(now - timedelta(seconds=config.service_snapshot_ttl_seconds * 2)),
             "expires_at": isoformat(now - timedelta(seconds=1)),
-            "ttl_seconds": config.ttl_seconds,
+            "ttl_seconds": config.service_snapshot_ttl_seconds,
             "record_count": len(payload),
             "bytes": bytes_written,
             "data_path": str(data_path),
@@ -735,8 +736,8 @@ def _write_fresh_user_snapshot(config: DbaasConfig, user: str, payload: list[dic
             "user": user,
             "status": "fresh",
             "synced_at": isoformat(now),
-            "expires_at": isoformat(now + timedelta(seconds=config.ttl_seconds)),
-            "ttl_seconds": config.ttl_seconds,
+            "expires_at": isoformat(now + timedelta(seconds=config.service_snapshot_ttl_seconds)),
+            "ttl_seconds": config.service_snapshot_ttl_seconds,
             "record_count": len(payload),
             "bytes": bytes_written,
             "data_path": str(paths.data_path),
@@ -759,9 +760,9 @@ def _write_expired_user_snapshot(config: DbaasConfig, user: str, payload: list[d
             "scope": "user",
             "user": user,
             "status": "fresh",
-            "synced_at": isoformat(now - timedelta(seconds=config.ttl_seconds * 2)),
+            "synced_at": isoformat(now - timedelta(seconds=config.service_snapshot_ttl_seconds * 2)),
             "expires_at": isoformat(now - timedelta(seconds=1)),
-            "ttl_seconds": config.ttl_seconds,
+            "ttl_seconds": config.service_snapshot_ttl_seconds,
             "record_count": len(payload),
             "bytes": bytes_written,
             "data_path": str(paths.data_path),
@@ -785,7 +786,7 @@ def _write_error_user_snapshot(config: DbaasConfig, user: str, message: str) -> 
             "error_type": "snapshot_unavailable",
             "synced_at": None,
             "expires_at": None,
-            "ttl_seconds": config.ttl_seconds,
+            "ttl_seconds": config.service_snapshot_ttl_seconds,
             "record_count": 0,
             "bytes": 0,
             "data_path": None,

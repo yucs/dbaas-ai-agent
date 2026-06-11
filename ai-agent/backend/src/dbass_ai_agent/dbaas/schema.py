@@ -8,6 +8,7 @@ from dbass_ai_agent.identity.models import Identity
 
 from .constants import (
     ADMIN_SCOPE,
+    HOSTS_KIND,
     SCHEMA_FILES,
     SCHEMA_VERSIONS,
     SUPPORTED_SCHEMA_KINDS,
@@ -23,12 +24,14 @@ class DbaasSchemaError(RuntimeError):
 def schema_version(kind: str, *, scope: str = ADMIN_SCOPE) -> str:
     _require_supported_kind(kind)
     _require_supported_scope(scope)
+    _require_kind_scope(kind, scope)
     return SCHEMA_VERSIONS[(kind, scope)]
 
 
 def schema_path(kind: str, *, app_root: Path, scope: str = ADMIN_SCOPE) -> Path:
     _require_supported_kind(kind)
     _require_supported_scope(scope)
+    _require_kind_scope(kind, scope)
     return (app_root / SCHEMA_FILES[(kind, scope)]).resolve()
 
 
@@ -65,3 +68,8 @@ def scope_for_identity(identity: Identity | None) -> str:
 def _require_supported_scope(scope: str) -> None:
     if scope not in {ADMIN_SCOPE, USER_SCOPE}:
         raise DbaasSchemaError(f"unsupported dbaas scope: {scope}")
+
+
+def _require_kind_scope(kind: str, scope: str) -> None:
+    if kind == HOSTS_KIND and scope != ADMIN_SCOPE:
+        raise DbaasSchemaError("hosts schema is only available for admin scope")

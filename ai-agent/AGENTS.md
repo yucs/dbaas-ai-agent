@@ -8,6 +8,18 @@
 
 当用户要求提交代码时，完成 commit 后应顺便 push 到当前分支对应的远端分支；如果 push 失败，需要向用户说明失败原因。
 
+## Prompt 与角色工具边界
+
+新增角色专属能力或 admin-only 工具时，不要把对应工具名、schema kind、调用示例或参数写进通用 `backend/prompts/system.md`。通用 prompt 只写所有角色都可见的能力和规则。
+
+角色专属能力应写入对应的 role extend prompt，例如管理员专属能力写入 `backend/prompts/admin_extend_system_prompt.md`；普通用户 prompt 只描述权限边界和可见范围，不暴露 admin-only 工具名或 schema 调用形式。
+
+新增或调整角色专属工具时，应补测试确认：
+
+- 对应 role 的 tool set 包含该工具
+- 其他 role 的 tool set 不包含该工具
+- 普通用户最终 system prompt 不包含 admin-only 工具名、schema kind 调用形式或示例参数
+
 ## 进度反馈与中断恢复
 
 当任务进入多文件联动修改、代码处于中间态或开发时间较长时，必须持续输出阶段性进度，避免界面长时间只显示“思考中”。

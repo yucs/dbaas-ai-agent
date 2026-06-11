@@ -82,8 +82,12 @@ class SettingsFromFileTests(unittest.TestCase):
 
                     [dbaas_workspace]
                     dir = "./var/dbaas"
-                    sync_interval_seconds = 5
-                    ttl_seconds = 30
+                    service_sync_interval_seconds = 5
+                    service_snapshot_ttl_seconds = 30
+                    backup_snapshot_ttl_seconds = 31
+                    host_sync_interval_seconds = 61
+                    host_snapshot_ttl_seconds = 121
+                    host_refresh_lock_timeout_seconds = 13
                     task_refresh_interval_seconds = 11
                     jq_timeout_seconds = 6
                     jq_max_preview_items = 25
@@ -127,8 +131,12 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.dbaas_request_timeout_seconds, 7)
             self.assertFalse(settings.dbaas_approval_current_value_enabled)
             self.assertEqual(settings.dbaas_approval_current_value_timeout_seconds, 3)
-            self.assertEqual(settings.dbaas_sync_interval_seconds, 5)
-            self.assertEqual(settings.dbaas_ttl_seconds, 30)
+            self.assertEqual(settings.dbaas_service_sync_interval_seconds, 5)
+            self.assertEqual(settings.dbaas_service_snapshot_ttl_seconds, 30)
+            self.assertEqual(settings.dbaas_backup_snapshot_ttl_seconds, 31)
+            self.assertEqual(settings.dbaas_host_sync_interval_seconds, 61)
+            self.assertEqual(settings.dbaas_host_snapshot_ttl_seconds, 121)
+            self.assertEqual(settings.dbaas_host_refresh_lock_timeout_seconds, 13)
             self.assertEqual(settings.dbaas_task_refresh_interval_seconds, 11)
             self.assertEqual(settings.dbaas_jq_timeout_seconds, 6)
             self.assertEqual(settings.dbaas_jq_max_preview_items, 25)

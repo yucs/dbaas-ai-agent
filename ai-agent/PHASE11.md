@@ -7,7 +7,7 @@
 - 核心边界：Phase11 首版只做 admin-only 主机查询，不做主机写操作，不接 `/hosts/{host_id}`，不做普通用户主机数据视图
 - 参考关系：
   - 查询形态参考 Phase5 services：使用 schema 描述结构，使用 jq 查询本地数据视图，原始大数据不直接进入模型上下文
-  - 刷新形态参考 Phase9 backups：采用 lazy refresh，不做后台常驻同步
+  - 刷新形态参考 Phase5 services 的 admin snapshot 后台刷新，并保留 Phase9 backups 风格的 tool 内 lazy refresh 兜底
 
 ## 1. Phase11 v1 目标
 
@@ -19,6 +19,7 @@ Phase11 第一版实现 DBAAS 主机资产查询能力。
 - 将 `GET /hosts` 返回的主机列表落盘为本地数据视图
 - 使用统一 hosts schema 描述查询字段
 - 使用 jq 查询本地主机数据视图
+- 后台周期刷新 admin hosts 数据视图
 - 支持 `refresh=true` 强制刷新
 - 明确主机字段、容量单位和状态枚举，避免模型猜测字段含义
 - 只将 host tool 注册给 admin agent
@@ -27,7 +28,6 @@ Phase11 第一版实现 DBAAS 主机资产查询能力。
 
 - 普通用户主机查询
 - 普通用户 host 数据视图
-- 后台周期同步 hosts
 - `/hosts/{host_id}` 主机详情接口
 - 主机入库、出库、启用、停用或维护切换
 - 主机迁移、调度、资源重分布
@@ -36,32 +36,38 @@ Phase11 第一版实现 DBAAS 主机资产查询能力。
 
 ## 2. 核心结论
 
-Host v1 采用 admin-only lazy refresh 数据视图。
+Host v1 采用 admin-only 后台周期刷新数据视图，并在 tool 内保留 lazy refresh 兜底。
 
 也就是说：
 
 - 只有管理员身份可以使用主机查询 tool
 - 普通 user agent 不注册 host tool
 - Host 数据只维护 admin scope 数据视图
-- 默认不做后台周期刷新
+- 后台周期刷新 `admin/hosts.json`
 - tool 调用时检查 `admin/hosts.meta.json`
 - 如果数据视图 fresh，直接执行 jq
-- 如果数据视图缺失或 stale，tool 内触发一次 `GET /hosts` 刷新
+- 如果数据视图缺失或 stale，tool 内触发一次 `GET /hosts` 刷新作为兜底
 - `refresh=true` 时无论当前数据视图是否 fresh，都强制刷新
 - 刷新失败时不使用 stale 数据冒充最新事实
+
+Host 和 services 的相似点：
+
+- 都使用本地数据视图承载大列表查询
+- 都通过后台周期刷新降低查询时延
+- 都支持 `refresh=true` 在用户明确要求最新时强制刷新
 
 Host 和 services 的差异：
 
 - services 是核心业务事实源，且涉及普通用户权限、active lease、prewarm 和后台同步
-- hosts 是管理员平台资产事实源，首版只服务按需查询
-- 因此 Host v1 不照搬 services 的后台同步和 user 数据视图机制
+- hosts 是管理员平台资产事实源，首版只服务管理员查询
+- Host v1 只照搬 services 的 admin snapshot 周期刷新，不照搬 user 数据视图、active lease 和 prewarm 机制
 
 Host 和 backups 的相似点：
 
 - 都是按需查询型数据视图
 - 都支持 `refresh=true`
 - 都可以在 tool 内按需拉取 DBAAS 最新数据
-- 都不需要后台常驻同步作为首版前提
+- refresh 失败时都不能使用 stale 数据冒充最新事实
 
 ## 3. Host Record Schema
 
@@ -121,16 +127,12 @@ DBAAS `/hosts` 应直接返回 agent-facing host record 数组。
 
 - `id`
   - 主机唯一 ID
-  - 使用 32 位随机数的十进制字符串
 - `siteId`
   - 站点 ID
-  - 使用 32 位随机数的十进制字符串
 - `areaId`
   - 区域 ID
-  - 使用 32 位随机数的十进制字符串
 - `clusterId`
   - 集群 ID
-  - 使用 32 位随机数的十进制字符串
 - `name`
   - 主机名称
 - `ip`
@@ -163,18 +165,16 @@ DBAAS `/hosts` 应直接返回 agent-facing host record 数组。
   - CPU 总核数
 - `cpuAllocatedCores`
   - 已分配 CPU 核数
-  - 表示 DBAAS 单元规格分配量，不表示实时 CPU 使用率
 - `cpuAvailableCores`
   - 可分配 CPU 核数
 - `cpuAllocationPercent`
   - CPU 分配率
 - `memoryCapacityGB`
-  - 内存总容量，单位 GB
+  - 内存总容量
 - `memoryAllocatedGB`
-  - 已分配内存，单位 GB
-  - 表示 DBAAS 单元规格分配量，不表示实时内存使用率
+  - 已分配内存
 - `memoryAvailableGB`
-  - 可分配内存，单位 GB
+  - 可分配内存
 - `memoryAllocationPercent`
   - 内存分配率
 - `hdd`
@@ -217,11 +217,11 @@ DBAAS `/hosts` 应直接返回 agent-facing host record 数组。
 - `device`
   - 主机侧设备路径
 - `capacityGB`
-  - 存储总容量，单位 GB
+  - 存储总容量
 - `usedGB`
-  - 已使用容量，单位 GB
+  - 已使用容量
 - `availableGB`
-  - 可用容量，单位 GB
+  - 可用容量
 - `usagePercent`
   - 容量使用率
 
@@ -314,8 +314,8 @@ data/runtime/dbaas_workspace/users/{safe_user}/hosts.meta.json
   "meta_path": ".../admin/hosts.meta.json",
   "status": "fresh",
   "synced_at": "2026-06-10T12:00:00+08:00",
-  "expires_at": "2026-06-10T12:00:30+08:00",
-  "ttl_seconds": 30,
+  "expires_at": "2026-06-10T12:02:00+08:00",
+  "ttl_seconds": 120,
   "record_count": 2880,
   "bytes": 3241888,
   "source": "dbaas",
@@ -337,9 +337,21 @@ meta 规则：
 - `status=error` 时 `data_path` 必须为 `null`
 - tool 不能返回 stale 数据视图的 `data_path`
 
-## 6. Lazy Refresh 策略
+## 6. 后台刷新与 Lazy Refresh 策略
 
-Host v1 不做后台周期同步。
+Host v1 做 admin hosts 后台周期刷新，同时在查询 tool 内保留 lazy refresh 兜底。
+
+后台刷新规则：
+
+- 启动后由 DBAAS background sync 创建独立 admin hosts 刷新任务
+- 后台任务只刷新 `admin/hosts.json`，不创建普通用户 hosts 视图
+- hosts 后台刷新使用独立配置，不直接复用 services 的短周期：
+  - `host_sync_interval_seconds`
+  - `host_snapshot_ttl_seconds`
+  - `host_refresh_lock_timeout_seconds`
+- 后台刷新失败时不删除仍 fresh 的旧 `hosts.json`
+- 后台刷新失败应记录 `last_refresh_status=error` 和 `last_error`
+- 如果当前 snapshot 已 stale/missing，刷新失败时发布 `status=error`、`data_path=null` 的 meta
 
 查询 tool 调用时执行 lazy refresh 判断：
 
@@ -352,9 +364,12 @@ query_dbaas_host_data_tool(refresh=false):
   5. 刷新失败返回 snapshot_unavailable，不使用 stale 数据
 
 query_dbaas_host_data_tool(refresh=true):
-  1. 无论当前数据视图是否 fresh，都调用 GET /hosts
-  2. 刷新成功后执行 jq
-  3. 刷新失败返回 refresh_failed，不使用旧数据冒充最新
+  1. 获取 host 数据视图刷新锁
+  2. 不预先删除旧 hosts.json
+  3. 无论当前数据视图是否 fresh，都调用 GET /hosts
+  4. 刷新成功后原子替换 hosts.json 和 hosts.meta.json，然后执行 jq
+  5. 刷新失败返回 refresh_failed，data_path=null，不使用旧数据冒充最新
+  6. 如果旧 snapshot 仍 fresh，可物理保留供后续非强刷查询使用
 ```
 
 刷新成功时：
@@ -371,14 +386,18 @@ query_dbaas_host_data_tool(refresh=true):
 - 如果是 `refresh=true`，返回 `refresh_failed`
 - 如果是默认 lazy refresh，返回 `snapshot_unavailable`
 - 不基于 stale 旧数据视图回答
-- 可以保留旧 meta 里的错误信息供排查，但 tool 不暴露 stale data path
+- `refresh=true` 失败时不预先删除旧 snapshot
+- 如果旧 snapshot 仍 fresh，可以保留旧 data 文件，并在 meta 中记录 `last_refresh_status=error`、`last_error`
+- 如果旧 snapshot 已 stale/missing，写入 `status=error`、`data_path=null` 的 meta
+- tool 本次响应不暴露 stale data path
 
 并发规则：
 
 - Host 只有 admin scope
 - 同一进程内应使用 host 数据视图刷新锁
 - 多个并发 host 查询命中 stale/missing 数据视图时，只允许一个请求实际调用 DBAAS
-- 其他查询等待同一个刷新结果，最多等待配置的 refresh lock timeout
+- 后台刷新和 tool 刷新共用同一个 host refresh lock
+- 其他查询等待同一个刷新结果，最多等待 `host_refresh_lock_timeout_seconds`
 - jq 查询本身不加锁，读取当前正式发布的 `hosts.json`
 
 ## 7. Tool 设计
@@ -513,6 +532,13 @@ Host tool 是管理员工具。
 - 如果普通用户询问主机列表、主机 IP、主机容量或主机健康，模型应说明当前身份无权查询平台主机资产
 - 不应尝试使用 services user 数据视图推断隐藏主机信息
 
+Prompt 边界：
+
+- 通用 `backend/prompts/system.md` 不写 host tool 名、hosts schema kind 调用形式或主机查询参数示例
+- 主机查询说明只写入 `backend/prompts/admin_extend_system_prompt.md`
+- `backend/prompts/user_extend_system_prompt.md` 只描述普通用户无权查询主机资产，不暴露 `query_dbaas_host_data_tool` 或 `describe_dbaas_schema_tool(kind="hosts")`
+- 这样可以避免普通用户 agent 虽未注册 host tool，却因通用 prompt 暴露工具名而尝试无效工具调用
+
 ## 10. 模型行为规则
 
 模型应该：
@@ -546,12 +572,14 @@ Host tool 是管理员工具。
 - schema 测试
   - `hosts.v1.schema.json` 可完整加载并通过 schema tool 返回
   - `hdd` / `ssd` 允许对象或 `null`
-  - `id`、`siteId`、`areaId`、`clusterId` 是 32 位随机数的十进制字符串
+  - `id`、`siteId`、`areaId`、`clusterId` 使用字符串类型，不限制具体格式
 - sync 测试
+  - 后台 admin hosts sync task 会启动并刷新
   - missing 数据视图时 lazy refresh 成功
   - stale 数据视图时 lazy refresh 成功
   - `refresh=true` 强制刷新
-  - refresh 失败时不返回 stale data path
+  - `refresh=true` 失败时不返回 stale data path
+  - `refresh=true` 失败但旧 fresh snapshot 仍可供后续非强刷查询使用
   - 并发查询只触发一次 DBAAS 请求
 - query 测试
   - jq 查询 enabled 主机
@@ -567,6 +595,8 @@ Host tool 是管理员工具。
   - admin tool set 包含 `query_dbaas_host_data_tool`
   - user tool set 不包含该 tool
   - `describe_dbaas_schema_tool(kind="hosts")` 支持 hosts schema
+  - user system prompt 不包含 admin-only host tool 名或 hosts schema 调用形式
+  - admin system prompt 包含 host tool 使用规则
 
 ## 12. 后续扩展
 
@@ -578,7 +608,6 @@ Host tool 是管理员工具。
 - 主机维护状态切换
 - 主机入库、出库、启用、停用
 - 主机资源迁移建议
-- Host 数据视图后台同步
 - Host 和 Services 的公共 jq runner / 数据视图基础抽象
 
 首版不提前实现这些扩展，避免把 admin-only 主机查询做重。

@@ -10,6 +10,7 @@ from dbass_ai_agent.identity.models import Identity, UserRole
 
 from .backup_tools import build_backup_tools
 from .capability_tools import build_capability_tools
+from .host_tools import build_host_tools
 from .metric_tools import build_metric_tools
 from .precheck_tools import build_precheck_tools
 from .service_tools import build_service_tools
@@ -50,8 +51,7 @@ def build_dbaas_tools(settings: Settings, role: UserRole) -> list[Any]:
 
 
 def build_admin_only_tools(settings: Settings) -> list[Any]:
-    del settings
-    return []
+    return build_host_tools(settings, _require_identity)
 
 
 def _require_identity() -> Identity:

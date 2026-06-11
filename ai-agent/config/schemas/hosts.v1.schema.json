@@ -1,0 +1,242 @@
+{
+  "$id": "hosts.v1",
+  "title": "HostsV1",
+  "description": "DBAAS 管理员主机资产列表快照。顶层为主机记录数组。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "单台主机资产记录。",
+    "required": [
+      "id",
+      "name",
+      "ip",
+      "sshPort",
+      "siteId",
+      "siteName",
+      "clusterId",
+      "clusterName",
+      "clusterEnabled",
+      "areaId",
+      "areaName",
+      "room",
+      "seat",
+      "networkPartition",
+      "status",
+      "healthStatus",
+      "cpuArchitecture",
+      "cpuArchitectureName",
+      "cpuCapacityCores",
+      "cpuAllocatedCores",
+      "cpuAvailableCores",
+      "cpuAllocationPercent",
+      "memoryCapacityGB",
+      "memoryAllocatedGB",
+      "memoryAvailableGB",
+      "memoryAllocationPercent",
+      "hdd",
+      "ssd",
+      "sanName",
+      "maxUnitCount",
+      "maxUsagePercent",
+      "unitCount",
+      "createdAt",
+      "creator",
+      "creatorName"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "ip": {
+        "type": "string"
+      },
+      "sshPort": {
+        "type": "integer"
+      },
+      "siteId": {
+        "type": "string"
+      },
+      "siteName": {
+        "type": "string"
+      },
+      "clusterId": {
+        "type": "string"
+      },
+      "clusterName": {
+        "type": "string"
+      },
+      "clusterEnabled": {
+        "type": "boolean"
+      },
+      "areaId": {
+        "type": "string"
+      },
+      "areaName": {
+        "type": "string"
+      },
+      "room": {
+        "type": "string"
+      },
+      "seat": {
+        "type": "string"
+      },
+      "networkPartition": {
+        "type": "string",
+        "description": "HA 网络分区"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "onboarding",
+          "offboarding",
+          "maintenance"
+        ],
+        "description": "主机管控状态"
+      },
+      "healthStatus": {
+        "type": "string",
+        "enum": [
+          "HEALTHY",
+          "WARN",
+          "UNHEALTHY",
+          "UNKNOWN"
+        ],
+        "description": "主机健康状态"
+      },
+      "cpuArchitecture": {
+        "type": "string",
+        "description": "CPU 架构机器值，例如 amd64 或 arm64"
+      },
+      "cpuArchitectureName": {
+        "type": "string",
+        "description": "CPU 架构显示名称，例如 X86 或 ARM"
+      },
+      "cpuCapacityCores": {
+        "type": "number",
+        "description": "CPU 总核数"
+      },
+      "cpuAllocatedCores": {
+        "type": "number",
+        "description": "已分配 CPU 核数"
+      },
+      "cpuAvailableCores": {
+        "type": "number",
+        "description": "可分配 CPU 核数"
+      },
+      "cpuAllocationPercent": {
+        "type": "number",
+        "description": "CPU 分配率"
+      },
+      "memoryCapacityGB": {
+        "type": "number",
+        "description": "内存总容量"
+      },
+      "memoryAllocatedGB": {
+        "type": "number",
+        "description": "已分配内存"
+      },
+      "memoryAvailableGB": {
+        "type": "number",
+        "description": "可分配内存"
+      },
+      "memoryAllocationPercent": {
+        "type": "number",
+        "description": "内存分配率"
+      },
+      "hdd": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/HostStorageDevice"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "HDD 存储设备摘要；没有 HDD 时为 null"
+      },
+      "ssd": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/HostStorageDevice"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "SSD 存储设备摘要；没有 SSD 时为 null"
+      },
+      "sanName": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "SAN 存储名称，没有时为 null"
+      },
+      "maxUnitCount": {
+        "type": "integer",
+        "description": "主机最大承载单元数量"
+      },
+      "maxUsagePercent": {
+        "type": "number",
+        "description": "主机最大资源使用率"
+      },
+      "unitCount": {
+        "type": "integer",
+        "description": "当前已承载单元数量"
+      },
+      "createdAt": {
+        "type": "string",
+        "description": "主机记录创建时间，格式 YYYY-MM-DD HH:mm:ss"
+      },
+      "creator": {
+        "type": "string",
+        "description": "主机记录创建人账号"
+      },
+      "creatorName": {
+        "type": "string",
+        "description": "主机记录创建人姓名"
+      }
+    }
+  },
+  "$defs": {
+    "HostStorageDevice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device",
+        "capacityGB",
+        "usedGB",
+        "availableGB",
+        "usagePercent"
+      ],
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "主机侧设备路径"
+        },
+        "capacityGB": {
+          "type": "number",
+          "description": "存储总容量"
+        },
+        "usedGB": {
+          "type": "number",
+          "description": "已使用容量"
+        },
+        "availableGB": {
+          "type": "number",
+          "description": "可用容量"
+        },
+        "usagePercent": {
+          "type": "number",
+          "description": "容量使用率"
+        }
+      }
+    }
+  }
+}

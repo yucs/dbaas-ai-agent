@@ -35,7 +35,7 @@ from dbass_ai_agent.agent.factory import (  # noqa: E402
 )
 from dbass_ai_agent.agent.compression_events import capture_compression_notices  # noqa: E402
 from dbass_ai_agent.agent.prompt import load_compression_prompt, load_system_prompt  # noqa: E402
-from dbass_ai_agent.config import Settings  # noqa: E402
+from dbass_ai_agent.config import APP_ROOT, Settings  # noqa: E402
 
 
 def _tool_name(tool: object) -> str | None:
@@ -259,6 +259,17 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
 
             self.assertEqual(load_system_prompt(system_path, "user"), "common rules\n\nuser rules")
             self.assertEqual(load_system_prompt(system_path, "admin"), "common rules\n\nadmin rules")
+
+    def test_real_user_prompt_does_not_expose_admin_host_tool(self) -> None:
+        system_path = APP_ROOT / "backend" / "prompts" / "system.md"
+
+        user_prompt = load_system_prompt(system_path, "user")
+        admin_prompt = load_system_prompt(system_path, "admin")
+
+        self.assertNotIn("query_dbaas_host_data_tool", user_prompt)
+        self.assertNotIn('kind="hosts"', user_prompt)
+        self.assertIn("query_dbaas_host_data_tool", admin_prompt)
+        self.assertIn('kind="hosts"', admin_prompt)
 
     def test_load_system_prompt_requires_role_extend_prompt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

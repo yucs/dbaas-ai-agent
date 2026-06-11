@@ -51,8 +51,9 @@ class Settings:
     dbaas_approval_current_value_enabled: bool = True
     dbaas_approval_current_value_timeout_seconds: int = 5
     dbaas_workspace_dir: Path = APP_ROOT / "data" / "runtime" / "dbaas_workspace"
-    dbaas_sync_interval_seconds: int = 5
-    dbaas_ttl_seconds: int = 30
+    dbaas_service_sync_interval_seconds: int = 5
+    dbaas_service_snapshot_ttl_seconds: int = 30
+    dbaas_backup_snapshot_ttl_seconds: int = 30
     dbaas_user_active_idle_timeout_seconds: int = 300
     dbaas_user_snapshot_refresh_wait_seconds: int = 3
     dbaas_task_refresh_interval_seconds: int = 10
@@ -62,6 +63,9 @@ class Settings:
     dbaas_metric_snapshot_ttl_seconds: int = 30
     dbaas_metric_snapshot_cleanup_interval_seconds: int = 600
     dbaas_metric_refresh_lock_timeout_seconds: int = 10
+    dbaas_host_sync_interval_seconds: int = 60
+    dbaas_host_snapshot_ttl_seconds: int = 120
+    dbaas_host_refresh_lock_timeout_seconds: int = 10
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -164,12 +168,21 @@ class Settings:
                     "./data/runtime/dbaas_workspace",
                 ),
             ),
-            dbaas_sync_interval_seconds=_get_positive_int(
+            dbaas_service_sync_interval_seconds=_get_positive_int(
                 dbaas_workspace,
-                "sync_interval_seconds",
+                "service_sync_interval_seconds",
                 5,
             ),
-            dbaas_ttl_seconds=_get_positive_int(dbaas_workspace, "ttl_seconds", 30),
+            dbaas_service_snapshot_ttl_seconds=_get_positive_int(
+                dbaas_workspace,
+                "service_snapshot_ttl_seconds",
+                30,
+            ),
+            dbaas_backup_snapshot_ttl_seconds=_get_positive_int(
+                dbaas_workspace,
+                "backup_snapshot_ttl_seconds",
+                30,
+            ),
             dbaas_user_active_idle_timeout_seconds=_get_positive_int(
                 dbaas_workspace,
                 "user_active_idle_timeout_seconds",
@@ -213,6 +226,21 @@ class Settings:
             dbaas_metric_refresh_lock_timeout_seconds=_get_positive_int(
                 dbaas_workspace,
                 "metric_refresh_lock_timeout_seconds",
+                10,
+            ),
+            dbaas_host_sync_interval_seconds=_get_positive_int(
+                dbaas_workspace,
+                "host_sync_interval_seconds",
+                60,
+            ),
+            dbaas_host_snapshot_ttl_seconds=_get_positive_int(
+                dbaas_workspace,
+                "host_snapshot_ttl_seconds",
+                120,
+            ),
+            dbaas_host_refresh_lock_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "host_refresh_lock_timeout_seconds",
                 10,
             ),
         )

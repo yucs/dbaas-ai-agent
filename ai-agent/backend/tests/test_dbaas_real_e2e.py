@@ -319,8 +319,9 @@ def _real_e2e_settings(root: Path, mock_port: int) -> Settings:
         log_file=root / "logs" / "app.log",
         dbaas_server_base_url=f"http://127.0.0.1:{mock_port}",
         dbaas_workspace_dir=root / "runtime" / "dbaas_workspace",
-        dbaas_sync_interval_seconds=1,
-        dbaas_ttl_seconds=60,
+        dbaas_service_sync_interval_seconds=1,
+        dbaas_service_snapshot_ttl_seconds=60,
+        dbaas_backup_snapshot_ttl_seconds=60,
         max_output_tokens=min(settings.max_output_tokens, 512),
     )
 
