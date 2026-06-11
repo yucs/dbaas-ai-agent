@@ -204,3 +204,138 @@ messageStreamController
 
 这些升级可以提升 thinking 阶段和同步阻塞调用中的中断及时性，
 但不是第一版 run 中断设计的前提。
+
+## 2. DBAAS jq 查询完整结果导出与复用分析
+
+### 2.1 背景
+
+当前 DBAAS services / backups 查询工具使用 jq 对本地数据视图执行查询，
+并只将截断后的 `preview` 返回给模型上下文。
+
+该设计可以避免大体积原始数据直接进入 LLM 上下文，但在以下场景中不够：
+
+- 用户明确需要完整明细清单
+- 查询结果被截断后，用户需要下载全部匹配记录
+- 用户希望基于某次完整查询结果继续做分组、统计或二次筛选
+
+### 2.2 目标
+
+未来支持 jq 查询结果的受控导出：
+
+- 默认查询仍只返回截断 `preview`
+- 只有用户明确要求“导出”、“保存文件”、“下载完整明细”或“生成清单文件”时才写文件
+- 导出时完整 jq 结果写入运行时导出目录
+- tool 返回截断 `preview`、`export_id`、文件元信息和下载入口
+- 后续可以基于 `export_id` 对同一份导出结果继续执行 jq 分析
+
+### 2.3 非目标
+
+第一版不做以下能力：
+
+- 不把完整导出内容直接塞进模型上下文
+- 不允许模型或用户传入任意输出路径
+- 不把本地绝对文件路径直接暴露为前端下载地址
+- 不自动为所有截断查询写导出文件
+- 不承诺导出文件永久保存
+
+### 2.4 Tool 行为草案
+
+现有查询工具未来可以增加导出参数：
+
+```text
+export_full_result: bool = false
+export_name_hint: str | None = None
+```
+
+行为规则：
+
+- `export_full_result=false` 时，保持当前行为，只返回截断 `preview`
+- `export_full_result=true` 时，将完整 jq 输出写入服务端生成的导出文件
+- `export_name_hint` 只作为文件名前缀建议，必须经过服务端清洗
+- 最终目录、文件名、扩展名和访问权限由服务端决定
+
+示例返回：
+
+```json
+{
+  "status": "success",
+  "preview": [],
+  "preview_count": 50,
+  "truncated": true,
+  "export": {
+    "export_id": "exp_20260610_173012_a8f3",
+    "display_name": "backup-strategy-conflicts-20260610-173012.jsonl",
+    "format": "jsonl",
+    "record_count": 1280,
+    "size_bytes": 384920,
+    "sha256": "...",
+    "download_url": "/api/v1/exports/exp_20260610_173012_a8f3/download",
+    "truncated": false
+  },
+  "message": "查询结果较大，已返回截断预览，并将完整结果导出为文件。"
+}
+```
+
+这里的 `truncated=true` 表示返回给模型的 preview 被截断；
+`export.truncated=false` 表示导出文件中的结果未被截断。
+
+### 2.5 对话框下载体验
+
+前端收到 tool 结果或 assistant 消息中的 export 元信息后，可以在对话框内渲染下载附件：
+
+```text
+完整明细已导出：backup-strategy-conflicts-20260610-173012.jsonl
+[下载]
+```
+
+下载按钮不应直接使用本地 `file_path`，而应请求后端受控下载接口：
+
+```http
+GET /api/v1/exports/{export_id}/download
+```
+
+下载接口职责：
+
+- 校验当前用户是否有权访问该 `export_id`
+- 校验导出文件是否存在、未过期、未超过权限边界
+- 设置安全的 `Content-Disposition` 文件名
+- 返回文件流
+
+如果导出文件已过期或不存在，前端应提示用户重新导出。
+
+### 2.6 基于导出结果继续分析
+
+后续可以增加导出结果查询工具：
+
+```text
+query_dbaas_export_result_tool
+```
+
+参数草案：
+
+```json
+{
+  "export_id": "exp_20260610_173012_a8f3",
+  "jq_filter": "group_by(.serviceType) | map({serviceType: .[0].serviceType, count: length})",
+  "max_preview_items": 50
+}
+```
+
+该工具只允许通过 `export_id` 定位文件，不接受任意文件路径。
+模型仍然只接收 jq 分析后的聚合结果或截断 preview，
+不直接读取完整大文件。
+
+这种设计可以保证后续分析基于用户当时导出的同一份结果，
+避免后续 DBAAS snapshot 刷新导致“这些数据”的语义变化。
+
+### 2.7 安全与治理
+
+后续实现时需要考虑：
+
+- 导出文件按用户、身份、Session 或 thread 做访问隔离
+- 导出目录位于 runtime workspace 内
+- 使用临时文件写入，完成后 `os.replace` 原子发布
+- 配置最大导出字节数，超限时返回 `export_too_large`
+- 配置导出文件 TTL 和清理机制
+- 下载接口不暴露服务端真实路径
+- 日志记录导出行为，但避免记录完整数据内容
