@@ -284,7 +284,7 @@ class SendMessageApiTests(unittest.TestCase):
                 self.assertEqual(same_identity_list.status_code, 200)
                 self.assertEqual(len(same_identity_list.json()["items"]), 1)
                 self.assertEqual(same_identity_list.json()["stale_identity_items"], [])
-                current_identity["value"] = Identity(user_id="alice", role="admin", user=None)
+                current_identity["value"] = Identity(user_id="alice", role="admin", user="alice")
 
                 changed_identity_list = client.get("/api/v1/sessions")
                 self.assertEqual(changed_identity_list.status_code, 200)
@@ -348,6 +348,45 @@ class SendMessageApiTests(unittest.TestCase):
             self.assertEqual(message_response.json()["detail"]["error_type"], "session_identity_changed")
             self.assertEqual(runtime.calls, [])
 
+    def test_send_message_rejects_admin_user_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            current_identity = {
+                "value": Identity(user_id="alice", role="admin", user="alice"),
+            }
+            service = SessionService(
+                repository=SessionRepository(
+                    data_root=Path(tmpdir),
+                    index_store=IndexStore(),
+                    message_store=MessageStore(),
+                    approval_store=ApprovalStore(),
+                    operation_store=OperationStore(),
+                    task_store=TaskStore(),
+                ),
+                thread_binding=ThreadBinding(),
+            )
+            runtime = StubAgentRuntime()
+            app = FastAPI()
+            app.include_router(sessions_router)
+            app.include_router(chat_router)
+            app.dependency_overrides[get_current_identity] = lambda: current_identity["value"]
+            app.dependency_overrides[get_session_service] = lambda: service
+            app.dependency_overrides[get_agent_runtime] = lambda: runtime
+
+            with TestClient(app) as client:
+                create_response = client.post("/api/v1/sessions", json={"title": "管理员用户变化测试"})
+                self.assertEqual(create_response.status_code, 200)
+                session_id = create_response.json()["session"]["meta"]["session_id"]
+                current_identity["value"] = Identity(user_id="alice", role="admin", user="ops-alice")
+
+                message_response = client.post(
+                    f"/api/v1/sessions/{session_id}/messages",
+                    json={"content": "继续这个管理员会话"},
+                )
+
+            self.assertEqual(message_response.status_code, 409)
+            self.assertEqual(message_response.json()["detail"]["error_type"], "session_identity_changed")
+            self.assertEqual(runtime.calls, [])
+
     def test_delete_session_allows_cleanup_after_role_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             current_identity = {
@@ -379,7 +418,7 @@ class SendMessageApiTests(unittest.TestCase):
                 create_response = client.post("/api/v1/sessions", json={"title": "旧身份清理测试"})
                 self.assertEqual(create_response.status_code, 200)
                 session_id = create_response.json()["session"]["meta"]["session_id"]
-                current_identity["value"] = Identity(user_id="alice", role="admin", user=None)
+                current_identity["value"] = Identity(user_id="alice", role="admin", user="alice")
 
                 delete_response = client.delete(f"/api/v1/sessions/{session_id}")
 

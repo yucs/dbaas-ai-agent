@@ -68,7 +68,7 @@
 
 即：
 
-- 当前用户登录后，主会话列表只展示 `user_id`、`role` 和普通用户 `user` 均匹配当前身份的 Session
+- 当前用户登录后，主会话列表只展示 `user_id`、`role` 和 `user` 均匹配当前身份的 Session
 - 不能在页面上看到其他用户的 Session
 - 管理员当前阶段也不例外
 - 登录身份或角色变化后，不复用旧 Session，应创建新的 Session
@@ -116,13 +116,12 @@
 
 规则：
 
-- 当 `role = user` 时
-  - `user = user_id`
-- 当 `role = admin` 时
-  - `user` 可以为空
+- `user_id` 是具体登录用户账号，不是角色名
+- `role` 只表示 `user` 或 `admin`
+- 当前本地登录默认 `user = user_id`，管理员也必须有具体 `user`
 
 Session 创建后身份不可变。
-如果 `role` 或普通用户 `user` 发生变化，前端应切换到新建 Session，
+如果 `role` 或 `user` 发生变化，前端应切换到新建 Session，
 不应继续向旧 Session 发送消息、处理审批或订阅任务事件。
 如果前端保留旧 Session 的删除入口，只能调用删除接口做本地清理，
 不能把旧 Session 打开后继续操作。

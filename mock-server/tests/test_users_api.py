@@ -11,7 +11,7 @@ def create_test_client() -> TestClient:
 def admin_headers() -> dict[str, str]:
     return {
         "Authorization": "Bearer admin",
-        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-User": "ops-admin",
         "X-DBAAS-Actor-Role": "admin",
     }
 
@@ -41,6 +41,22 @@ def test_user_token_requires_actor_headers() -> None:
 
     assert response.status_code == 401
     assert response.json() == {"detail": "missing X-DBAAS-Actor-User header"}
+
+
+def test_admin_token_rejects_reserved_admin_actor_user() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/users",
+        headers={
+            "Authorization": "Bearer admin",
+            "X-DBAAS-Actor-User": "admin",
+            "X-DBAAS-Actor-Role": "admin",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "admin actor user must be a concrete user"}
 
 
 def test_list_users_returns_all_known_users_for_admin() -> None:

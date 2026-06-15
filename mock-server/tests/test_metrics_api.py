@@ -13,7 +13,7 @@ def create_test_client(task_unit_interval_seconds: float = 0.01) -> TestClient:
 def admin_headers() -> dict[str, str]:
     return {
         "Authorization": "Bearer admin",
-        "X-DBAAS-Actor-User": "admin",
+        "X-DBAAS-Actor-User": "ops-admin",
         "X-DBAAS-Actor-Role": "admin",
     }
 

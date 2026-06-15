@@ -658,7 +658,7 @@ function authHeaders() {
   return {
     "X-User-Id": state.auth.user_id,
     "X-User-Role": state.auth.role,
-    "X-User": state.auth.role === "user" ? state.auth.user : "",
+    "X-User": state.auth.user || state.auth.user_id,
     "Content-Type": "application/json",
   };
 }
@@ -1692,7 +1692,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   state.auth = {
     user_id: userId,
     role,
-    user: role === "user" ? userId : "",
+    user: userId,
   };
 
   saveAuth(state.auth);

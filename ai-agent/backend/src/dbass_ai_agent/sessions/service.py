@@ -303,7 +303,7 @@ class SessionService:
             return False
         if meta.role != identity.role:
             return False
-        return meta.role != "user" or meta.user == identity.user
+        return meta.user == identity.user
 
     @staticmethod
     def _assert_safe_session_id(session_id: str) -> None:

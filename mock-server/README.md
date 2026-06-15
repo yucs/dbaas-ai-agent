@@ -60,7 +60,7 @@
 ```bash
 curl http://127.0.0.1:8000/services/payad001 \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -175,7 +175,7 @@ curl http://127.0.0.1:8000/healthz
 ```bash
 curl http://127.0.0.1:8000/services/payad001 \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -184,7 +184,7 @@ curl http://127.0.0.1:8000/services/payad001 \
 ```bash
 curl http://127.0.0.1:8000/sites \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -193,7 +193,7 @@ curl http://127.0.0.1:8000/sites \
 ```bash
 curl http://127.0.0.1:8000/hosts/host-01-01 \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -202,7 +202,7 @@ curl http://127.0.0.1:8000/hosts/host-01-01 \
 ```bash
 curl http://127.0.0.1:8000/services \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -211,7 +211,7 @@ curl http://127.0.0.1:8000/services \
 ```bash
 curl http://127.0.0.1:8000/users \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -220,7 +220,7 @@ curl http://127.0.0.1:8000/users \
 ```bash
 curl http://127.0.0.1:8000/users/payment-team-prod \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -229,7 +229,7 @@ curl http://127.0.0.1:8000/users/payment-team-prod \
 ```bash
 curl 'http://127.0.0.1:8000/services?user=payment-team-prod' \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -247,7 +247,7 @@ curl http://127.0.0.1:8000/services \
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -263,7 +263,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-resource-update \
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/prechecks/service-storage-update \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -287,7 +287,7 @@ precheck 联调触发 `blocking_errors` 的固定阈值：
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/payad001/resource \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -303,7 +303,7 @@ curl -X PUT http://127.0.0.1:8000/services/payad001/resource \
 ```bash
 curl -X PUT http://127.0.0.1:8000/services/payad001/storage \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -325,7 +325,7 @@ curl -X PUT http://127.0.0.1:8000/services/payad001/storage \
 ```bash
 curl -X POST http://127.0.0.1:8000/services/payad001/image-upgrade \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -341,7 +341,7 @@ curl -X POST http://127.0.0.1:8000/services/payad001/image-upgrade \
 ```bash
 curl http://127.0.0.1:8000/tasks/a3f9c2017b12e0af9d45c8b00123abcd \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -350,7 +350,7 @@ curl http://127.0.0.1:8000/tasks/a3f9c2017b12e0af9d45c8b00123abcd \
 ```bash
 curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 
@@ -377,7 +377,7 @@ curl 'http://127.0.0.1:8000/metrics/latest?metric_key=container.cpu.use' \
 ```bash
 curl 'http://127.0.0.1:8000/units/aaa8ee1f_payad001/metrics/history?metric_key=container.cpu.use&start_ts=1777437600&end_ts=1777441200' \
   -H 'Authorization: Bearer admin' \
-  -H 'X-DBAAS-Actor-User: admin' \
+  -H 'X-DBAAS-Actor-User: ops-admin' \
   -H 'X-DBAAS-Actor-Role: admin'
 ```
 

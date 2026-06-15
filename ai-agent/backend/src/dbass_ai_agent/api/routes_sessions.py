@@ -256,7 +256,7 @@ def _session_identity_matches(meta, identity: Identity) -> bool:
         return False
     if meta.role != identity.role:
         return False
-    return meta.role != "user" or meta.user == identity.user
+    return meta.user == identity.user
 
 
 def _raise_session_run_locked() -> None:

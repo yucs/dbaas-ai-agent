@@ -45,6 +45,8 @@ def get_current_user(
         actor_user_value, actor_role_value = _require_actor(actor_user, actor_role)
         if actor_role_value not in {"admin", "system"}:
             _raise_unauthorized("invalid actor role for admin token")
+        if actor_role_value == "admin" and actor_user_value.lower() == "admin":
+            _raise_unauthorized("admin actor user must be a concrete user")
         return CurrentUser(
             role="admin",
             actor_user=actor_user_value,

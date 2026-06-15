@@ -40,9 +40,5 @@ def resolve_identity(request: Request) -> Identity:
 
     role: UserRole = raw_role  # type: ignore[assignment]
 
-    if role == "admin":
-        user = _require_safe_value("user", raw_user) if raw_user else None
-        return Identity(user_id=user_id, role=role, user=user)
-
     user = _require_safe_value("user", raw_user) if raw_user else user_id
     return Identity(user_id=user_id, role=role, user=user)
