@@ -24,7 +24,7 @@ BACKUP_IDS: set[str] = set()
 TASK_IDS: set[str] = set()
 
 SITE_COUNT = 12
-CLUSTERS_PER_SITE = 4
+CLUSTERS_PER_SITE = 9
 HOSTS_PER_CLUSTER = 60
 GENERATED_SERVICE_COUNT = 2200
 BACKUP_REFERENCE_TIME = datetime(2026, 6, 1, 10, 0, 0)
@@ -110,6 +110,8 @@ def main() -> None:
     backups = build_backups(public_services)
     for site in sites:
         site.pop("_logicalId", None)
+    for cluster in clusters:
+        cluster.pop("sequence", None)
     for host in hosts:
         host.pop("_logicalId", None)
 
@@ -163,28 +165,78 @@ def build_sites() -> list[dict[str, Any]]:
 def build_clusters(sites: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build raw cluster seed data."""
 
+    software_profiles = (
+        ("mysql", "redis", "mongodb"),
+        ("mysql", "tidb", "redis"),
+        ("kafka", "zookeeper", "redis"),
+        ("influxdb", "clickhouse", "mysql"),
+        ("elasticsearch", "mongodb", "redis"),
+        ("mysql", "proxy", "switch-manager"),
+        ("tidb", "pd", "tikv"),
+        ("clickhouse", "keeper", "zookeeper"),
+        ("kafka", "influxdb", "elasticsearch"),
+    )
     clusters: list[dict[str, Any]] = []
     for site in sites:
         site_sequence = int(site["sequence"])
         for cluster_index in range(CLUSTERS_PER_SITE):
             sequence = site_sequence * CLUSTERS_PER_SITE + cluster_index + 1
-            cluster_type = ("KUBERNETES", "KUBERNETES", "BAREMETAL", "KUBERNETES")[cluster_index]
-            scheduler = {"KUBERNETES": "K8S", "BAREMETAL": "SYSTEMD"}[cluster_type]
+            cluster_id = random_u32_decimal_id(CLUSTER_IDS)
+            created_by, created_by_name = choose_owner(f"cluster:{cluster_id}")
+            created_at = (
+                datetime(2026, 4, 1, 9, 0, 0)
+                + timedelta(days=stable_index(f"cluster-created-day:{cluster_id}") % 55)
+                + timedelta(minutes=stable_index(f"cluster-created-minute:{cluster_id}") % 480)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            supported_architectures = cluster_architectures(site_sequence, cluster_index)
+            supported_network_names = cluster_network_names(site, cluster_index)
             clusters.append(
                 {
-                    "id": random_u32_decimal_id(CLUSTER_IDS),
+                    "id": cluster_id,
                     "name": f"{site['name']} Cluster {cluster_index + 1:02d}",
                     "siteId": site["id"],
+                    "siteName": site["name"],
+                    "areaId": site["areaId"],
+                    "areaName": site["areaName"],
                     "sequence": sequence,
-                    "clusterType": cluster_type,
-                    "scheduler": scheduler,
-                    "healthStatus": "HEALTHY",
-                    "controlPlaneVersion": f"1.{26 + cluster_index}.{site_sequence % 5}",
-                    "runtime": "containerd" if cluster_type == "KUBERNETES" else "systemd",
-                    "networkMode": "overlay" if cluster_type == "KUBERNETES" else "underlay",
+                    "supportedCpuArchitectures": [item[0] for item in supported_architectures],
+                    "supportedCpuArchitectureNames": [item[1] for item in supported_architectures],
+                    "supportedSoftwareTypes": list(software_profiles[cluster_index % len(software_profiles)]),
+                    "supportedNetworkNames": supported_network_names,
+                    "haNetworkTag": f"HA-{site['region'].upper()}-{cluster_index + 1:02d}",
+                    "enabled": cluster_index % 11 != 10,
+                    "description": f"{site['name']} {site['environment']} 数据服务集群 {cluster_index + 1:02d}",
+                    "createdAt": created_at,
+                    "createdBy": created_by,
+                    "createdByName": created_by_name,
+                    "updatedAt": None,
+                    "updatedBy": None,
+                    "updatedByName": None,
                 }
             )
     return clusters
+
+
+def cluster_architectures(site_sequence: int, cluster_index: int) -> list[tuple[str, str]]:
+    """Return supported CPU architectures for a generated cluster."""
+
+    if (site_sequence + cluster_index) % 5 == 0:
+        return [("amd64", "X86"), ("arm64", "ARM")]
+    if (site_sequence + cluster_index) % 7 == 0:
+        return [("arm64", "ARM")]
+    return [("amd64", "X86")]
+
+
+def cluster_network_names(site: dict[str, Any], cluster_index: int) -> list[str]:
+    """Return realistic leaf network names for a generated cluster."""
+
+    site_sequence = int(site["sequence"])
+    region_code = site["region"].split("-")[-2][0].upper() + site["region"].split("-")[-1]
+    leaf_base = 16 + (site_sequence % 6) * 4 + cluster_index * 2
+    return [
+        f"LEAF-{region_code}-10.{24 + site_sequence}.{leaf_base}",
+        f"LEAF-{region_code}-10.{24 + site_sequence}.{leaf_base + 1}",
+    ]
 
 
 def build_hosts(sites: list[dict[str, Any]], clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:

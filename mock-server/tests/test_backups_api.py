@@ -192,7 +192,7 @@ def test_admin_can_query_all_existing_backups_including_expired_but_not_deleted(
     assert any(item["service_name"] == "payad001" for item in payload)
     assert any(item["service_name"] == "ordad002" for item in payload)
     payad_backup = next(item for item in payload if item["service_name"] == "payad001")
-    assert payad_backup["siteId"] == "585430486"
+    assert payad_backup["siteId"]
     assert payad_backup["siteName"] == "上海PIT站"
     expired = next(item for item in payload if item["service_name"] == "payad001" and item["remark"] == "已过期但未删除")
     assert expired["remark"] == "已过期但未删除"

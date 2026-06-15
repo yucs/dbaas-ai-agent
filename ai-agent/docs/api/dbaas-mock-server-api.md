@@ -8,6 +8,7 @@
 
 - 服务视图查询
 - 主机资产查询
+- 集群资产查询
 - 备份列表查询
 - 监控最新值和历史值查询
 - 资源 / 存储变更预检
@@ -81,6 +82,7 @@ X-DBAAS-Actor-Role: system
 | `GET` | `/services` | 刷新当前身份可见服务快照 |
 | `GET` | `/services/{service_name}` | 获取单个服务详情，补充审批当前值 |
 | `GET` | `/hosts` | 管理员主机资产快照 |
+| `GET` | `/clusters` | 管理员集群资产快照 |
 | `GET` | `/backups` | 当前身份可见备份列表快照 |
 | `GET` | `/metrics/latest?metric_key=...` | 获取某监控项最新值 |
 | `GET` | `/units/{unit_name}/metrics/history?metric_key=...&start_ts=...&end_ts=...` | 获取单元历史监控 |
@@ -334,9 +336,62 @@ GET /hosts
 ]
 ```
 
-## 8. 备份列表接口
+## 8. 集群资产接口
 
-### 8.1 查询备份列表
+### 8.1 查询集群列表
+
+```http
+GET /clusters
+```
+
+用途：
+
+- 管理员 Agent 查询集群启用状态、支持的 CPU 架构、支持的软件类型和支持的网络。
+- ai-agent 按查询 lazy refresh clusters 快照。
+
+权限：
+
+- 仅管理员使用。
+- 普通用户查询集群资产时 ai-agent 会直接返回权限不足，不应调用 DBAAS。
+
+返回示例：
+
+```json
+[
+  {
+    "id": "3101",
+    "name": "NJ-MYSQL-CLUSTER-01",
+    "siteId": "12",
+    "siteName": "南京一区",
+    "areaId": "8",
+    "areaName": "核心区",
+    "supportedCpuArchitectures": ["amd64"],
+    "supportedCpuArchitectureNames": ["X86"],
+    "supportedSoftwareTypes": ["mysql", "redis", "mongodb"],
+    "supportedNetworkNames": ["LEAF-10.24.16", "LEAF-10.24.17"],
+    "haNetworkTag": "NJ-MYSQL-CLUSTER-01",
+    "enabled": true,
+    "description": "核心数据库集群",
+    "createdAt": "2026-05-18 10:23:00",
+    "createdBy": "ops_admin",
+    "createdByName": "运维管理员",
+    "updatedAt": "2026-05-20 15:42:11",
+    "updatedBy": "ops_admin",
+    "updatedByName": "运维管理员"
+  }
+]
+```
+
+约定：
+
+- 返回结构应与 ai-agent `clusters.v1` schema 保持一致。
+- `id`、`siteId`、`areaId` 使用字符串。
+- `supportedSoftwareTypes` 使用 DBAAS 服务类型，例如 `mysql`、`redis`、`mongodb`。
+- `supportedNetworkNames` 只表示集群支持的网络名称，网络 IP 范围、VLAN 和容量由后续网络接口提供。
+
+## 9. 备份列表接口
+
+### 9.1 查询备份列表
 
 ```http
 GET /backups
@@ -944,6 +999,7 @@ ai-agent 不会每次 Agent 问答都直接打 DBAAS 全量接口，而是维护
 | --- | --- | --- |
 | 服务列表 | `GET /services` | `services.admin.v1` / `services.user.v1` |
 | 主机资产 | `GET /hosts` | `hosts.v1` |
+| 集群资产 | `GET /clusters` | `clusters.v1` |
 | 备份列表 | `GET /backups` | `backups.v1` |
 | 最新监控 | `GET /metrics/latest` | metric catalog 决定字段含义 |
 | 历史监控 | `GET /units/{unit_name}/metrics/history` | metric catalog 决定字段含义 |
@@ -952,7 +1008,7 @@ ai-agent 不会每次 Agent 问答都直接打 DBAAS 全量接口，而是维护
 
 - 管理员 services 和 hosts 由后台任务周期刷新。
 - 普通用户 services 在用户会话活跃时续约，并由后台任务刷新。
-- backups 和 metrics 按查询时 lazy refresh。
+- clusters、backups 和 metrics 按查询时 lazy refresh。
 - task 状态由 ai-agent 当前 Session 任务接口 lazy refresh。
 
 DBAAS 正式实现需要保证：

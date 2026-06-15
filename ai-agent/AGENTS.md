@@ -20,6 +20,12 @@
 - 其他 role 的 tool set 不包含该工具
 - 普通用户最终 system prompt 不包含 admin-only 工具名、schema kind 调用形式或示例参数
 
+## DBAAS Schema 与 Mock Server 契约
+
+ai-agent 面向模型暴露的 DBAAS schema 应与 mock-server 对应接口返回结构保持一致。新增或调整 DBAAS 数据对象时，应优先让 mock-server 直接返回 ai-agent schema 定义的结构体，不要在 ai-agent 内额外设计一套 production/raw body 到 agent-facing schema 的字段映射层。
+
+如果真实生产接口字段与 ai-agent schema 暂时不一致，应优先在 DBAAS/mock-server 适配层统一结构；只有在外部接口无法调整且确有必要时，才在 ai-agent 内增加转换，并在 phase 文档中明确原因和边界。
+
 ## 进度反馈与中断恢复
 
 当任务进入多文件联动修改、代码处于中间态或开发时间较长时，必须持续输出阶段性进度，避免界面长时间只显示“思考中”。

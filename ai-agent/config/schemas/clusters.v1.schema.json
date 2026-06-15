@@ -1,0 +1,118 @@
+{
+  "$id": "clusters.v1",
+  "title": "ClustersV1",
+  "description": "DBAAS 管理员集群列表快照。顶层为集群记录数组。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "name",
+      "siteId",
+      "siteName",
+      "areaId",
+      "areaName",
+      "supportedCpuArchitectures",
+      "supportedCpuArchitectureNames",
+      "supportedSoftwareTypes",
+      "supportedNetworkNames",
+      "haNetworkTag",
+      "enabled",
+      "description",
+      "createdAt",
+      "createdBy",
+      "createdByName",
+      "updatedAt",
+      "updatedBy",
+      "updatedByName"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "siteId": {
+        "type": "string"
+      },
+      "siteName": {
+        "type": "string"
+      },
+      "areaId": {
+        "type": "string"
+      },
+      "areaName": {
+        "type": "string"
+      },
+      "supportedCpuArchitectures": {
+        "type": "array",
+        "description": "支持的 CPU 架构机器值，例如 amd64 或 arm64",
+        "items": {
+          "type": "string"
+        }
+      },
+      "supportedCpuArchitectureNames": {
+        "type": "array",
+        "description": "支持的 CPU 架构显示名称，例如 X86 或 ARM",
+        "items": {
+          "type": "string"
+        }
+      },
+      "supportedSoftwareTypes": {
+        "type": "array",
+        "description": "支持部署的软件或服务类型",
+        "items": {
+          "type": "string"
+        }
+      },
+      "supportedNetworkNames": {
+        "type": "array",
+        "description": "支持使用的网络名称",
+        "items": {
+          "type": "string"
+        }
+      },
+      "haNetworkTag": {
+        "type": "string",
+        "description": "HA 网络标签"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "description": {
+        "type": "string"
+      },
+      "createdAt": {
+        "type": "string",
+        "description": "格式 YYYY-MM-DD HH:mm:ss"
+      },
+      "createdBy": {
+        "type": "string"
+      },
+      "createdByName": {
+        "type": "string"
+      },
+      "updatedAt": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "没有更新时为 null"
+      },
+      "updatedBy": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "updatedByName": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    }
+  }
+}

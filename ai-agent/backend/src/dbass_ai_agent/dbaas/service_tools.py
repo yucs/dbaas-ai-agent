@@ -41,7 +41,7 @@ def build_service_tools(settings: Settings, require_identity: Callable[[], Ident
     def describe_dbaas_schema_tool(kind: str = SERVICES_KIND) -> dict[str, Any]:
         """返回 DBAAS schema 完整内容。
 
-        当前支持 kind=services、kind=backups 和管理员可见的 kind=hosts。
+        当前支持 kind=services、kind=backups，以及管理员可见的 kind=hosts、kind=clusters。
         用于确认 DBAAS 字段含义、可用字段、嵌套结构和 jq 查询路径。
         """
 

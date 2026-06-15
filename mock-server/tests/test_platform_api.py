@@ -51,10 +51,15 @@ def test_list_sites_clusters_and_hosts_returns_platform_inventory() -> None:
     hosts = hosts_response.json()
 
     assert len(sites) == 12
-    assert len(clusters) == 48
-    assert len(hosts) == 2880
-    assert all(site["clusterCount"] == 4 for site in sites)
+    assert len(clusters) >= 100
+    assert len(hosts) == len(clusters) * 60
+    assert all(site["clusterCount"] == 9 for site in sites)
     assert any(site["healthStatus"] != "HEALTHY" for site in sites)
+    assert all("supportedSoftwareTypes" in cluster for cluster in clusters)
+    assert all("supportedNetworkNames" in cluster for cluster in clusters)
+    assert all("clusterType" not in cluster for cluster in clusters)
+    assert any("mysql" in cluster["supportedSoftwareTypes"] for cluster in clusters)
+    assert any("redis" in cluster["supportedSoftwareTypes"] for cluster in clusters)
     assert all(host["ip"].startswith("192.18.") for host in hosts)
     assert all((host["hdd"] is None) != (host["ssd"] is None) for host in hosts)
     assert all(host["cpuCapacityCores"] >= host["cpuAllocatedCores"] for host in hosts)
@@ -75,9 +80,9 @@ def test_get_site_returns_clusters_and_service_groups() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["id"] == site_id
-    assert payload["clusterCount"] == 4
-    assert payload["hostCount"] == 240
-    assert len(payload["clusters"]) == 4
+    assert payload["clusterCount"] == 9
+    assert payload["hostCount"] == 540
+    assert len(payload["clusters"]) == 9
     assert payload["serviceGroupCount"] >= 1
     assert len(payload["serviceGroups"]) >= 1
 
@@ -94,9 +99,12 @@ def test_get_cluster_returns_hosts_and_service_counts() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["id"] == cluster_id
-    assert payload["hostCount"] == 60
     assert len(payload["hosts"]) == 60
-    assert payload["serviceGroupCount"] >= 1
+    assert "supportedCpuArchitectures" in payload
+    assert "supportedSoftwareTypes" in payload
+    assert "supportedNetworkNames" in payload
+    assert "hostCount" not in payload
+    assert "serviceGroupCount" not in payload
 
 
 def test_get_host_returns_disk_and_unit_details() -> None:

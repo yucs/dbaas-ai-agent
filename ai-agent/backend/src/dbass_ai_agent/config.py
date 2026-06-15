@@ -66,6 +66,8 @@ class Settings:
     dbaas_host_sync_interval_seconds: int = 60
     dbaas_host_snapshot_ttl_seconds: int = 120
     dbaas_host_refresh_lock_timeout_seconds: int = 10
+    dbaas_cluster_snapshot_ttl_seconds: int = 120
+    dbaas_cluster_refresh_lock_timeout_seconds: int = 10
 
     @classmethod
     def from_file(cls, path: Path | None = None) -> "Settings":
@@ -241,6 +243,16 @@ class Settings:
             dbaas_host_refresh_lock_timeout_seconds=_get_positive_int(
                 dbaas_workspace,
                 "host_refresh_lock_timeout_seconds",
+                10,
+            ),
+            dbaas_cluster_snapshot_ttl_seconds=_get_positive_int(
+                dbaas_workspace,
+                "cluster_snapshot_ttl_seconds",
+                120,
+            ),
+            dbaas_cluster_refresh_lock_timeout_seconds=_get_positive_int(
+                dbaas_workspace,
+                "cluster_refresh_lock_timeout_seconds",
                 10,
             ),
         )

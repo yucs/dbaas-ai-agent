@@ -1339,21 +1339,99 @@ class JsonDataStore:
 
         cluster = self._clusters_by_id[cluster_id]
         site = self._sites_by_id[cluster["siteId"]]
+        supported_software_types = self._supported_software_types_for_cluster(cluster_id)
+        supported_network_names = self._supported_network_names_for_cluster(cluster_id, site["id"])
+        supported_cpu_architectures = cluster.get("supportedCpuArchitectures") or self._supported_cpu_architectures_for_cluster(cluster_id)
+        supported_cpu_architecture_names = cluster.get("supportedCpuArchitectureNames") or self._supported_cpu_architecture_names_for_cluster(cluster_id)
         return {
             "id": cluster["id"],
             "name": cluster["name"],
             "siteId": site["id"],
             "siteName": site["name"],
-            "environment": site["environment"],
-            "region": site["region"],
-            "zone": site["zone"],
-            "clusterType": cluster["clusterType"],
-            "scheduler": cluster["scheduler"],
-            "healthStatus": cluster["healthStatus"],
-            "hostCount": cluster["hostCount"],
-            "unitCount": cluster["unitCount"],
-            "serviceGroupCount": cluster["serviceGroupCount"],
+            "areaId": site["areaId"],
+            "areaName": site["areaName"],
+            "supportedCpuArchitectures": supported_cpu_architectures,
+            "supportedCpuArchitectureNames": supported_cpu_architecture_names,
+            "supportedSoftwareTypes": supported_software_types,
+            "supportedNetworkNames": supported_network_names,
+            "haNetworkTag": cluster.get("haNetworkTag") or cluster["name"],
+            "enabled": bool(cluster.get("enabled", True)),
+            "description": cluster.get("description") or "",
+            "createdAt": cluster.get("createdAt") or "2026-04-01 00:00:00",
+            "createdBy": cluster.get("createdBy") or cluster.get("creator") or "system",
+            "createdByName": cluster.get("createdByName") or cluster.get("creatorName") or "DBaaS",
+            "updatedAt": cluster.get("updatedAt") or cluster.get("gmtModified"),
+            "updatedBy": cluster.get("updatedBy") or cluster.get("editor"),
+            "updatedByName": cluster.get("updatedByName") or cluster.get("editorName"),
         }
+
+    def _supported_cpu_architectures_for_cluster(self, cluster_id: str) -> list[str]:
+        """按集群下主机聚合支持的 CPU 架构。"""
+
+        values = sorted(
+            {
+                host["cpuArchitecture"]
+                for host in self._hosts_by_id.values()
+                if host["_clusterId"] == cluster_id and isinstance(host.get("cpuArchitecture"), str)
+            }
+        )
+        return values or ["amd64"]
+
+    def _supported_cpu_architecture_names_for_cluster(self, cluster_id: str) -> list[str]:
+        """按集群下主机聚合支持的 CPU 架构显示名称。"""
+
+        values = sorted(
+            {
+                host["cpuArchitectureName"]
+                for host in self._hosts_by_id.values()
+                if host["_clusterId"] == cluster_id and isinstance(host.get("cpuArchitectureName"), str)
+            }
+        )
+        return values or ["X86"]
+
+    def _supported_software_types_for_cluster(self, cluster_id: str) -> list[str]:
+        """按集群下服务组聚合支持的软件类型。"""
+
+        cluster = self._clusters_by_id[cluster_id]
+        configured_types = {
+            item
+            for item in cluster.get("supportedSoftwareTypes", [])
+            if isinstance(item, str) and item
+        }
+        service_types = {
+            child_service["type"]
+            for service in self._services_by_name.values()
+            for child_service in service.get("services", [])
+            for unit in child_service.get("units", [])
+            if self._hosts_by_id[unit["hostId"]]["_clusterId"] == cluster_id
+            and isinstance(child_service.get("type"), str)
+        }
+        values = sorted(
+            {
+                *configured_types,
+                *service_types,
+            }
+        )
+        return values or ["mysql"]
+
+    def _supported_network_names_for_cluster(self, cluster_id: str, site_id: str) -> list[str]:
+        """按集群和站点生成稳定的支持网络名称。"""
+
+        cluster = self._clusters_by_id[cluster_id]
+        configured_names = [
+            item
+            for item in cluster.get("supportedNetworkNames", [])
+            if isinstance(item, str) and item
+        ]
+        if configured_names:
+            return configured_names
+        site = self._sites_by_id[site_id]
+        suffix = str(cluster_id)[-2:].zfill(2)
+        base_third = 10 + int(site.get("sequence") or 0)
+        return [
+            f"LEAF-{base_third}.{20 + int(suffix):02d}",
+            f"LEAF-{base_third}.{30 + int(suffix):02d}",
+        ]
 
     def _public_host_summary(self, host_id: str) -> dict[str, Any]:
         """返回主机摘要。"""
@@ -1754,9 +1832,9 @@ class JsonDataStore:
 
         unit = item.get("unit", {})
         memory_gib = float(unit.get("memory") or 8.0)
-        if metric_key == "container.cpu.use":
+        if metric_key in {"container.cpu.use", "container.docker.cpu.avg_usage"}:
             return round(5 + seed % 940 / 10, 1)
-        if metric_key == "container.mem.usagePercent":
+        if metric_key in {"container.mem.usagePercent", "container.docker.mem.usage"}:
             return round(10 + seed % 860 / 10, 1)
         if metric_key == "container.mem.limitBytes":
             return int(memory_gib * 1024 * 1024 * 1024)
@@ -1769,7 +1847,7 @@ class JsonDataStore:
         """生成字符串型监控值。"""
 
         unit = item.get("unit", {})
-        if metric_key == "instance.mysql.version":
+        if metric_key in {"instance.mysql.version", "instance.upsql.version"}:
             version = unit.get("version")
             if isinstance(version, str) and version:
                 return version

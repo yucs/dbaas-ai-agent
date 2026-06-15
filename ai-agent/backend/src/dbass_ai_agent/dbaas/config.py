@@ -25,6 +25,8 @@ class DbaasConfig:
     host_sync_interval_seconds: int = 60
     host_snapshot_ttl_seconds: int = 120
     host_refresh_lock_timeout_seconds: int = 10
+    cluster_snapshot_ttl_seconds: int = 120
+    cluster_refresh_lock_timeout_seconds: int = 10
 
 
 def dbaas_config_from_settings(settings: Settings) -> DbaasConfig:
@@ -46,4 +48,6 @@ def dbaas_config_from_settings(settings: Settings) -> DbaasConfig:
         host_sync_interval_seconds=settings.dbaas_host_sync_interval_seconds,
         host_snapshot_ttl_seconds=settings.dbaas_host_snapshot_ttl_seconds,
         host_refresh_lock_timeout_seconds=settings.dbaas_host_refresh_lock_timeout_seconds,
+        cluster_snapshot_ttl_seconds=settings.dbaas_cluster_snapshot_ttl_seconds,
+        cluster_refresh_lock_timeout_seconds=settings.dbaas_cluster_refresh_lock_timeout_seconds,
     )

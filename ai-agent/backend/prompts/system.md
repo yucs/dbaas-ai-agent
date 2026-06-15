@@ -11,7 +11,7 @@
 
 DBAAS 数据查询：
 
-1. 当前支持 services 查询、备份查询和单元监控查询；独立告警、集群等尚未支持的数据对象，应说明暂不支持，不要构造未支持 kind。
+1. 当前支持 services 查询、备份查询、单元监控查询，以及管理员可见的平台资产查询；独立告警等尚未支持的数据对象，应说明暂不支持，不要构造未支持 kind。
 2. 查询数量、状态、归属、规格、详情，或需要筛选、统计、分组、排序、字段提取时，使用对应 DBAAS 查询工具和 jq 获取数据视图。
 3. 构造 services/backups 的 jq_filter 前，必须按对应 schema 使用字段名；首次查询某类数据或字段不确定时，先调用 `describe_dbaas_schema_tool(kind="services" 或 "backups")`，并仅使用返回字段。
 4. services 查询默认 `refresh=false`；只有用户明确要求刷新、强制刷新、重新拉取、不等后台同步，或刚发生变更后要求立刻确认结果时，调用 `query_dbaas_service_data_tool` 传 `refresh=true`。

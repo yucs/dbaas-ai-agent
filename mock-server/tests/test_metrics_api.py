@@ -26,12 +26,19 @@ def user_headers(user: str) -> dict[str, str]:
     }
 
 
+CONTAINER_CPU_METRIC = "container.docker.cpu.avg_usage"
+CONTAINER_MEMORY_METRIC = "container.docker.mem.usage"
+MYSQL_STATUS_METRIC = "instance.upsql.running.status"
+PAYAD_MYSQL_UNIT = "aaa8ee1f_payad001"
+PAYAD_PROXY_UNIT = "2637448a_payad001"
+
+
 def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None:
     client = create_test_client()
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.cpu.use"},
+        params={"metric_key": CONTAINER_CPU_METRIC},
         headers=admin_headers(),
     )
 
@@ -40,7 +47,7 @@ def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None
     assert len(payload) == 100_000
     assert any(
         item["service_name"] == "payad001"
-        and item["unit_name"] == "aaa8ee1f_payad001"
+        and item["unit_name"] == PAYAD_MYSQL_UNIT
         and item["service_type"] == "mysql"
         for item in payload
     )
@@ -53,7 +60,7 @@ def test_non_admin_can_query_all_owned_services_latest_metric_without_service_na
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.cpu.use"},
+        params={"metric_key": CONTAINER_CPU_METRIC},
         headers=user_headers("payment-platform-team"),
     )
 
@@ -62,7 +69,7 @@ def test_non_admin_can_query_all_owned_services_latest_metric_without_service_na
     assert len(payload) == 5_000
     assert any(
         item["service_name"] == "payad001"
-        and item["unit_name"] == "aaa8ee1f_payad001"
+        and item["unit_name"] == PAYAD_MYSQL_UNIT
         and item["service_type"] == "mysql"
         for item in payload
     )
@@ -78,7 +85,7 @@ def test_non_admin_can_query_own_service_latest_metric() -> None:
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.mem.usagePercent", "service_name": "payad001"},
+        params={"metric_key": CONTAINER_MEMORY_METRIC, "service_name": "payad001"},
         headers=user_headers("payment-platform-team"),
     )
 
@@ -86,7 +93,7 @@ def test_non_admin_can_query_own_service_latest_metric() -> None:
     payload = response.json()
     assert len(payload) == 100_000
     assert payload[0]["service_name"] == "payad001"
-    assert payload[0]["unit_name"] == "2637448a_payad001"
+    assert payload[0]["unit_name"] == PAYAD_PROXY_UNIT
     assert all(item["service_name"] == "payad001" for item in payload[:100])
     assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
 
@@ -96,7 +103,7 @@ def test_non_admin_cannot_query_other_users_service_latest_metric() -> None:
 
     response = client.get(
         "/metrics/latest",
-        params={"metric_key": "container.cpu.use", "service_name": "payad001"},
+        params={"metric_key": CONTAINER_CPU_METRIC, "service_name": "payad001"},
         headers=user_headers("db-platform-team"),
     )
 
@@ -106,20 +113,13 @@ def test_non_admin_cannot_query_other_users_service_latest_metric() -> None:
 def test_latest_metric_uses_catalog_value_types() -> None:
     client = create_test_client()
 
-    version_response = client.get(
-        "/metrics/latest",
-        params={"metric_key": "instance.mysql.version"},
-        headers=admin_headers(),
-    )
     replication_response = client.get(
         "/metrics/latest",
-        params={"metric_key": "instance.mysql.replicationStatus"},
+        params={"metric_key": MYSQL_STATUS_METRIC},
         headers=admin_headers(),
     )
 
-    assert version_response.status_code == 200
     assert replication_response.status_code == 200
-    assert isinstance(version_response.json()[0]["value"], str)
     assert replication_response.json()[0]["value"] in {"passing", "warning", "critical", "unknown"}
 
 
@@ -142,9 +142,9 @@ def test_admin_can_query_unit_metric_history() -> None:
     start_ts = end_ts - 300
 
     response = client.get(
-        "/units/aaa8ee1f_payad001/metrics/history",
+        f"/units/{PAYAD_MYSQL_UNIT}/metrics/history",
         params={
-            "metric_key": "container.cpu.use",
+            "metric_key": CONTAINER_CPU_METRIC,
             "start_ts": start_ts,
             "end_ts": end_ts,
         },
@@ -163,9 +163,9 @@ def test_unit_metric_history_rejects_invalid_time_range() -> None:
     now_ts = int(time.time()) - 60
 
     response = client.get(
-        "/units/aaa8ee1f_payad001/metrics/history",
+        f"/units/{PAYAD_MYSQL_UNIT}/metrics/history",
         params={
-            "metric_key": "container.cpu.use",
+            "metric_key": CONTAINER_CPU_METRIC,
             "start_ts": now_ts,
             "end_ts": now_ts,
         },
@@ -182,9 +182,9 @@ def test_non_admin_can_query_own_real_unit_history() -> None:
     start_ts = end_ts - 120
 
     response = client.get(
-        "/units/aaa8ee1f_payad001/metrics/history",
+        f"/units/{PAYAD_MYSQL_UNIT}/metrics/history",
         params={
-            "metric_key": "instance.mysql.version",
+            "metric_key": MYSQL_STATUS_METRIC,
             "start_ts": start_ts,
             "end_ts": end_ts,
         },
@@ -203,7 +203,7 @@ def test_unit_metric_history_rejects_fake_unit() -> None:
     response = client.get(
         "/units/payad001-mock-000001/metrics/history",
         params={
-            "metric_key": "container.cpu.use",
+            "metric_key": CONTAINER_CPU_METRIC,
             "start_ts": start_ts,
             "end_ts": end_ts,
         },

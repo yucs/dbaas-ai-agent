@@ -84,6 +84,10 @@ host_sync_interval_seconds = 60
 host_snapshot_ttl_seconds = 120
 # 同一个 host snapshot 刷新锁最多等待多久，单位秒。
 host_refresh_lock_timeout_seconds = 10
+# clusters 快照对 Agent 查询来说仍被认为新鲜的时间窗口，单位秒。
+cluster_snapshot_ttl_seconds = 120
+# 同一个 clusters snapshot 刷新锁最多等待多久，单位秒。
+cluster_refresh_lock_timeout_seconds = 10
 # 普通用户会话多久没有续约后停止用户 services 快照同步，单位秒。
 user_active_idle_timeout_seconds = 300
 # 普通用户 services 快照缺失时，query 最多等待 prewarm/refresh 多久，单位秒。

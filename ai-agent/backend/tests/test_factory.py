@@ -268,8 +268,11 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
 
         self.assertNotIn("query_dbaas_host_data_tool", user_prompt)
         self.assertNotIn('kind="hosts"', user_prompt)
+        self.assertNotIn("query_dbaas_cluster_data_tool", user_prompt)
+        self.assertNotIn('kind="clusters"', user_prompt)
         self.assertIn("query_dbaas_host_data_tool", admin_prompt)
-        self.assertIn('kind="hosts"', admin_prompt)
+        self.assertIn("query_dbaas_cluster_data_tool", admin_prompt)
+        self.assertIn("hosts/clusters", admin_prompt)
 
     def test_load_system_prompt_requires_role_extend_prompt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
