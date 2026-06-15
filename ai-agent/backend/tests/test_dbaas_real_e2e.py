@@ -41,7 +41,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             root = Path(tmpdir)
             port = _free_port()
             settings = _real_e2e_settings(root, port)
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             session = _session_meta(identity, "thread_dbaas_real_e2e_precheck_explicit_target")
 
             with _mock_server(port):
@@ -86,7 +86,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             root = Path(tmpdir)
             port = _free_port()
             settings = _real_e2e_settings(root, port)
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             session = _session_meta(identity, "thread_dbaas_real_e2e_precheck")
 
             with _mock_server(port):
@@ -111,7 +111,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             root = Path(tmpdir)
             port = _free_port()
             settings = _real_e2e_settings(root, port)
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             session = _session_meta(identity, "thread_dbaas_real_e2e_precheck_then_continue")
 
             with _mock_server(port):
@@ -163,7 +163,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             root = Path(tmpdir)
             port = _free_port()
             settings = _real_e2e_settings(root, port)
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             session = _session_meta(identity, "thread_dbaas_real_e2e_storage_precheck")
 
             with _mock_server(port):
@@ -202,7 +202,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             root = Path(tmpdir)
             port = _free_port()
             settings = _real_e2e_settings(root, port)
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             session = _session_meta(identity, "thread_dbaas_real_e2e_storage_advice")
 
             with _mock_server(port):
@@ -228,7 +228,7 @@ class DbaasRealE2ETests(unittest.TestCase):
             port = _free_port()
             settings = _real_e2e_settings(root, port)
             config = dbaas_config_from_settings(settings)
-            identity = Identity(user_id="payment-team-prod", role="user", user="payment-team-prod")
+            identity = Identity(user_id="payment-team-prod", role="user")
 
             with _mock_server(port):
                 sync_meta = DbaasServiceSynchronizer(config).force_refresh_admin_services()
@@ -394,7 +394,6 @@ def _session_meta(identity: Identity, thread_id: str) -> SessionMeta:
         session_id=f"sess_{thread_id}",
         user_id=identity.user_id,
         role=identity.role,
-        user=identity.user,
         thread_id=thread_id,
         title="DBAAS real E2E",
         created_at=now,

@@ -32,7 +32,7 @@ def ensure_latest_snapshot(config: DbaasConfig, identity: Identity, metric_key: 
     except MetricWorkspaceError as exc:
         return _error(metric_key, "metric_not_found", str(exc))
 
-    if identity.role != "admin" and not identity.user:
+    if identity.role != "admin" and not identity.user_id:
         return _error(metric_key, "permission_denied", "当前用户身份缺少可见范围，无法查询监控数据。")
     if get_metric_catalog_entry(metric_key, app_root=APP_ROOT) is None:
         return _error(metric_key, "metric_not_found", f"监控项不存在：{metric_key}")

@@ -235,9 +235,9 @@ def _headers_for_paths(paths: DbaasSnapshotPaths, *, identity: Identity | None =
 
 def _user_and_identity(user_or_identity: str | Identity) -> tuple[str, Identity | None]:
     if isinstance(user_or_identity, Identity):
-        if not user_or_identity.user:
+        if not user_or_identity.user_id:
             raise ValueError("ordinary user services refresh requires user identity")
-        return user_or_identity.user, user_or_identity
+        return user_or_identity.user_id, user_or_identity
     return user_or_identity, None
 
 

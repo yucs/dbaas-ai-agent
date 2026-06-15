@@ -38,7 +38,6 @@ def query_dbaas_service_data(
             identity.role != ADMIN_SCOPE
             and visible.get("status") == "error"
             and visible.get("error_type") == "snapshot_missing"
-            and identity.user
         ):
             synchronizer.force_refresh_user_services(
                 identity,
@@ -61,7 +60,7 @@ def query_dbaas_service_data(
 
 
 def _current_services_snapshot(config: DbaasConfig, identity: Identity) -> dict[str, Any]:
-    if identity.role != ADMIN_SCOPE and not identity.user:
+    if identity.role != ADMIN_SCOPE and not identity.user_id:
         return {
             "kind": SERVICES_KIND,
             "status": "error",
@@ -71,7 +70,7 @@ def _current_services_snapshot(config: DbaasConfig, identity: Identity) -> dict[
         }
     workspace = DbaasWorkspace(config)
     scope = ADMIN_SCOPE if identity.role == ADMIN_SCOPE else USER_SCOPE
-    paths = workspace.paths(SERVICES_KIND, scope=scope, user=identity.user)
+    paths = workspace.paths(SERVICES_KIND, scope=scope, user=None if scope == ADMIN_SCOPE else identity.user_id)
     meta = read_meta(paths.meta_path)
     if meta is None:
         return _snapshot_unavailable(
@@ -137,7 +136,7 @@ def _force_refresh_services_snapshot(
 ) -> dict[str, Any]:
     if identity.role == ADMIN_SCOPE:
         return synchronizer.force_refresh_admin_services()
-    if identity.user:
+    if identity.user_id:
         return synchronizer.force_refresh_user_services(
             identity,
             timeout_seconds=timeout_seconds,
@@ -158,7 +157,7 @@ def _refresh_failed_response(identity: Identity, refreshed: dict[str, Any]) -> d
     return {
         "kind": SERVICES_KIND,
         "scope": refreshed.get("scope") or scope,
-        "user": refreshed.get("user") if refreshed.get("user") is not None else identity.user,
+        "user": refreshed.get("user") if refreshed.get("user") is not None else identity.user_id,
         "status": "error",
         "error_type": str(refreshed.get("error_type") or "snapshot_unavailable"),
         "data_path": None,

@@ -48,7 +48,7 @@ class BackupQueryTests(unittest.TestCase):
                 dbaas_server_base_url="http://127.0.0.1:9000",
                 dbaas_workspace_dir=Path(tmpdir) / "workspace",
             )
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             fake_client = _FakeClient(
                 _FakeResponse(
                     200,
@@ -88,7 +88,7 @@ class BackupQueryTests(unittest.TestCase):
     def test_describe_backup_capability_tool_requires_target(self) -> None:
         tools = {tool.name: tool for tool in build_dbaas_tools(Settings(), role="admin")}
 
-        with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+        with dbaas_tool_identity(Identity(user_id="admin", role="admin")):
             result = tools["describe_service_backup_capability_tool"].invoke({})
 
         self.assertEqual(result["status"], "error")
@@ -100,7 +100,7 @@ class BackupQueryTests(unittest.TestCase):
                 dbaas_server_base_url="http://127.0.0.1:9000",
                 dbaas_workspace_dir=Path(tmpdir) / "workspace",
             )
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             fake_client = _FakeClient(
                 _FakeResponse(
                     200,
@@ -141,7 +141,7 @@ class BackupQueryTests(unittest.TestCase):
     def test_describe_image_upgrade_capability_tool_requires_target(self) -> None:
         tools = {tool.name: tool for tool in build_dbaas_tools(Settings(), role="admin")}
 
-        with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+        with dbaas_tool_identity(Identity(user_id="admin", role="admin")):
             result = tools["describe_service_image_upgrade_capability_tool"].invoke(
                 {
                     "service_name": "",
@@ -169,7 +169,7 @@ class BackupQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.backup_sync.httpx.Client", return_value=fake_client):
                 result = query_dbaas_backup_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter='[.[] | select(.service_name == "mysql-xf2")]',
                 )
 
@@ -180,7 +180,7 @@ class BackupQueryTests(unittest.TestCase):
                 fake_client.last_headers,
                 {
                     "Authorization": "Bearer user",
-                    "X-DBAAS-Actor-User": "alice",
+                    "X-DBAAS-Actor-User": "payment-team",
                     "X-DBAAS-Actor-Role": "user",
                 },
             )
@@ -197,7 +197,7 @@ class BackupQueryTests(unittest.TestCase):
             ):
                 forced = query_dbaas_backup_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter='[.[] | .backup_id]',
                     refresh=True,
                 )
@@ -207,7 +207,7 @@ class BackupQueryTests(unittest.TestCase):
 
             normal = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | .backup_id]',
                 refresh=False,
             )
@@ -222,7 +222,7 @@ class BackupQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.backup_sync.httpx.Client", return_value=fake_client):
                 result = query_dbaas_backup_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter=".[]",
                 )
 
@@ -239,7 +239,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=(
                     '[.[] | select(.service_name == "mysql-xf2"'
                     ' and .started_at >= "2026-05-26 00:00:00"'
@@ -270,7 +270,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=(
                     '[.[] | select(.service_name == "mysql-xf2"'
                     ' and .started_at >= "2026-05-29 00:00:00"'
@@ -306,7 +306,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | select(.siteId == "585430486") | {backup_id, siteName}]',
             )
 
@@ -321,7 +321,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=(
                     '[.[] | select(.service_name == "mysql-xf2"'
                     ' and .expires_at != null'
@@ -351,7 +351,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=(
                     '[.[] | select(.service_name == "mysql-xf2"'
                     ' and .started_at >= "2026-05-26 00:00:00"'
@@ -385,7 +385,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=(
                     '[.[] | select(.service_name == "mysql-xf2"'
                     ' and .task_status == "succeeded")]'
@@ -420,7 +420,7 @@ class BackupQueryTests(unittest.TestCase):
 
             result = query_dbaas_backup_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | select(.service_name == "mysql-xf2") | {backup_id, started_at}] | sort_by(.started_at)',
                 max_preview_items=5,
             )

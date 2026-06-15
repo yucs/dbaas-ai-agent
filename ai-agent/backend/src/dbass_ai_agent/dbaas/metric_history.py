@@ -36,7 +36,7 @@ def ensure_history_snapshot(
     now_ts = int(utcnow().timestamp())
     if end_ts > now_ts:
         return _error(metric_key, "history_time_range_invalid", "end_ts 不能晚于当前时间。")
-    if identity.role != "admin" and not identity.user:
+    if identity.role != "admin" and not identity.user_id:
         return _error(metric_key, "permission_denied", "当前用户身份缺少可见范围，无法查询历史监控。")
     if get_metric_catalog_entry(metric_key, app_root=APP_ROOT) is None:
         return _error(metric_key, "metric_not_found", f"监控项不存在：{metric_key}")

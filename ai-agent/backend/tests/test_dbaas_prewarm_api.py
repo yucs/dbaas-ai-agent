@@ -46,7 +46,7 @@ class StubBackgroundSync:
         self.calls: list[Identity] = []
 
     def renew_user_lease(self, identity: Identity) -> None:
-        if identity.role == "admin" or not identity.user:
+        if identity.role == "admin" or not identity.user_id:
             return
         self.calls.append(identity)
 
@@ -82,7 +82,7 @@ class StubTaskService:
 class DbaasPrewarmApiTests(unittest.TestCase):
     def test_create_session_renews_user_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="alice", role="user", user="payment-team-prod")
+            identity = Identity(user_id="alice", role="user")
             service = _build_session_service(tmpdir)
             background = StubBackgroundSync()
             app = _build_app(
@@ -99,7 +99,7 @@ class DbaasPrewarmApiTests(unittest.TestCase):
 
     def test_get_approvals_renews_user_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="alice", role="user", user="payment-team-prod")
+            identity = Identity(user_id="alice", role="user")
             service = _build_session_service(tmpdir)
             detail = service.create_session(identity, title="审批列表触发预热")
             background = StubBackgroundSync()
@@ -118,7 +118,7 @@ class DbaasPrewarmApiTests(unittest.TestCase):
 
     def test_decide_approval_renews_user_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="alice", role="user", user="payment-team-prod")
+            identity = Identity(user_id="alice", role="user")
             service = _build_session_service(tmpdir)
             detail = service.create_session(identity, title="审批决策触发预热")
             background = StubBackgroundSync()
@@ -140,7 +140,7 @@ class DbaasPrewarmApiTests(unittest.TestCase):
 
     def test_get_session_tasks_renews_user_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="alice", role="user", user="payment-team-prod")
+            identity = Identity(user_id="alice", role="user")
             service = _build_session_service(tmpdir)
             detail = service.create_session(identity, title="任务列表触发预热")
             background = StubBackgroundSync()
@@ -158,7 +158,7 @@ class DbaasPrewarmApiTests(unittest.TestCase):
 
     def test_stream_session_task_events_renews_user_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="alice", role="user", user="payment-team-prod")
+            identity = Identity(user_id="alice", role="user")
             service = _build_session_service(tmpdir)
             detail = service.create_session(identity, title="任务事件触发预热")
             background = StubBackgroundSync()

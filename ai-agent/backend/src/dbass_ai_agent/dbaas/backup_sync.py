@@ -37,7 +37,7 @@ class DbaasBackupSynchronizer:
         self.app_root = app_root
 
     def ensure_snapshot(self, identity: Identity, *, refresh: bool = False) -> dict[str, Any]:
-        if identity.role != ADMIN_SCOPE and not identity.user:
+        if identity.role != ADMIN_SCOPE and not identity.user_id:
             return self._snapshot_unavailable(
                 None,
                 "当前用户身份缺少可见范围，无法查询备份列表。",
@@ -47,7 +47,7 @@ class DbaasBackupSynchronizer:
             )
 
         scope = ADMIN_SCOPE if identity.role == ADMIN_SCOPE else USER_SCOPE
-        paths = self.workspace.paths(BACKUPS_KIND, scope=scope, user=identity.user)
+        paths = self.workspace.paths(BACKUPS_KIND, scope=scope, user=None if scope == ADMIN_SCOPE else identity.user_id)
         if refresh:
             return self._refresh_under_lock(paths, identity, force=True)
 

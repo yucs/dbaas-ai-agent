@@ -59,19 +59,15 @@
 - 后续请求通过请求头传给后端：
   - `X-User-Id`
   - `X-User-Role`
-  - `X-User`
 
 当前实现中的身份规则是：
 
-- 普通用户
-  - 默认 `user = user_id`
-- 管理员
-  - 允许只传 `user_id`
-  - `X-User` 可为空
+- `user_id` 是具体登录用户账号，不是角色名
+- `role` 只表示 `user` 或 `admin`
 
 后端还补充了安全校验：
 
-- `user_id`、`user` 仅允许字母、数字、点、下划线和中划线
+- `user_id` 仅允许字母、数字、点、下划线和中划线
 - 长度限制为 64
 - 非法请求头直接返回 `400`
 
@@ -187,8 +183,8 @@ data/users/<user_id>/sessions/<session_id>/tasks.jsonl
   - 负责承载排序、归档过滤、删除过滤、标题和预览
 - `meta.json`
   - 单个 Session 的元信息
-  - 保存 `session_id`、`user_id`、`role`、`user`、`thread_id`、`title`、`status`、`created_at`、`updated_at`、`archived_at`
-  - `role` 和 `user` 是 Session 创建时的身份快照，后续请求必须与该快照匹配才能继续运行
+  - 保存 `session_id`、`user_id`、`role`、`thread_id`、`title`、`status`、`created_at`、`updated_at`、`archived_at`
+  - `role` 是 Session 创建时的身份快照，后续请求必须与该快照匹配才能继续运行
 - `messages.jsonl`
   - 当前 Session 的原始消息记录
   - 按逐行 JSON append 写入，至少包含消息 ID、角色、内容和创建时间

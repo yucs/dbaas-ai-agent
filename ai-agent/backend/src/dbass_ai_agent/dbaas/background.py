@@ -52,9 +52,9 @@ class DbaasBackgroundSync:
         self._loop = None
 
     def renew_user_lease(self, identity: Identity) -> None:
-        if identity.role == "admin" or not identity.user:
+        if identity.role == "admin" or not identity.user_id:
             return
-        user = identity.user
+        user = identity.user_id
         with self._leases_guard:
             self._leases[user] = (identity, _utcnow())
         loop = self._loop
@@ -108,7 +108,7 @@ class DbaasBackgroundSync:
                             timeout_seconds=0,
                         )
                     except Exception:
-                        logger.exception("dbaas user services sync failed user=%s", identity.user)
+                        logger.exception("dbaas user services sync failed user=%s", identity.user_id)
         finally:
             logger.info("dbaas user services sync stopped")
 
@@ -120,7 +120,7 @@ class DbaasBackgroundSync:
                 timeout_seconds=self.config.user_snapshot_refresh_wait_seconds,
             )
         except Exception:
-            logger.exception("dbaas user services prewarm failed user=%s", identity.user)
+            logger.exception("dbaas user services prewarm failed user=%s", identity.user_id)
 
     def _active_and_expired_users(self) -> tuple[list[Identity], list[str]]:
         now = _utcnow()

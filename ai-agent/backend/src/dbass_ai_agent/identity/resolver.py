@@ -22,7 +22,6 @@ def _require_safe_value(name: str, value: str) -> str:
 def resolve_identity(request: Request) -> Identity:
     raw_user_id = request.headers.get("X-User-Id", "").strip()
     raw_role = request.headers.get("X-User-Role", "user").strip().lower()
-    raw_user = request.headers.get("X-User", "").strip()
 
     if not raw_user_id:
         raise HTTPException(
@@ -40,5 +39,4 @@ def resolve_identity(request: Request) -> Identity:
 
     role: UserRole = raw_role  # type: ignore[assignment]
 
-    user = _require_safe_value("user", raw_user) if raw_user else user_id
-    return Identity(user_id=user_id, role=role, user=user)
+    return Identity(user_id=user_id, role=role)

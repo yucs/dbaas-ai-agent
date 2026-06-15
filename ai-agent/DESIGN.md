@@ -227,7 +227,7 @@ Phase8 引入轻量 precheck tool 后，额外保持：
 
 所有真正访问 DBAAS 控制面的 HTTP 请求，都必须由后端统一注入当前 request/session identity。
 
-前端和 AI tool 参数不得传入 `user_id`、`role` 或 `user` 来影响 DBAAS 调用身份。
+前端和 AI tool 参数不得传入 `user_id` 或 `role` 来影响 DBAAS 调用身份。
 模型可以描述业务目标和过滤条件，但不能决定 DBAAS 请求使用哪个身份。
 
 产品侧 identity 转换为 DBAAS 身份时遵循：

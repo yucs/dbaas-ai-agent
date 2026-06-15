@@ -11,4 +11,3 @@ UserRole = Literal["admin", "user"]
 class Identity:
     user_id: str
     role: UserRole
-    user: str | None

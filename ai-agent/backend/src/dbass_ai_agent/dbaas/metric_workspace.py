@@ -73,7 +73,7 @@ def validate_metric_key(metric_key: str) -> None:
 def identity_scope(identity: Identity) -> tuple[MetricScope, str | None]:
     if identity.role == "admin":
         return "admin", None
-    return "user", identity.user
+    return "user", identity.user_id
 
 
 def _paths(

@@ -47,7 +47,6 @@ class SessionService:
                 StaleIdentitySessionIndexItem(
                     **item.model_dump(),
                     role=meta.role,
-                    user=meta.user,
                 )
             )
         return stale
@@ -64,7 +63,6 @@ class SessionService:
             session_id=session_id,
             user_id=identity.user_id,
             role=identity.role,
-            user=identity.user,
             thread_id=thread_id,
             title=(title or DEFAULT_TITLE).strip() or DEFAULT_TITLE,
             status="active",
@@ -303,7 +301,7 @@ class SessionService:
             return False
         if meta.role != identity.role:
             return False
-        return meta.user == identity.user
+        return True
 
     @staticmethod
     def _assert_safe_session_id(session_id: str) -> None:

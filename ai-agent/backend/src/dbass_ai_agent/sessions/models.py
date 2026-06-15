@@ -27,7 +27,6 @@ class SessionMeta(BaseModel):
     session_id: str
     user_id: str
     role: Literal["admin", "user"]
-    user: str | None = None
     thread_id: str
     title: str
     status: SessionStatus = "active"
@@ -49,7 +48,6 @@ class SessionIndexItem(BaseModel):
 
 class StaleIdentitySessionIndexItem(SessionIndexItem):
     role: Literal["admin", "user"]
-    user: str | None = None
     cleanup_only: bool = True
     reason: Literal["session_identity_changed"] = "session_identity_changed"
 

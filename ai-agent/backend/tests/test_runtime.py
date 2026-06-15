@@ -202,7 +202,7 @@ def _user_message(content: str) -> ChatMessage:
 
 
 def _identity() -> Identity:
-    return Identity(user_id="admin", role="admin", user=None)
+    return Identity(user_id="admin", role="admin")
 
 
 def _approval_record() -> ApprovalRecord:

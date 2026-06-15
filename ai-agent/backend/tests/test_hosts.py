@@ -30,7 +30,7 @@ class HostSchemaTests(unittest.TestCase):
         summary = describe_schema(
             HOSTS_KIND,
             app_root=APP_ROOT,
-            identity=Identity(user_id="admin", role="admin", user=None),
+            identity=Identity(user_id="admin", role="admin"),
         )
 
         self.assertEqual(summary["scope"], "admin")
@@ -47,7 +47,7 @@ class HostSchemaTests(unittest.TestCase):
             describe_schema(
                 HOSTS_KIND,
                 app_root=APP_ROOT,
-                identity=Identity(user_id="alice", role="user", user="payment-team"),
+                identity=Identity(user_id="payment-team", role="user"),
             )
 
 
@@ -61,7 +61,7 @@ class HostQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.host_sync.httpx.Client", return_value=fake_client):
                 result = query_dbaas_host_data(
                     config,
-                    Identity(user_id="ops-admin", role="admin", user=None),
+                    Identity(user_id="ops-admin", role="admin"),
                     jq_filter='[.[] | select(.cpuAvailableCores >= 16) | {name, ip, cpuAvailableCores}]',
                 )
 
@@ -84,7 +84,7 @@ class HostQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.host_query.DbaasHostSynchronizer") as synchronizer:
                 result = query_dbaas_host_data(
                     _config(tmpdir),
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter=".[]",
                 )
 
@@ -105,7 +105,7 @@ class HostQueryTests(unittest.TestCase):
             ):
                 forced = query_dbaas_host_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter='[.[] | .name]',
                     refresh=True,
                 )
@@ -123,7 +123,7 @@ class HostQueryTests(unittest.TestCase):
 
             normal = query_dbaas_host_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | .name]',
                 refresh=False,
             )
@@ -138,7 +138,7 @@ class HostQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.host_sync.httpx.Client", return_value=fake_client):
                 result = query_dbaas_host_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter=".[]",
                 )
 
@@ -160,7 +160,7 @@ class HostToolTests(unittest.TestCase):
     def test_admin_schema_tool_describes_hosts_schema(self) -> None:
         tools = {item.name: item for item in build_dbaas_tools(Settings(), role="admin")}
 
-        with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+        with dbaas_tool_identity(Identity(user_id="admin", role="admin")):
             result = tools["describe_dbaas_schema_tool"].invoke({"kind": "hosts"})
 
         self.assertEqual(result["kind"], "hosts")
@@ -176,7 +176,7 @@ class HostToolTests(unittest.TestCase):
             fake_client = _FakeClient(_FakeResponse(200, [_host("host-1")]))
 
             with patch("dbass_ai_agent.dbaas.host_sync.httpx.Client", return_value=fake_client):
-                with dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)):
+                with dbaas_tool_identity(Identity(user_id="admin", role="admin")):
                     result = tools["query_dbaas_host_data_tool"].invoke({"jq_filter": "[.[] | .name]"})
 
             self.assertEqual(result["status"], "success")

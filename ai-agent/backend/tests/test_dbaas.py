@@ -43,7 +43,7 @@ class DbaasSchemaTests(unittest.TestCase):
         summary = describe_schema(
             SERVICES_KIND,
             app_root=APP_ROOT,
-            identity=Identity(user_id="alice", role="user", user="payment-team"),
+            identity=Identity(user_id="payment-team", role="user"),
         )
 
         self.assertEqual(summary["schema_version"], "services.user.v1")
@@ -53,7 +53,7 @@ class DbaasSchemaTests(unittest.TestCase):
 class DbaasSyncTests(unittest.TestCase):
     def test_dbaas_identity_headers_include_actor_for_admin_user_and_system(self) -> None:
         self.assertEqual(
-            dbaas_identity_headers(Identity(user_id="ops-admin", role="admin", user=None)),
+            dbaas_identity_headers(Identity(user_id="ops-admin", role="admin")),
             {
                 "Authorization": "Bearer admin",
                 "X-DBAAS-Actor-User": "ops-admin",
@@ -61,7 +61,7 @@ class DbaasSyncTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            dbaas_identity_headers(Identity(user_id="payment-team", role="user", user="payment-team")),
+            dbaas_identity_headers(Identity(user_id="payment-team", role="user")),
             {
                 "Authorization": "Bearer user",
                 "X-DBAAS-Actor-User": "payment-team",
@@ -110,7 +110,7 @@ class DbaasSyncTests(unittest.TestCase):
 
             result = query_dbaas_service_data(
                 config,
-                Identity(user_id="alice", role="user", user="payment-team"),
+                Identity(user_id="payment-team", role="user"),
                 jq_filter='[.[] | select(.runningStatus != "passing") | {name, runningStatus}]',
                 max_preview_items=10,
             )
@@ -123,7 +123,7 @@ class DbaasSyncTests(unittest.TestCase):
             self.assertEqual(result["ttl_seconds"], config.service_snapshot_ttl_seconds)
 
     def test_tool_identity_context_can_exit_from_different_context(self) -> None:
-        manager = dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None))
+        manager = dbaas_tool_identity(Identity(user_id="admin", role="admin"))
 
         copy_context().run(manager.__enter__)
         copy_context().run(manager.__exit__, None, None, None)
@@ -173,7 +173,7 @@ class DbaasSyncTests(unittest.TestCase):
 
             result = query_dbaas_service_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | select(.runningStatus != "passing")] | length',
             )
 
@@ -186,7 +186,7 @@ class DbaasSyncTests(unittest.TestCase):
 
             result = query_dbaas_service_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter=".[]",
             )
 
@@ -199,8 +199,7 @@ class DbaasSyncTests(unittest.TestCase):
             config = _config(tmpdir)
 
             def _refresh(identity: Identity, *, timeout_seconds: int | None = None) -> dict:
-                user = identity.user
-                assert user is not None
+                user = identity.user_id
                 _write_fresh_user_snapshot(
                     config,
                     user,
@@ -211,7 +210,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter='[.[] | {name, runningStatus}]',
                 )
 
@@ -238,7 +237,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "force_refresh_admin_services", side_effect=_refresh) as refresh_admin:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter='[.[] | {name, runningStatus}]',
                     refresh=True,
                 )
@@ -253,8 +252,7 @@ class DbaasSyncTests(unittest.TestCase):
             config = _config(tmpdir)
 
             def _refresh(identity: Identity, *, timeout_seconds: int | None = None) -> dict[str, object]:
-                user = identity.user
-                assert user is not None
+                user = identity.user_id
                 _write_fresh_user_snapshot(
                     config,
                     user,
@@ -273,7 +271,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services", side_effect=_refresh) as refresh_user:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter='[.[] | {name, runningStatus}]',
                     refresh=True,
                 )
@@ -291,7 +289,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter=".[]",
                 )
 
@@ -307,7 +305,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "force_refresh_user_services") as refresh_user:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="payment-team", role="user"),
                     jq_filter=".[]",
                 )
 
@@ -323,7 +321,7 @@ class DbaasSyncTests(unittest.TestCase):
             with patch.object(DbaasServiceSynchronizer, "_fetch_services") as fetch_services:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter=".[]",
                 )
 
@@ -352,7 +350,7 @@ class DbaasSyncTests(unittest.TestCase):
             ) as refresh_admin:
                 result = query_dbaas_service_data(
                     config,
-                    Identity(user_id="admin", role="admin", user=None),
+                    Identity(user_id="admin", role="admin"),
                     jq_filter='[.[] | {name, runningStatus}]',
                     refresh=True,
                 )
@@ -369,7 +367,7 @@ class DbaasSyncTests(unittest.TestCase):
 
             result = query_dbaas_service_data(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 jq_filter='[.[] | select(.runningStatus != "passing")] | length',
             )
 
@@ -391,7 +389,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin")),
         ):
             result = tools["precheck_service_resource_update_tool"].invoke(
                 {
@@ -441,7 +439,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="alice", role="user", user="payment-team-prod")),
+            dbaas_tool_identity(Identity(user_id="payment-team", role="user")),
         ):
             result = tools["precheck_service_storage_update_tool"].invoke(
                 {
@@ -458,7 +456,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
             fake_client.last_headers,
             {
                 "Authorization": "Bearer user",
-                "X-DBAAS-Actor-User": "alice",
+                "X-DBAAS-Actor-User": "payment-team",
                 "X-DBAAS-Actor-Role": "user",
             },
         )
@@ -480,7 +478,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin")),
         ):
             result = tools["precheck_service_resource_update_tool"].invoke(
                 {
@@ -500,7 +498,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin")),
         ):
             result = tools["precheck_service_resource_update_tool"].invoke(
                 {
@@ -529,7 +527,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin")),
         ):
             result = tools["precheck_service_resource_update_tool"].invoke(
                 {
@@ -550,7 +548,7 @@ class DbaasPrecheckToolTests(unittest.TestCase):
 
         with (
             patch("dbass_ai_agent.dbaas.write_client.httpx.Client", return_value=fake_client),
-            dbaas_tool_identity(Identity(user_id="admin", role="admin", user=None)),
+            dbaas_tool_identity(Identity(user_id="admin", role="admin")),
         ):
             result = tools["precheck_service_storage_update_tool"].invoke(
                 {

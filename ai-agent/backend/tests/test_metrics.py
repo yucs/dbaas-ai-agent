@@ -278,41 +278,37 @@ class MetricWorkspaceTests(unittest.TestCase):
 
             admin_latest = workspace.latest_paths(
                 CPU_METRIC_KEY,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
             )
             user_latest = workspace.latest_paths(
                 CPU_METRIC_KEY,
-                Identity(user_id="alice", role="user", user="payment/team"),
+                Identity(user_id="alice", role="user"),
             )
             admin_history = workspace.history_paths(
                 unit_name="mysql/primary 01",
                 metric_key=CPU_METRIC_KEY,
                 start_ts=100,
                 end_ts=200,
-                identity=Identity(user_id="admin", role="admin", user=None),
+                identity=Identity(user_id="admin", role="admin"),
             )
             history = workspace.history_paths(
                 unit_name="mysql/primary 01",
                 metric_key=CPU_METRIC_KEY,
                 start_ts=100,
                 end_ts=200,
-                identity=Identity(user_id="alice", role="user", user="payment/team"),
+                identity=Identity(user_id="alice", role="user"),
             )
 
             self.assertTrue(str(admin_latest.data_path).endswith(f"admin/metrics_latest/{CPU_METRIC_KEY}.json"))
             self.assertEqual(admin_latest.key, f"admin/metrics_latest/{CPU_METRIC_KEY}")
-            self.assertTrue(
-                str(user_latest.data_path).endswith(
-                    f"users/payment_team/metrics_latest/{CPU_METRIC_KEY}.json"
-                )
-            )
-            self.assertEqual(user_latest.key, f"users/payment_team/metrics_latest/{CPU_METRIC_KEY}")
+            self.assertTrue(str(user_latest.data_path).endswith(f"users/alice/metrics_latest/{CPU_METRIC_KEY}.json"))
+            self.assertEqual(user_latest.key, f"users/alice/metrics_latest/{CPU_METRIC_KEY}")
             self.assertIn(
                 f"admin/metrics_history/mysql_primary_01__{CPU_METRIC_KEY}__100__200.json",
                 str(admin_history.data_path),
             )
             self.assertIn(
-                f"users/payment_team/metrics_history/mysql_primary_01__{CPU_METRIC_KEY}__100__200.json",
+                f"users/alice/metrics_history/mysql_primary_01__{CPU_METRIC_KEY}__100__200.json",
                 str(history.data_path),
             )
 
@@ -335,7 +331,7 @@ class MetricQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.metric_sync.httpx.Client", return_value=fake_client):
                 result = query_unit_latest_metric_data(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="alice", role="user"),
                     metric_key=CPU_METRIC_KEY,
                     jq_filter='[.[] | select(.service_type == "mysql" and .value > 60)]',
                 )
@@ -363,7 +359,7 @@ class MetricQueryTests(unittest.TestCase):
             with patch("dbass_ai_agent.dbaas.metric_history.httpx.Client", return_value=fake_client):
                 result = ensure_history_snapshot(
                     config,
-                    Identity(user_id="alice", role="user", user="payment-team"),
+                    Identity(user_id="alice", role="user"),
                     unit_name="mysql-0",
                     metric_key=CPU_METRIC_KEY,
                     start_ts=start_ts,
@@ -378,7 +374,7 @@ class MetricQueryTests(unittest.TestCase):
             config = _config(tmpdir)
             result = ensure_history_snapshot(
                 config,
-                Identity(user_id="admin", role="admin", user=None),
+                Identity(user_id="admin", role="admin"),
                 unit_name="mysql-0",
                 metric_key=CPU_METRIC_KEY,
                 start_ts=100,

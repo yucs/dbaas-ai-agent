@@ -2841,7 +2841,6 @@ restart
 
 - `user_id`
 - `role`
-- `user`
 - `thread_id`
 - 角色扩展系统提示词
 - 角色工具集
@@ -2849,7 +2848,7 @@ restart
 同一个 Session 生命周期内不得切换身份、角色扩展系统提示词或角色工具集。
 
 后续请求访问该 Session 时，当前请求身份必须与 `SessionMeta` 一致。
-如果 `user_id`、`role` 或 `user` 发生变化，
+如果 `user_id` 或 `role` 发生变化，
 后端不得继续复用原 Session/thread。
 
 角色变化时，前端应删除旧 Session 或创建新的 Session。

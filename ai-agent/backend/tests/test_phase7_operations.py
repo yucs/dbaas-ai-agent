@@ -401,7 +401,7 @@ class AsyncTaskResumeRuntime:
 class Phase7ApprovalApiTests(unittest.TestCase):
     def test_send_message_creates_pending_approval_and_blocks_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             app = FastAPI()
             app.include_router(sessions_router)
@@ -438,7 +438,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_send_message_rechecks_pending_approval_after_run_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 locked pending check")
             app = FastAPI()
@@ -498,7 +498,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_stream_message_rechecks_pending_approval_after_run_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 stream locked pending check")
             app = FastAPI()
@@ -558,7 +558,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_expired_approval_resumes_reject_and_allows_next_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 expired")
             approval_service = ApprovalService(service.repository, service)
@@ -616,7 +616,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_session_expires_pending_approval_and_clears_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 get session expires")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -645,7 +645,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_session_without_expired_approval_does_not_initialize_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 get session no expiry")
             operation_service = OperationService(service.repository)
@@ -666,7 +666,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_approvals_expires_pending_approval_and_records_resume_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 get approvals expires")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -692,7 +692,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_approvals_without_expired_approval_does_not_initialize_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 get approvals no expiry")
             approval = ApprovalService(service.repository, service).create_approval(
@@ -740,7 +740,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_expiration_cleanup_requires_runtime_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 expiry requires runtime")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -760,7 +760,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_session_skips_expiration_cleanup_when_run_lock_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 get session locked expiry")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -788,7 +788,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_get_approvals_skips_expiration_cleanup_when_run_lock_busy_without_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 approvals locked expiry")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -816,7 +816,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_approval_proposal_includes_current_values_when_snapshot_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 current values")
             approval_service = ApprovalService(
@@ -875,7 +875,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_approval_decision_resumes_and_persists_assistant_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 decision")
             approval_service = ApprovalService(service.repository, service)
@@ -924,7 +924,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_user_rejected_approval_persists_fixed_assistant_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 reject")
             approval_service = ApprovalService(service.repository, service)
@@ -977,7 +977,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_approval_decision_can_return_next_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 next approval")
             approval_service = ApprovalService(service.repository, service)
@@ -1038,7 +1038,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_batch_approval_displays_all_items_and_returns_all_operations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 batch approval")
             approval_service = ApprovalService(service.repository, service)
@@ -1105,7 +1105,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_async_approval_decision_emits_task_creation_system_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 async notice")
             approval = _create_async_approval(identity, detail, service, count=1)
@@ -1138,7 +1138,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_batch_async_approval_emits_one_creation_notice_and_dedupes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 batch async notice")
             approval = _create_async_approval(identity, detail, service, count=2)
@@ -1176,7 +1176,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_async_approval_decision_returns_409_for_existing_conflicting_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 task conflict")
             approval = _create_async_approval(identity, detail, service, count=1)
@@ -1207,7 +1207,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_batch_async_approval_rejects_duplicate_conflict_key_before_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 duplicate async batch")
             approval = ApprovalService(service.repository, service).create_approval(
@@ -1273,7 +1273,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_batch_backup_approval_rejects_duplicate_unit_conflict_key_before_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase10 duplicate backup batch")
             approval = ApprovalService(service.repository, service).create_approval(
@@ -1342,7 +1342,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_approval_decision_rechecks_expiration_after_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 decision lock expiry")
             approval = _create_expired_resource_approval(identity, detail, service).model_copy(
@@ -1377,7 +1377,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_expired_decision_retries_failed_resume_and_returns_expired(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 expired decision retry")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -1419,7 +1419,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_expired_pending_decision_requires_run_lock_before_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 pending expiry locked")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -1450,7 +1450,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_expired_decision_resume_retry_requires_run_lock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 expired decision locked")
             approval = _create_expired_resource_approval(identity, detail, service)
@@ -1492,7 +1492,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_archive_blocks_when_expired_approval_resume_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 archive expired resume failed")
             _create_expired_resource_approval(identity, detail, service)
@@ -1518,7 +1518,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_archive_returns_409_when_session_run_lock_busy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 archive locked")
             operation_service = OperationService(service.repository)
@@ -1541,7 +1541,7 @@ class Phase7ApprovalApiTests(unittest.TestCase):
 
     def test_query_expiration_does_not_restore_archived_session_or_create_next_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user="Admin")
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase7 archived expiry cleanup")
             _create_expired_resource_approval(identity, detail, service)
@@ -1628,7 +1628,7 @@ class Phase10BackupCreateToolTests(unittest.TestCase):
 
     def test_create_service_backup_task_tool_rejects_unit_scope_without_unit_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase10 backup missing unit")
             operation_service = OperationService(service.repository)
@@ -1660,7 +1660,7 @@ class Phase10BackupCreateToolTests(unittest.TestCase):
 
     def test_create_service_backup_task_tool_creates_unified_task_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="phase10 backup create")
             operation_service = OperationService(service.repository)
@@ -1722,7 +1722,7 @@ class Phase10BackupCreateToolTests(unittest.TestCase):
 class TaskLazyRefreshTests(unittest.TestCase):
     def test_refresh_task_skips_terminal_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="terminal task")
             task_service = TaskService(
@@ -1743,7 +1743,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_tasks_endpoint_lazy_refreshes_current_session_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="task route")
             task_service = TaskService(
@@ -1775,7 +1775,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_task_events_streams_task_status_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="task events")
             task_service = TaskService(
@@ -1837,7 +1837,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_task_terminal_notice_does_not_restore_archived_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="archived task notice")
             task_service = TaskService(
@@ -1877,7 +1877,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_task_events_groups_batch_terminal_notice_by_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="task batch notice")
             approval = ApprovalService(service.repository, service).create_approval(
@@ -2011,7 +2011,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_lazy_refresh_updates_non_terminal_task_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="task refresh")
             config = _dbaas_config(tmpdir)
@@ -2033,7 +2033,7 @@ class TaskLazyRefreshTests(unittest.TestCase):
 
     def test_terminal_task_refresh_syncs_operation_final_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            identity = Identity(user_id="admin", role="admin", user=None)
+            identity = Identity(user_id="admin", role="admin")
             service = _session_service(tmpdir)
             detail = service.create_session(identity, title="task operation sync")
             operation_service = OperationService(service.repository)

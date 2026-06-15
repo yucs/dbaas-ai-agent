@@ -658,7 +658,6 @@ function authHeaders() {
   return {
     "X-User-Id": state.auth.user_id,
     "X-User-Role": state.auth.role,
-    "X-User": state.auth.user || state.auth.user_id,
     "Content-Type": "application/json",
   };
 }
@@ -760,7 +759,6 @@ function renderIdentity() {
     <p class="eyebrow">当前身份</p>
     <h2>${escapeHtml(state.auth.user_id)}</h2>
     <div class="identity-row"><span>角色</span><strong>${escapeHtml(state.auth.role)}</strong></div>
-    <div class="identity-row"><span>后端 user</span><strong>${escapeHtml(state.auth.user || "-")}</strong></div>
     <div class="session-actions">
       <button data-action="switch-user" class="ghost-button" type="button">切换用户</button>
     </div>
@@ -1692,7 +1690,6 @@ elements.loginForm.addEventListener("submit", async (event) => {
   state.auth = {
     user_id: userId,
     role,
-    user: userId,
   };
 
   saveAuth(state.auth);

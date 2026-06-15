@@ -37,8 +37,7 @@ dbass-auth
 ```json
 {
   "user_id": "ops_zhang",
-  "role": "admin",
-  "user": "ops_zhang"
+  "role": "admin"
 }
 ```
 
@@ -47,8 +46,7 @@ dbass-auth
 ```json
 {
   "user_id": "payment_team",
-  "role": "user",
-  "user": "payment_team"
+  "role": "user"
 }
 ```
 
@@ -59,7 +57,6 @@ dbass-auth
 ```http
 X-User-Id: payment_team
 X-User-Role: user
-X-User: payment_team
 Content-Type: application/json
 ```
 
@@ -68,7 +65,6 @@ Content-Type: application/json
 ```http
 X-User-Id: ops_zhang
 X-User-Role: admin
-X-User: ops_zhang
 Content-Type: application/json
 ```
 
@@ -76,9 +72,8 @@ Content-Type: application/json
 
 | Header | 来源 | 说明 |
 | --- | --- | --- |
-| `X-User-Id` | `state.auth.user_id` | 产品层用户标识，也是 Session 归属用户 |
+| `X-User-Id` | `state.auth.user_id` | 产品层用户标识、Session 归属用户，也是 DBAAS 调用发起者用户名 |
 | `X-User-Role` | `state.auth.role` | `admin` 或 `user` |
-| `X-User` | `state.auth.user` | DBAAS 调用发起者用户名；当前本地登录默认等于 `user_id` |
 | `Content-Type` | 固定 | 当前前端统一发送 `application/json` |
 
 正式接入统一登录后，建议由鉴权层注入身份，前端不再手工维护这些 header。
@@ -275,7 +270,6 @@ Accept: text/event-stream
       "session_id": "sess_001",
       "user_id": "payment_team",
       "role": "user",
-      "user": "payment_team",
       "thread_id": "thread_001",
       "title": "排查 mysql-xf2 状态",
       "status": "active",
@@ -531,7 +525,6 @@ Content-Type: application/json
       "session_id": "sess_003",
       "user_id": "payment_team",
       "role": "user",
-      "user": "payment_team",
       "thread_id": "thread_003",
       "title": "新建会话",
       "status": "active",
@@ -667,7 +660,7 @@ data: {"detail":"DBAAS 控制面请求失败。","error_type":"dbaas_request_fai
 
 ```text
 event: done
-data: {"session":{"session_id":"sess_001","user_id":"payment_team","role":"user","user":"payment_team","thread_id":"thread_001","title":"排查 mysql-xf2","status":"active","created_at":"2026-04-22T12:00:00Z","updated_at":"2026-04-22T12:10:02Z","last_message_at":"2026-04-22T12:10:02Z","archived_at":null,"deleted_at":null},"user_message":{"message_id":"msg_010","role":"user","content":"查看 mysql-xf2 当前状态","created_at":"2026-04-22T12:10:01Z"},"assistant_message":{"message_id":"msg_011","role":"assistant","content":"mysql-xf2 当前健康状态为 warning。","created_at":"2026-04-22T12:10:02Z"},"run_id":"run_001","mode":"deepagent","warning":null}
+data: {"session":{"session_id":"sess_001","user_id":"payment_team","role":"user","thread_id":"thread_001","title":"排查 mysql-xf2","status":"active","created_at":"2026-04-22T12:00:00Z","updated_at":"2026-04-22T12:10:02Z","last_message_at":"2026-04-22T12:10:02Z","archived_at":null,"deleted_at":null},"user_message":{"message_id":"msg_010","role":"user","content":"查看 mysql-xf2 当前状态","created_at":"2026-04-22T12:10:01Z"},"assistant_message":{"message_id":"msg_011","role":"assistant","content":"mysql-xf2 当前健康状态为 warning。","created_at":"2026-04-22T12:10:02Z"},"run_id":"run_001","mode":"deepagent","warning":null}
 ```
 
 #### done：审批暂停
