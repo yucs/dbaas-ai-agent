@@ -32,6 +32,11 @@ def user_headers(user: str) -> dict[str, str]:
     }
 
 
+OWNER_ACCOUNT_USER = "03000647"
+OWNER_ACCOUNT_SERVICE = "accad119"
+OWNER_ACCOUNT_MYSQL_UNIT = "373e0bd6_accad119"
+
+
 def wait_for_task_completion(client: TestClient, task_id: str, timeout_seconds: float = 1.0) -> dict:
     deadline = time.time() + timeout_seconds
     last_payload: dict | None = None
@@ -142,6 +147,37 @@ def test_create_service_backup_task_for_service_can_create_multiple_records() ->
     assert len(created) >= 3
     assert all(HEX_ID_PATTERN.fullmatch(item["backup_id"]) for item in created)
     assert {item["task_status"] for item in created} == {"running"}
+
+
+def test_owner_account_user_can_create_and_list_service_backup() -> None:
+    client = create_test_client(task_unit_interval_seconds=0.2)
+
+    create_response = client.post(
+        f"/services/{OWNER_ACCOUNT_SERVICE}/backup",
+        headers=user_headers(OWNER_ACCOUNT_USER),
+        json={
+            "scope": "unit",
+            "backupType": "full",
+            "retentionDays": 7,
+            "unitName": OWNER_ACCOUNT_MYSQL_UNIT,
+        },
+    )
+
+    assert create_response.status_code == 200
+    task_id = create_response.json()["taskId"]
+    task_payload = wait_for_task_completion(client, task_id)
+    assert task_payload["status"] == "SUCCESS"
+
+    backups_response = client.get("/backups", headers=user_headers(OWNER_ACCOUNT_USER))
+
+    assert backups_response.status_code == 200
+    backups = backups_response.json()
+    assert any(
+        item["task_id"] == task_id
+        and item["service_name"] == OWNER_ACCOUNT_SERVICE
+        and item["unit_name"] == OWNER_ACCOUNT_MYSQL_UNIT
+        for item in backups
+    )
 
 
 def test_create_service_backup_task_rejects_child_service_scope() -> None:

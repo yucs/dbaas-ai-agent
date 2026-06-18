@@ -121,7 +121,7 @@ def ensure_service_access(
     if current_user.is_admin:
         return service_detail
 
-    if service_detail.get("user") != current_user.user:
+    if not store.service_matches_user(service_detail, current_user.user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"user '{current_user.user}' cannot access service '{service_name}'",

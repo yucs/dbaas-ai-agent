@@ -75,7 +75,10 @@ def list_unit_metric_history(
     if not bindings:
         raise HTTPException(status_code=404, detail=f"unit '{unit_name}' not found")
 
-    if not current_user.is_admin and not any(binding.get("user") == current_user.user for binding in bindings):
+    if not current_user.is_admin and not any(
+        binding.get("user") == current_user.user or binding.get("ownerAccount") == current_user.user
+        for binding in bindings
+    ):
         raise HTTPException(
             status_code=403,
             detail=f"user '{current_user.user}' cannot access unit '{unit_name}'",

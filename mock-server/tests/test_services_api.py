@@ -27,6 +27,10 @@ def user_headers(user: str) -> dict[str, str]:
     }
 
 
+OWNER_ACCOUNT_USER = "03000647"
+OWNER_ACCOUNT_SERVICE = "accad119"
+
+
 def get_first_user_service(client: TestClient, user: str) -> dict:
     response = client.get("/services", headers=user_headers(user))
     assert response.status_code == 200
@@ -146,6 +150,50 @@ def test_list_services_returns_empty_list_when_user_has_no_matches() -> None:
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_non_admin_can_list_services_matched_by_owner_account() -> None:
+    client = create_test_client()
+
+    admin_response = client.get("/services", headers=admin_headers())
+    assert admin_response.status_code == 200
+    expected_names = {
+        item["name"]
+        for item in admin_response.json()
+        if item["user"] == OWNER_ACCOUNT_USER or item["ownerAccount"] == OWNER_ACCOUNT_USER
+    }
+
+    response = client.get("/services", headers=user_headers(OWNER_ACCOUNT_USER))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert {item["name"] for item in payload} == expected_names
+    assert OWNER_ACCOUNT_SERVICE in expected_names
+
+
+def test_non_admin_can_get_service_matched_by_owner_account() -> None:
+    client = create_test_client()
+
+    response = client.get(f"/services/{OWNER_ACCOUNT_SERVICE}", headers=user_headers(OWNER_ACCOUNT_USER))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == OWNER_ACCOUNT_SERVICE
+    assert payload["user"] == "account-team-prod"
+    assert "ownerAccount" not in payload
+    assert "ownerName" not in payload
+
+
+def test_non_admin_cannot_get_unmatched_owner_account_service() -> None:
+    client = create_test_client()
+
+    response = client.get("/services/payad001", headers=user_headers(OWNER_ACCOUNT_USER))
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": f"user '{OWNER_ACCOUNT_USER}' cannot access service 'payad001'"
+    }
 
 
 def test_get_service_can_load_additional_seed_samples() -> None:

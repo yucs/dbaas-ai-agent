@@ -65,7 +65,12 @@ def test_list_users_returns_all_known_users_for_admin() -> None:
     services_response = client.get("/services", headers=admin_headers())
     assert services_response.status_code == 200
     expected_users = sorted(
-        {item["user"] for item in services_response.json() if item["user"] is not None}
+        {
+            value
+            for item in services_response.json()
+            for value in (item.get("user"), item.get("ownerAccount"))
+            if value is not None
+        }
     )
 
     response = client.get("/users", headers=admin_headers())
@@ -75,6 +80,7 @@ def test_list_users_returns_all_known_users_for_admin() -> None:
     assert [item["user"] for item in payload] == expected_users
     assert all(item["serviceGroupCount"] > 0 for item in payload)
     assert any(item["user"] == "payment-team-prod" for item in payload)
+    assert any(item["user"] == "03000647" for item in payload)
 
 
 def test_get_user_returns_aggregated_user_service_groups() -> None:
@@ -103,6 +109,29 @@ def test_get_user_returns_aggregated_user_service_groups() -> None:
     assert all(item["user"] == "payment-team-prod" for item in payload["serviceGroups"])
 
 
+def test_get_user_can_aggregate_service_groups_by_owner_account() -> None:
+    client = create_test_client()
+
+    services_response = client.get(
+        "/services",
+        params={"user": "03000647"},
+        headers=admin_headers(),
+    )
+    assert services_response.status_code == 200
+    user_services = services_response.json()
+
+    response = client.get("/users/03000647", headers=admin_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user"] == "03000647"
+    assert payload["serviceGroupCount"] == len(user_services)
+    assert payload["serviceGroupCount"] > 0
+    assert [item["name"] for item in payload["serviceGroups"]] == [
+        item["name"] for item in user_services
+    ]
+
+
 def test_list_users_for_user_only_returns_self() -> None:
     client = create_test_client()
 
@@ -112,6 +141,18 @@ def test_list_users_for_user_only_returns_self() -> None:
     payload = response.json()
     assert len(payload) == 1
     assert payload[0]["user"] == "payment-team-prod"
+    assert payload[0]["serviceGroupCount"] > 0
+
+
+def test_list_users_for_owner_account_user_only_returns_self() -> None:
+    client = create_test_client()
+
+    response = client.get("/users", headers=user_headers("03000647"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["user"] == "03000647"
     assert payload[0]["serviceGroupCount"] > 0
 
 

@@ -113,37 +113,33 @@ class JsonDataStore:
             return deepcopy(service)
 
     def list_service_details(self, *, user: str | None = None) -> list[dict[str, Any]]:
-        """返回当前内存中的服务组详情，可按 user 过滤。"""
+        """返回当前内存中的服务组详情，可按 user 或 ownerAccount 过滤。"""
 
         with self._lock:
             return [
                 self._public_service_detail(self._services_by_name[name])
                 for name in sorted(self._services_by_name)
-                if user is None or self._services_by_name[name].get("user") == user
+                if user is None or self.service_matches_user(self._services_by_name[name], user)
             ]
 
     def list_service_seeds(self, *, user: str | None = None) -> list[dict[str, Any]]:
-        """返回当前内存中的服务组内部 seed，可按 user 过滤。"""
+        """返回当前内存中的服务组内部 seed，可按 user 或 ownerAccount 过滤。"""
 
         with self._lock:
             return [
                 deepcopy(self._services_by_name[name])
                 for name in sorted(self._services_by_name)
-                if user is None or self._services_by_name[name].get("user") == user
+                if user is None or self.service_matches_user(self._services_by_name[name], user)
             ]
 
     def list_users(self, *, user: str | None = None) -> list[dict[str, Any]]:
-        """返回用户摘要列表，用户名直接等于服务组 user。"""
+        """返回用户摘要列表，用户名可来自服务组 user 或 ownerAccount。"""
 
         with self._lock:
             users = [
                 service_user
                 for service_user in sorted(
-                    {
-                        service.get("user")
-                        for service in self._services_by_name.values()
-                        if isinstance(service.get("user"), str) and service.get("user")
-                    }
+                    self._known_service_users()
                 )
                 if user is None or service_user == user
             ]
@@ -157,11 +153,17 @@ class JsonDataStore:
             for backup in self._backups:
                 if backup.get("deleted") is True:
                     continue
-                backup_owner = self._backup_owner_user(backup)
-                if owner_user is not None and backup_owner != owner_user:
+                if owner_user is not None and not self._backup_matches_user(backup, owner_user):
                     continue
                 items.append(self._public_backup_record(backup))
             return items
+
+    def service_matches_user(self, service: dict[str, Any], user: str | None) -> bool:
+        """判断服务是否对指定普通用户可见。"""
+
+        if not user:
+            return False
+        return service.get("user") == user or service.get("ownerAccount") == user
 
     def precheck_service_resource_update(
         self,
@@ -682,6 +684,7 @@ class JsonDataStore:
                             {
                                 "service_name": service["name"],
                                 "user": service.get("user"),
+                                "ownerAccount": service.get("ownerAccount"),
                                 "service_type": child_service["type"],
                                 "unit_name": unit["name"],
                             }
@@ -1066,6 +1069,18 @@ class JsonDataStore:
             return None
         user = service.get("user")
         return user if isinstance(user, str) and user else None
+
+    def _backup_matches_user(self, backup: dict[str, Any], user: str) -> bool:
+        """判断备份记录是否对指定普通用户可见。"""
+
+        backup_owner = self._backup_owner_user(backup)
+        if backup_owner == user:
+            return True
+        service_name = backup.get("service_name")
+        if not isinstance(service_name, str) or not service_name:
+            return False
+        service = self._services_by_name.get(service_name)
+        return service is not None and self.service_matches_user(service, user)
 
     def _normalize_unit_storage_seed(self, storage: Any, *, host_id: str) -> dict[str, Any]:
         """规范化 seed 中的 unit 存储结构。"""
@@ -1658,8 +1673,19 @@ class JsonDataStore:
         return [
             self._services_by_name[name]
             for name in sorted(self._services_by_name)
-            if self._services_by_name[name].get("user") == user
+            if self.service_matches_user(self._services_by_name[name], user)
         ]
+
+    def _known_service_users(self) -> set[str]:
+        """返回服务数据中出现过的普通用户标识。"""
+
+        users: set[str] = set()
+        for service in self._services_by_name.values():
+            for key in ("user", "ownerAccount"):
+                value = service.get(key)
+                if isinstance(value, str) and value:
+                    users.add(value)
+        return users
 
     def _collect_host_units(self, host_id: str) -> list[dict[str, Any]]:
         """收集指定主机上的全部单元。"""
@@ -1701,7 +1727,7 @@ class JsonDataStore:
             services = [
                 service
                 for service in self._services_by_name.values()
-                if service.get("user") == owner_user
+                if self.service_matches_user(service, owner_user)
             ]
 
         metric_service_type = metric["service_type"]
@@ -1779,7 +1805,7 @@ class JsonDataStore:
             child_service_types = [
                 child_service["type"]
                 for service in self._services_by_name.values()
-                if service.get("user") == owner_user
+                if self.service_matches_user(service, owner_user)
                 for child_service in service.get("services", [])
                 if metric_service_type == "container" or child_service["type"] == metric_service_type
             ]
@@ -1830,7 +1856,7 @@ class JsonDataStore:
         service_names = [
             service["name"]
             for service in sorted(self._services_by_name.values(), key=lambda item: item["name"])
-            if service.get("user") == owner_user
+            if self.service_matches_user(service, owner_user)
         ]
         if not service_names:
             return f"{owner_user}-mock-svc"

@@ -31,6 +31,9 @@ CONTAINER_MEMORY_METRIC = "container.docker.mem.usage"
 MYSQL_STATUS_METRIC = "instance.upsql.running.status"
 PAYAD_MYSQL_UNIT = "aaa8ee1f_payad001"
 PAYAD_PROXY_UNIT = "2637448a_payad001"
+OWNER_ACCOUNT_USER = "03000647"
+OWNER_ACCOUNT_SERVICE = "accad119"
+OWNER_ACCOUNT_MYSQL_UNIT = "373e0bd6_accad119"
 
 
 def test_admin_can_query_latest_metric_with_100k_points_and_real_units() -> None:
@@ -80,6 +83,26 @@ def test_non_admin_can_query_all_owned_services_latest_metric_without_service_na
     )
 
 
+def test_non_admin_can_query_owner_account_services_latest_metric_without_service_name() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/metrics/latest",
+        params={"metric_key": CONTAINER_CPU_METRIC},
+        headers=user_headers(OWNER_ACCOUNT_USER),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 5_000
+    assert any(item["service_name"] == OWNER_ACCOUNT_SERVICE for item in payload)
+    assert any(
+        item["service_name"] == OWNER_ACCOUNT_SERVICE
+        and item["unit_name"].startswith(f"{OWNER_ACCOUNT_USER}-mock-")
+        for item in payload
+    )
+
+
 def test_non_admin_can_query_own_service_latest_metric() -> None:
     client = create_test_client()
 
@@ -95,6 +118,22 @@ def test_non_admin_can_query_own_service_latest_metric() -> None:
     assert payload[0]["service_name"] == "payad001"
     assert payload[0]["unit_name"] == PAYAD_PROXY_UNIT
     assert all(item["service_name"] == "payad001" for item in payload[:100])
+    assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
+
+
+def test_non_admin_can_query_owner_account_service_latest_metric() -> None:
+    client = create_test_client()
+
+    response = client.get(
+        "/metrics/latest",
+        params={"metric_key": CONTAINER_MEMORY_METRIC, "service_name": OWNER_ACCOUNT_SERVICE},
+        headers=user_headers(OWNER_ACCOUNT_USER),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 100_000
+    assert all(item["service_name"] == OWNER_ACCOUNT_SERVICE for item in payload[:100])
     assert all(isinstance(item["value"], (int, float)) for item in payload[:100])
 
 
@@ -189,6 +228,25 @@ def test_non_admin_can_query_own_real_unit_history() -> None:
             "end_ts": end_ts,
         },
         headers=user_headers("payment-platform-team"),
+    )
+
+    assert response.status_code == 200
+    assert isinstance(response.json()[0]["value"], str)
+
+
+def test_non_admin_can_query_owner_account_real_unit_history() -> None:
+    client = create_test_client()
+    end_ts = int(time.time()) - 60
+    start_ts = end_ts - 120
+
+    response = client.get(
+        f"/units/{OWNER_ACCOUNT_MYSQL_UNIT}/metrics/history",
+        params={
+            "metric_key": MYSQL_STATUS_METRIC,
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+        },
+        headers=user_headers(OWNER_ACCOUNT_USER),
     )
 
     assert response.status_code == 200
