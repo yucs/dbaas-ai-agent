@@ -22,10 +22,7 @@
       "description",
       "createdAt",
       "createdBy",
-      "createdByName",
-      "updatedAt",
-      "updatedBy",
-      "updatedByName"
+      "createdByName"
     ],
     "properties": {
       "id": {
@@ -93,25 +90,6 @@
       },
       "createdByName": {
         "type": "string"
-      },
-      "updatedAt": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "没有更新时为 null"
-      },
-      "updatedBy": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "updatedByName": {
-        "type": [
-          "string",
-          "null"
-        ]
       }
     }
   }

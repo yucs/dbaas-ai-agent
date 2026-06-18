@@ -13,6 +13,7 @@ from .capability_tools import build_capability_tools
 from .cluster_tools import build_cluster_tools
 from .host_tools import build_host_tools
 from .metric_tools import build_metric_tools
+from .network_segment_tools import build_network_segment_tools
 from .precheck_tools import build_precheck_tools
 from .service_tools import build_service_tools
 from .write_tools import build_write_tools
@@ -55,6 +56,7 @@ def build_admin_only_tools(settings: Settings) -> list[Any]:
     return [
         *build_host_tools(settings, _require_identity),
         *build_cluster_tools(settings, _require_identity),
+        *build_network_segment_tools(settings, _require_identity),
     ]
 
 

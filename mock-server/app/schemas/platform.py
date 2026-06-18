@@ -53,6 +53,37 @@ class ClusterSummary(ApiSchema):
     updatedByName: str | None = Field(default=None, description="集群记录最近更新人姓名")
 
 
+class NetworkSegmentSummary(ApiSchema):
+    """网段摘要。"""
+
+    id: str = Field(description="网段唯一标识")
+    name: str = Field(description="网段名称")
+    description: str = Field(description="网段描述")
+    siteId: str = Field(description="所属站点 ID")
+    siteName: str = Field(description="所属站点名称")
+    clusterId: str = Field(description="所属集群 ID")
+    clusterName: str = Field(description="所属集群名称")
+    startIpv4: str = Field(description="IPv4 起始地址")
+    endIpv4: str = Field(description="IPv4 结束地址")
+    gatewayIpv4: str = Field(description="IPv4 网关地址")
+    ipv4MaskLength: int = Field(description="IPv4 掩码长度")
+    ipv4TotalCount: int = Field(description="IPv4 总地址数量")
+    ipv4UsedCount: int = Field(description="IPv4 已使用地址数量")
+    ipv4UsagePercent: float = Field(description="IPv4 使用率")
+    startIpv6: str = Field(description="IPv6 起始地址")
+    endIpv6: str = Field(description="IPv6 结束地址")
+    gatewayIpv6: str = Field(description="IPv6 网关地址")
+    ipv6MaskLength: int = Field(description="IPv6 掩码长度")
+    ipv6TotalCount: int = Field(description="IPv6 总地址数量")
+    ipv6UsedCount: int = Field(description="IPv6 已使用地址数量")
+    ipv6UsagePercent: float = Field(description="IPv6 使用率")
+    vlanId: int = Field(description="VLAN ID")
+    enabled: bool = Field(description="网段是否启用")
+    createdAt: str = Field(description="网段记录创建时间")
+    createdBy: str = Field(description="网段记录创建人账号")
+    createdByName: str = Field(description="网段记录创建人姓名")
+
+
 class HostStorageDevice(ApiSchema):
     """主机存储设备摘要。"""
 

@@ -19,6 +19,7 @@ UNIT_IDS: set[str] = set()
 SITE_IDS: set[str] = set()
 HOST_IDS: set[str] = set()
 CLUSTER_IDS: set[str] = set()
+NETWORK_SEGMENT_IDS: set[str] = set()
 AREA_IDS: set[str] = set()
 BACKUP_IDS: set[str] = set()
 TASK_IDS: set[str] = set()
@@ -99,10 +100,12 @@ def main() -> None:
     SITE_IDS.clear()
     HOST_IDS.clear()
     CLUSTER_IDS.clear()
+    NETWORK_SEGMENT_IDS.clear()
     AREA_IDS.clear()
 
     sites = build_sites()
     clusters = build_clusters(sites)
+    network_segments = build_network_segments(sites, clusters)
     hosts = build_hosts(sites, clusters)
     services = build_services(sites, clusters, hosts)
     refresh_host_seed_allocations(hosts, services)
@@ -117,6 +120,7 @@ def main() -> None:
 
     write_json(DATA_DIR / "sites.json", sites)
     write_json(DATA_DIR / "clusters.json", clusters)
+    write_json(DATA_DIR / "network_segments.json", network_segments)
     write_json(DATA_DIR / "hosts.json", hosts)
     write_json(DATA_DIR / "services.json", public_services)
     write_json(DATA_DIR / "backups.json", backups)
@@ -237,6 +241,61 @@ def cluster_network_names(site: dict[str, Any], cluster_index: int) -> list[str]
         f"LEAF-{region_code}-10.{24 + site_sequence}.{leaf_base}",
         f"LEAF-{region_code}-10.{24 + site_sequence}.{leaf_base + 1}",
     ]
+
+
+def build_network_segments(sites: list[dict[str, Any]], clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build network segment seed data from cluster supported networks."""
+
+    site_by_id = {site["id"]: site for site in sites}
+    segments: list[dict[str, Any]] = []
+    for cluster in clusters:
+        site = site_by_id[cluster["siteId"]]
+        cluster_sequence = int(cluster["sequence"])
+        for network_index, network_name in enumerate(cluster["supportedNetworkNames"]):
+            segment_id = random_u32_decimal_id(NETWORK_SEGMENT_IDS)
+            third_octet = 24 + (int(site["sequence"]) % 12)
+            fourth_octet = 16 + ((cluster_sequence * 3 + network_index * 7) % 180)
+            ipv4_total = 230
+            ipv4_used = 24 + stable_index(f"segment-ipv4-used:{segment_id}") % 170
+            ipv6_total = 230
+            ipv6_used = 8 + stable_index(f"segment-ipv6-used:{segment_id}") % 90
+            created_by, created_by_name = choose_owner(f"network-segment:{segment_id}")
+            created_at = (
+                datetime(2026, 4, 10, 9, 0, 0)
+                + timedelta(days=stable_index(f"segment-created-day:{segment_id}") % 45)
+                + timedelta(minutes=stable_index(f"segment-created-minute:{segment_id}") % 480)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            segments.append(
+                {
+                    "id": segment_id,
+                    "name": network_name,
+                    "description": f"{site['name']} {cluster['name']} 网段 {network_index + 1:02d}",
+                    "siteId": site["id"],
+                    "siteName": site["name"],
+                    "clusterId": cluster["id"],
+                    "clusterName": cluster["name"],
+                    "startIpv4": f"10.{third_octet}.{fourth_octet}.11",
+                    "endIpv4": f"10.{third_octet}.{fourth_octet}.240",
+                    "gatewayIpv4": f"10.{third_octet}.{fourth_octet}.254",
+                    "ipv4MaskLength": 24,
+                    "ipv4TotalCount": ipv4_total,
+                    "ipv4UsedCount": ipv4_used,
+                    "ipv4UsagePercent": round(ipv4_used / ipv4_total * 100, 1),
+                    "startIpv6": f"2405:db8:{third_octet:04x}:{fourth_octet:04x}::b",
+                    "endIpv6": f"2405:db8:{third_octet:04x}:{fourth_octet:04x}::f0",
+                    "gatewayIpv6": f"2405:db8:{third_octet:04x}:{fourth_octet:04x}::1",
+                    "ipv6MaskLength": 64,
+                    "ipv6TotalCount": ipv6_total,
+                    "ipv6UsedCount": ipv6_used,
+                    "ipv6UsagePercent": round(ipv6_used / ipv6_total * 100, 1),
+                    "vlanId": 2000 + (cluster_sequence * 2) + network_index,
+                    "enabled": bool(cluster.get("enabled", True)) and network_index != 1,
+                    "createdAt": created_at,
+                    "createdBy": created_by,
+                    "createdByName": created_by_name,
+                }
+            )
+    return segments
 
 
 def build_hosts(sites: list[dict[str, Any]], clusters: list[dict[str, Any]]) -> list[dict[str, Any]]:

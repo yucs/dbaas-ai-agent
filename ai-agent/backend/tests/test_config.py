@@ -90,6 +90,8 @@ class SettingsFromFileTests(unittest.TestCase):
                     host_refresh_lock_timeout_seconds = 13
                     cluster_snapshot_ttl_seconds = 122
                     cluster_refresh_lock_timeout_seconds = 14
+                    network_segment_snapshot_ttl_seconds = 123
+                    network_segment_refresh_lock_timeout_seconds = 15
                     task_refresh_interval_seconds = 11
                     jq_timeout_seconds = 6
                     jq_max_preview_items = 25
@@ -141,6 +143,8 @@ class SettingsFromFileTests(unittest.TestCase):
             self.assertEqual(settings.dbaas_host_refresh_lock_timeout_seconds, 13)
             self.assertEqual(settings.dbaas_cluster_snapshot_ttl_seconds, 122)
             self.assertEqual(settings.dbaas_cluster_refresh_lock_timeout_seconds, 14)
+            self.assertEqual(settings.dbaas_network_segment_snapshot_ttl_seconds, 123)
+            self.assertEqual(settings.dbaas_network_segment_refresh_lock_timeout_seconds, 15)
             self.assertEqual(settings.dbaas_task_refresh_interval_seconds, 11)
             self.assertEqual(settings.dbaas_jq_timeout_seconds, 6)
             self.assertEqual(settings.dbaas_jq_max_preview_items, 25)

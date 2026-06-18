@@ -31,6 +31,7 @@ def test_seed_files_exist_with_normalized_platform_layout() -> None:
 
     assert (data_dir / "sites.json").exists()
     assert (data_dir / "clusters.json").exists()
+    assert (data_dir / "network_segments.json").exists()
     assert (data_dir / "hosts.json").exists()
     assert (data_dir / "services.json").exists()
 
@@ -40,18 +41,22 @@ def test_list_sites_clusters_and_hosts_returns_platform_inventory() -> None:
 
     sites_response = client.get("/sites", headers=admin_headers())
     clusters_response = client.get("/clusters", headers=admin_headers())
+    network_segments_response = client.get("/network-segments", headers=admin_headers())
     hosts_response = client.get("/hosts", headers=admin_headers())
 
     assert sites_response.status_code == 200
     assert clusters_response.status_code == 200
+    assert network_segments_response.status_code == 200
     assert hosts_response.status_code == 200
 
     sites = sites_response.json()
     clusters = clusters_response.json()
+    network_segments = network_segments_response.json()
     hosts = hosts_response.json()
 
     assert len(sites) == 12
     assert len(clusters) >= 100
+    assert len(network_segments) >= 200
     assert len(hosts) == len(clusters) * 60
     assert all(site["clusterCount"] == 9 for site in sites)
     assert any(site["healthStatus"] != "HEALTHY" for site in sites)
@@ -60,6 +65,10 @@ def test_list_sites_clusters_and_hosts_returns_platform_inventory() -> None:
     assert all("clusterType" not in cluster for cluster in clusters)
     assert any("mysql" in cluster["supportedSoftwareTypes"] for cluster in clusters)
     assert any("redis" in cluster["supportedSoftwareTypes"] for cluster in clusters)
+    assert all(segment["name"] in {name for cluster in clusters for name in cluster["supportedNetworkNames"]} for segment in network_segments)
+    assert all(segment["enabled"] in {True, False} for segment in network_segments)
+    assert all(segment["ipv4UsagePercent"] <= 100 for segment in network_segments)
+    assert all(segment["ipv6UsagePercent"] <= 100 for segment in network_segments)
     assert all(host["ip"].startswith("192.18.") for host in hosts)
     assert all((host["hdd"] is None) != (host["ssd"] is None) for host in hosts)
     assert all(host["cpuCapacityCores"] >= host["cpuAllocatedCores"] for host in hosts)
@@ -134,6 +143,7 @@ def test_platform_endpoints_return_404_when_resource_not_found() -> None:
 
     assert client.get("/sites/not-exist", headers=admin_headers()).status_code == 404
     assert client.get("/clusters/not-exist", headers=admin_headers()).status_code == 404
+    assert client.get("/network-segments/not-exist", headers=admin_headers()).status_code == 404
     assert client.get("/hosts/not-exist", headers=admin_headers()).status_code == 404
 
 
@@ -142,10 +152,12 @@ def test_non_admin_user_cannot_access_platform_resources() -> None:
 
     sites_response = client.get("/sites", headers=user_headers("payment-team-prod"))
     clusters_response = client.get("/clusters", headers=user_headers("payment-team-prod"))
+    network_segments_response = client.get("/network-segments", headers=user_headers("payment-team-prod"))
     hosts_response = client.get("/hosts", headers=user_headers("payment-team-prod"))
 
     assert sites_response.status_code == 403
     assert clusters_response.status_code == 403
+    assert network_segments_response.status_code == 403
     assert hosts_response.status_code == 403
     assert sites_response.json() == {
         "detail": "platform resources are only available to admin users"

@@ -70,6 +70,7 @@ class JsonDataStore:
         self._services_by_name: dict[str, dict[str, Any]] = {}
         self._sites_by_id: dict[str, dict[str, Any]] = {}
         self._clusters_by_id: dict[str, dict[str, Any]] = {}
+        self._network_segments: list[dict[str, Any]] = []
         self._hosts_by_id: dict[str, dict[str, Any]] = {}
         self._tasks_by_id: dict[str, dict[str, Any]] = {}
         self._metric_catalog_by_key: dict[str, dict[str, Any]] = {}
@@ -83,6 +84,7 @@ class JsonDataStore:
         with self._lock:
             self._sites_by_id = self._load_sites()
             self._clusters_by_id = self._load_clusters()
+            self._network_segments = self._load_network_segments()
             self._hosts_by_id = self._load_hosts()
             self._services_by_name = self._load_services()
             self._backups = self._load_backups()
@@ -309,6 +311,12 @@ class JsonDataStore:
                 if host["_clusterId"] == cluster_id
             ]
             return cluster_detail
+
+    def list_network_segments(self) -> list[dict[str, Any]]:
+        """返回全部网段摘要。"""
+
+        with self._lock:
+            return [deepcopy(segment) for segment in sorted(self._network_segments, key=lambda item: item["id"])]
 
     def list_hosts(self) -> list[dict[str, Any]]:
         """返回全部主机摘要。"""
@@ -720,6 +728,30 @@ class JsonDataStore:
             normalized_cluster["serviceGroupCount"] = 0
             clusters_by_id[cluster_id] = normalized_cluster
         return clusters_by_id
+
+    def _load_network_segments(self) -> list[dict[str, Any]]:
+        """加载网段原始数据。"""
+
+        network_segments = self._load_array_file(self.data_dir / "network_segments.json", resource_name="network_segments")
+        normalized_segments: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for segment in network_segments:
+            if not isinstance(segment, dict):
+                raise DataValidationError("network_segments.json items must be objects")
+            segment_id = segment.get("id")
+            cluster_id = segment.get("clusterId")
+            site_id = segment.get("siteId")
+            if not isinstance(segment_id, str) or not segment_id:
+                raise DataValidationError("each network segment item must have a non-empty 'id'")
+            if segment_id in seen_ids:
+                raise DataValidationError(f"duplicate network segment id '{segment_id}'")
+            if not isinstance(cluster_id, str) or not cluster_id:
+                raise DataValidationError(f"network segment '{segment_id}' must have a non-empty 'clusterId'")
+            if not isinstance(site_id, str) or not site_id:
+                raise DataValidationError(f"network segment '{segment_id}' must have a non-empty 'siteId'")
+            seen_ids.add(segment_id)
+            normalized_segments.append(deepcopy(segment))
+        return normalized_segments
 
     def _load_hosts(self) -> dict[str, dict[str, Any]]:
         """加载主机原始数据。"""
@@ -1198,6 +1230,20 @@ class JsonDataStore:
             host["_siteName"] = site["name"]
             host["_clusterName"] = cluster["name"]
             host["_clusterEnabled"] = bool(cluster.get("enabled", True))
+
+        for segment in self._network_segments:
+            segment_id = segment["id"]
+            cluster = self._clusters_by_id.get(segment["clusterId"])
+            if cluster is None:
+                raise DataValidationError(f"network segment '{segment_id}' references unknown cluster '{segment['clusterId']}'")
+            if cluster["siteId"] != segment["siteId"]:
+                raise DataValidationError(
+                    f"network segment '{segment_id}' references site '{segment['siteId']}' outside cluster '{cluster['id']}'"
+                )
+            if segment["name"] not in self._supported_network_names_for_cluster(cluster["id"], cluster["siteId"]):
+                raise DataValidationError(
+                    f"network segment '{segment_id}' name '{segment['name']}' is not supported by cluster '{cluster['id']}'"
+                )
 
         for service_name, service in self._services_by_name.items():
             site_id = service["siteId"]

@@ -10,6 +10,7 @@ from .constants import (
     ADMIN_SCOPE,
     CLUSTERS_KIND,
     HOSTS_KIND,
+    NETWORK_SEGMENTS_KIND,
     SCHEMA_FILES,
     SCHEMA_VERSIONS,
     SUPPORTED_SCHEMA_KINDS,
@@ -72,5 +73,5 @@ def _require_supported_scope(scope: str) -> None:
 
 
 def _require_kind_scope(kind: str, scope: str) -> None:
-    if kind in {HOSTS_KIND, CLUSTERS_KIND} and scope != ADMIN_SCOPE:
+    if kind in {HOSTS_KIND, CLUSTERS_KIND, NETWORK_SEGMENTS_KIND} and scope != ADMIN_SCOPE:
         raise DbaasSchemaError(f"{kind} schema is only available for admin scope")

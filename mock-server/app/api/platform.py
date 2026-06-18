@@ -8,6 +8,7 @@ from app.schemas import (
     ClusterSummary,
     HostDetailResponse,
     HostSummary,
+    NetworkSegmentSummary,
     SiteDetailResponse,
     SiteSummary,
 )
@@ -74,6 +75,17 @@ def get_cluster(
     except ClusterNotFoundError:
         raise HTTPException(status_code=404, detail=f"cluster '{cluster_id}' not found") from None
     return ClusterDetailResponse.model_validate(cluster)
+
+
+@router.get("/network-segments", response_model=list[NetworkSegmentSummary])
+def list_network_segments(
+    request: Request,
+    _current_user: CurrentUser = Depends(require_admin_user),
+) -> list[NetworkSegmentSummary]:
+    """查询全部网段摘要。"""
+
+    store = get_store(request)
+    return [NetworkSegmentSummary.model_validate(segment) for segment in store.list_network_segments()]
 
 
 @router.get("/hosts", response_model=list[HostSummary])

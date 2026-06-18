@@ -6,7 +6,6 @@
   "items": {
     "type": "object",
     "additionalProperties": false,
-    "description": "单台主机资产记录。",
     "required": [
       "id",
       "name",
@@ -195,12 +194,10 @@
         "description": "主机记录创建时间，格式 YYYY-MM-DD HH:mm:ss"
       },
       "creator": {
-        "type": "string",
-        "description": "主机记录创建人账号"
+        "type": "string"
       },
       "creatorName": {
-        "type": "string",
-        "description": "主机记录创建人姓名"
+        "type": "string"
       }
     }
   },

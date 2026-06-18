@@ -13,7 +13,7 @@ from dbass_ai_agent.identity.models import Identity
 
 from .auth import dbaas_identity_headers
 from .config import DbaasConfig
-from .constants import ADMIN_SCOPE, CLUSTERS_ENDPOINT, CLUSTERS_KIND
+from .constants import ADMIN_SCOPE, NETWORK_SEGMENTS_ENDPOINT, NETWORK_SEGMENTS_KIND
 from .schema import schema_path, schema_version
 from .snapshot_meta import isoformat, is_meta_fresh, read_meta, utcnow
 from .workspace import (
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _refresh_lock = threading.Lock()
 
 
-class DbaasClusterSynchronizer:
+class DbaasNetworkSegmentSynchronizer:
     def __init__(self, config: DbaasConfig, *, app_root: Path = APP_ROOT) -> None:
         self.config = config
         self.workspace = DbaasWorkspace(config)
@@ -41,7 +41,7 @@ class DbaasClusterSynchronizer:
         if identity.role != ADMIN_SCOPE:
             return self._snapshot_unavailable(
                 paths,
-                "当前身份无权查询平台集群数据。",
+                "当前身份无权查询平台网段数据。",
                 error_type="permission_denied",
             )
         if refresh:
@@ -61,20 +61,20 @@ class DbaasClusterSynchronizer:
         force: bool,
         error_type: str = "snapshot_unavailable",
     ) -> dict[str, Any]:
-        acquired = _refresh_lock.acquire(timeout=self.config.cluster_refresh_lock_timeout_seconds)
+        acquired = _refresh_lock.acquire(timeout=self.config.network_segment_refresh_lock_timeout_seconds)
         if not acquired:
-            return self._snapshot_unavailable(paths, "当前 DBAAS 集群数据视图正在刷新，等待超时。", error_type=error_type)
+            return self._snapshot_unavailable(paths, "当前 DBAAS 网段数据视图正在刷新，等待超时。", error_type=error_type)
         try:
             current = read_meta(paths.meta_path)
             if not force and self._is_snapshot_fresh(paths, current):
                 assert current is not None
                 return self._snapshot(paths, current)
 
-            result = self._refresh_clusters(paths, identity)
+            result = self._refresh_network_segments(paths, identity)
             if result.get("status") == "fresh":
                 return result
 
-            message = str(result.get("last_error") or result.get("message") or "DBAAS 集群数据视图刷新失败。")
+            message = str(result.get("last_error") or result.get("message") or "DBAAS 网段数据视图刷新失败。")
             refresh_error_type = str(result.get("error_type") or error_type)
             if current is not None and self._is_snapshot_fresh(paths, current):
                 self._write_fresh_error_meta(paths, current, message)
@@ -85,30 +85,30 @@ class DbaasClusterSynchronizer:
         finally:
             _refresh_lock.release()
 
-    def _refresh_clusters(self, paths: DbaasSnapshotPaths, identity: Identity) -> dict[str, Any]:
-        url = f"{self.config.server_base_url}{CLUSTERS_ENDPOINT}"
+    def _refresh_network_segments(self, paths: DbaasSnapshotPaths, identity: Identity) -> dict[str, Any]:
+        url = f"{self.config.server_base_url}{NETWORK_SEGMENTS_ENDPOINT}"
         try:
             with httpx.Client(timeout=self.config.request_timeout_seconds, trust_env=False) as client:
                 response = client.get(url, headers=dbaas_identity_headers(identity))
         except httpx.HTTPError as exc:
-            logger.exception("dbaas clusters request failed")
-            return self._snapshot_unavailable(paths, f"请求 DBAAS 集群接口失败：{exc}", error_type="dbaas_request_failed")
+            logger.exception("dbaas network segments request failed")
+            return self._snapshot_unavailable(paths, f"请求 DBAAS 网段接口失败：{exc}", error_type="dbaas_request_failed")
 
         if response.status_code in {401, 403}:
-            return self._snapshot_unavailable(paths, "当前身份无权访问集群列表。", error_type="permission_denied")
+            return self._snapshot_unavailable(paths, "当前身份无权访问网段列表。", error_type="permission_denied")
         if response.status_code < 200 or response.status_code >= 300:
             return self._snapshot_unavailable(
                 paths,
-                f"DBAAS 集群接口返回异常状态：{response.status_code}",
+                f"DBAAS 网段接口返回异常状态：{response.status_code}",
                 error_type="dbaas_request_failed",
             )
 
         try:
             payload = response.json()
         except ValueError as exc:
-            return self._snapshot_unavailable(paths, f"DBAAS 集群接口返回非 JSON 数据：{exc}", error_type="dbaas_request_failed")
+            return self._snapshot_unavailable(paths, f"DBAAS 网段接口返回非 JSON 数据：{exc}", error_type="dbaas_request_failed")
 
-        shape_error = _validate_cluster_payload_shape(payload)
+        shape_error = _validate_network_segment_payload_shape(payload)
         if shape_error is not None:
             return self._snapshot_unavailable(paths, shape_error, error_type="snapshot_unavailable")
 
@@ -118,7 +118,7 @@ class DbaasClusterSynchronizer:
         try:
             data_tmp_path, bytes_written = write_json_temp(paths.data_path, payload)
             meta = {
-                "kind": CLUSTERS_KIND,
+                "kind": NETWORK_SEGMENTS_KIND,
                 "scope": ADMIN_SCOPE,
                 "user": None,
                 "version": 1,
@@ -126,43 +126,43 @@ class DbaasClusterSynchronizer:
                 "meta_path": str(paths.meta_path),
                 "status": "fresh",
                 "synced_at": isoformat(now),
-                "expires_at": isoformat(now + timedelta(seconds=self.config.cluster_snapshot_ttl_seconds)),
-                "ttl_seconds": self.config.cluster_snapshot_ttl_seconds,
+                "expires_at": isoformat(now + timedelta(seconds=self.config.network_segment_snapshot_ttl_seconds)),
+                "ttl_seconds": self.config.network_segment_snapshot_ttl_seconds,
                 "record_count": len(payload),
                 "bytes": bytes_written,
                 "source": "dbaas-server",
-                "source_endpoint": CLUSTERS_ENDPOINT,
-                "schema_version": schema_version(CLUSTERS_KIND, scope=ADMIN_SCOPE),
-                "schema_path": str(schema_path(CLUSTERS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
+                "source_endpoint": NETWORK_SEGMENTS_ENDPOINT,
+                "schema_version": schema_version(NETWORK_SEGMENTS_KIND, scope=ADMIN_SCOPE),
+                "schema_path": str(schema_path(NETWORK_SEGMENTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
                 "last_refresh_status": "success",
                 "last_error": None,
             }
             meta_tmp_path, _ = write_json_temp(paths.meta_path, meta)
             replace_file_atomic(data_tmp_path, paths.data_path)
             replace_file_atomic(meta_tmp_path, paths.meta_path)
-            logger.info("dbaas clusters snapshot refreshed records=%s bytes=%s", meta["record_count"], bytes_written)
+            logger.info("dbaas network segments snapshot refreshed records=%s bytes=%s", meta["record_count"], bytes_written)
             return meta
         except Exception as exc:  # noqa: BLE001
             if data_tmp_path is not None:
                 delete_if_exists(data_tmp_path)
             if meta_tmp_path is not None:
                 delete_if_exists(meta_tmp_path)
-            logger.exception("dbaas clusters snapshot write failed")
-            return self._snapshot_unavailable(paths, f"写入 DBAAS 集群数据失败：{exc}", error_type="snapshot_unavailable")
+            logger.exception("dbaas network segments snapshot write failed")
+            return self._snapshot_unavailable(paths, f"写入 DBAAS 网段数据失败：{exc}", error_type="snapshot_unavailable")
 
     def _paths(self) -> DbaasSnapshotPaths:
-        return self.workspace.paths(CLUSTERS_KIND, scope=ADMIN_SCOPE)
+        return self.workspace.paths(NETWORK_SEGMENTS_KIND, scope=ADMIN_SCOPE)
 
     def _is_snapshot_fresh(self, paths: DbaasSnapshotPaths, meta: dict[str, Any] | None) -> bool:
         return (
             meta is not None
             and is_meta_fresh(meta)
-            and meta.get("kind") == CLUSTERS_KIND
+            and meta.get("kind") == NETWORK_SEGMENTS_KIND
             and meta.get("scope") == ADMIN_SCOPE
             and meta.get("user") is None
             and meta.get("data_path") == str(paths.data_path)
-            and meta.get("schema_version") == schema_version(CLUSTERS_KIND, scope=ADMIN_SCOPE)
-            and meta.get("schema_path") == str(schema_path(CLUSTERS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE))
+            and meta.get("schema_version") == schema_version(NETWORK_SEGMENTS_KIND, scope=ADMIN_SCOPE)
+            and meta.get("schema_path") == str(schema_path(NETWORK_SEGMENTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE))
             and paths.data_path.exists()
             and paths.meta_path.exists()
         )
@@ -170,7 +170,7 @@ class DbaasClusterSynchronizer:
     def _snapshot(self, paths: DbaasSnapshotPaths, meta: dict[str, Any]) -> dict[str, Any]:
         return {
             **meta,
-            "kind": CLUSTERS_KIND,
+            "kind": NETWORK_SEGMENTS_KIND,
             "scope": ADMIN_SCOPE,
             "user": None,
             "status": "fresh",
@@ -189,7 +189,7 @@ class DbaasClusterSynchronizer:
     def _write_unavailable_meta(self, paths: DbaasSnapshotPaths, message: str, *, error_type: str) -> None:
         now = utcnow()
         meta = {
-            "kind": CLUSTERS_KIND,
+            "kind": NETWORK_SEGMENTS_KIND,
             "scope": ADMIN_SCOPE,
             "user": None,
             "version": 1,
@@ -198,14 +198,14 @@ class DbaasClusterSynchronizer:
             "data_path": None,
             "meta_path": str(paths.meta_path),
             "synced_at": isoformat(now),
-            "expires_at": isoformat(now + timedelta(seconds=self.config.cluster_snapshot_ttl_seconds)),
-            "ttl_seconds": self.config.cluster_snapshot_ttl_seconds,
+            "expires_at": isoformat(now + timedelta(seconds=self.config.network_segment_snapshot_ttl_seconds)),
+            "ttl_seconds": self.config.network_segment_snapshot_ttl_seconds,
             "record_count": 0,
             "bytes": 0,
             "source": "dbaas-server",
-            "source_endpoint": CLUSTERS_ENDPOINT,
-            "schema_version": schema_version(CLUSTERS_KIND, scope=ADMIN_SCOPE),
-            "schema_path": str(schema_path(CLUSTERS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
+            "source_endpoint": NETWORK_SEGMENTS_ENDPOINT,
+            "schema_version": schema_version(NETWORK_SEGMENTS_KIND, scope=ADMIN_SCOPE),
+            "schema_path": str(schema_path(NETWORK_SEGMENTS_KIND, app_root=self.app_root, scope=ADMIN_SCOPE)),
             "last_refresh_status": "error",
             "last_error": message,
             "message": message,
@@ -220,7 +220,7 @@ class DbaasClusterSynchronizer:
         error_type: str = "snapshot_unavailable",
     ) -> dict[str, Any]:
         return {
-            "kind": CLUSTERS_KIND,
+            "kind": NETWORK_SEGMENTS_KIND,
             "scope": ADMIN_SCOPE,
             "user": None,
             "status": "error",
@@ -228,17 +228,17 @@ class DbaasClusterSynchronizer:
             "data_path": None,
             "meta_path": str(paths.meta_path),
             "last_error": message,
-            "message": f"当前没有可用的 DBAAS 集群数据视图，暂时无法获得准确数据：{message}",
+            "message": f"当前没有可用的 DBAAS 网段数据视图，暂时无法获得准确数据：{message}",
         }
 
 
-def _validate_cluster_payload_shape(payload: Any) -> str | None:
+def _validate_network_segment_payload_shape(payload: Any) -> str | None:
     if not isinstance(payload, list):
-        return "DBAAS 集群接口返回结构不是数组。"
+        return "DBAAS 网段接口返回结构不是数组。"
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
-            return f"DBAAS 集群接口第 {index} 条记录不是对象。"
-        field_error = _validate_cluster_record(index, item)
+            return f"DBAAS 网段接口第 {index} 条记录不是对象。"
+        field_error = _validate_network_segment_record(index, item)
         if field_error is not None:
             return field_error
     return None
@@ -247,41 +247,54 @@ def _validate_cluster_payload_shape(payload: Any) -> str | None:
 _STRING_FIELDS = {
     "id",
     "name",
+    "description",
     "siteId",
     "siteName",
-    "areaId",
-    "areaName",
-    "haNetworkTag",
-    "description",
+    "clusterId",
+    "clusterName",
+    "startIpv4",
+    "endIpv4",
+    "gatewayIpv4",
+    "startIpv6",
+    "endIpv6",
+    "gatewayIpv6",
     "createdAt",
     "createdBy",
     "createdByName",
 }
-_STRING_ARRAY_FIELDS = {
-    "supportedCpuArchitectures",
-    "supportedCpuArchitectureNames",
-    "supportedSoftwareTypes",
-    "supportedNetworkNames",
+_INTEGER_FIELDS = {
+    "ipv4MaskLength",
+    "ipv4TotalCount",
+    "ipv4UsedCount",
+    "ipv6MaskLength",
+    "ipv6TotalCount",
+    "ipv6UsedCount",
+    "vlanId",
 }
+_NUMBER_FIELDS = {"ipv4UsagePercent", "ipv6UsagePercent"}
 _BOOLEAN_FIELDS = {"enabled"}
-_REQUIRED_FIELDS = _STRING_FIELDS | _STRING_ARRAY_FIELDS | _BOOLEAN_FIELDS
+_REQUIRED_FIELDS = _STRING_FIELDS | _INTEGER_FIELDS | _NUMBER_FIELDS | _BOOLEAN_FIELDS
 
 
-def _validate_cluster_record(index: int, item: dict[str, Any]) -> str | None:
+def _validate_network_segment_record(index: int, item: dict[str, Any]) -> str | None:
     for field in sorted(_REQUIRED_FIELDS):
         if field not in item:
-            return f"DBAAS 集群接口第 {index} 条记录缺少字段：{field}。"
+            return f"DBAAS 网段接口第 {index} 条记录缺少字段：{field}。"
     for field in item:
         if field not in _REQUIRED_FIELDS:
-            return f"DBAAS 集群接口第 {index} 条记录包含未定义字段：{field}。"
+            return f"DBAAS 网段接口第 {index} 条记录包含未定义字段：{field}。"
     for field in _STRING_FIELDS:
         if not isinstance(item[field], str):
-            return f"DBAAS 集群接口第 {index} 条记录字段 {field} 不是字符串。"
-    for field in _STRING_ARRAY_FIELDS:
-        value = item[field]
-        if not isinstance(value, list) or any(not isinstance(entry, str) for entry in value):
-            return f"DBAAS 集群接口第 {index} 条记录字段 {field} 不是字符串数组。"
+            return f"DBAAS 网段接口第 {index} 条记录字段 {field} 不是字符串。"
+    for field in _INTEGER_FIELDS:
+        if isinstance(item[field], bool) or not isinstance(item[field], int):
+            return f"DBAAS 网段接口第 {index} 条记录字段 {field} 不是 integer。"
+    for field in _NUMBER_FIELDS:
+        if isinstance(item[field], bool) or not isinstance(item[field], (int, float)):
+            return f"DBAAS 网段接口第 {index} 条记录字段 {field} 不是 number。"
+        if item[field] < 0 or item[field] > 100:
+            return f"DBAAS 网段接口第 {index} 条记录字段 {field} 不在 0-100 范围内。"
     for field in _BOOLEAN_FIELDS:
         if not isinstance(item[field], bool):
-            return f"DBAAS 集群接口第 {index} 条记录字段 {field} 不是 boolean。"
+            return f"DBAAS 网段接口第 {index} 条记录字段 {field} 不是 boolean。"
     return None

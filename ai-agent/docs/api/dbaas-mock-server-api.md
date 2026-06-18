@@ -9,6 +9,7 @@
 - 服务视图查询
 - 主机资产查询
 - 集群资产查询
+- 网段资产查询
 - 备份列表查询
 - 监控最新值和历史值查询
 - 资源 / 存储变更预检
@@ -83,6 +84,7 @@ X-DBAAS-Actor-Role: system
 | `GET` | `/services/{service_name}` | 获取单个服务详情，补充审批当前值 |
 | `GET` | `/hosts` | 管理员主机资产快照 |
 | `GET` | `/clusters` | 管理员集群资产快照 |
+| `GET` | `/network-segments` | 管理员网段资产快照 |
 | `GET` | `/backups` | 当前身份可见备份列表快照 |
 | `GET` | `/metrics/latest?metric_key=...` | 获取某监控项最新值 |
 | `GET` | `/units/{unit_name}/metrics/history?metric_key=...&start_ts=...&end_ts=...` | 获取单元历史监控 |
@@ -389,9 +391,70 @@ GET /clusters
 - `supportedSoftwareTypes` 使用 DBAAS 服务类型，例如 `mysql`、`redis`、`mongodb`。
 - `supportedNetworkNames` 只表示集群支持的网络名称，网络 IP 范围、VLAN 和容量由后续网络接口提供。
 
-## 9. 备份列表接口
+## 9. 网段资产接口
 
-### 9.1 查询备份列表
+### 9.1 查询网段列表
+
+```http
+GET /network-segments
+```
+
+用途：
+
+- 管理员 Agent 查询网段启用状态、IPv4/IPv6 地址范围、网关、VLAN、地址使用率和所属集群。
+- ai-agent 按查询 lazy refresh networkSegments 快照。
+
+权限：
+
+- 仅管理员使用。
+- 普通用户查询网段资产时 ai-agent 会直接返回权限不足，不应调用 DBAAS。
+
+返回示例：
+
+```json
+[
+  {
+    "id": "71001",
+    "name": "LEAF-10.24.16",
+    "description": "核心数据库网段",
+    "siteId": "12",
+    "siteName": "南京一区",
+    "clusterId": "3101",
+    "clusterName": "NJ-MYSQL-CLUSTER-01",
+    "startIpv4": "10.24.16.11",
+    "endIpv4": "10.24.16.240",
+    "gatewayIpv4": "10.24.16.254",
+    "ipv4MaskLength": 24,
+    "ipv4TotalCount": 230,
+    "ipv4UsedCount": 86,
+    "ipv4UsagePercent": 37.4,
+    "startIpv6": "2405:db8:2000:1010::b",
+    "endIpv6": "2405:db8:2000:1010::f0",
+    "gatewayIpv6": "2405:db8:2000:1010::1",
+    "ipv6MaskLength": 64,
+    "ipv6TotalCount": 230,
+    "ipv6UsedCount": 24,
+    "ipv6UsagePercent": 10.4,
+    "vlanId": 2416,
+    "enabled": true,
+    "createdAt": "2026-05-18 10:23:00",
+    "createdBy": "ops_admin",
+    "createdByName": "运维管理员"
+  }
+]
+```
+
+约定：
+
+- 返回结构应与 ai-agent `networkSegments.v1` schema 保持一致。
+- `id`、`siteId`、`clusterId` 使用字符串。
+- `ipv4MaskLength`、`ipv6MaskLength`、`ipv4TotalCount`、`ipv4UsedCount`、`ipv6TotalCount`、`ipv6UsedCount`、`vlanId` 使用数字。
+- `ipv4UsagePercent`、`ipv6UsagePercent` 使用 0-100 的数字。
+- 返回记录不包含生产原始字段名。
+
+## 10. 备份列表接口
+
+### 10.1 查询备份列表
 
 ```http
 GET /backups
@@ -450,9 +513,9 @@ GET /backups
 | `task_status` | 备份任务状态 |
 | `valid_status` | 备份有效性状态 |
 
-## 9. 监控接口
+## 11. 监控接口
 
-### 9.1 查询最新监控
+### 11.1 查询最新监控
 
 ```http
 GET /metrics/latest?metric_key={metric_key}
@@ -492,7 +555,7 @@ Query 参数：
 | `service_type` | 服务类型 |
 | `value` | 监控值；类型由 metric catalog 的 `value_type` 决定 |
 
-### 9.2 查询单元历史监控
+### 11.2 查询单元历史监控
 
 ```http
 GET /units/{unit_name}/metrics/history?metric_key={metric_key}&start_ts={start_ts}&end_ts={end_ts}
@@ -532,9 +595,9 @@ Query 参数：
 ]
 ```
 
-## 10. 资源调整预检与执行
+## 12. 资源调整预检与执行
 
-### 10.1 CPU / 内存调整预检
+### 12.1 CPU / 内存调整预检
 
 ```http
 POST /api/v1/prechecks/service-resource-update
@@ -622,7 +685,7 @@ ai-agent 会校验响应必须包含：
 
 如果 `blocking_errors` 不为空，Agent 应先向用户说明阻断原因，不应直接发起写操作。
 
-### 10.2 执行 CPU / 内存调整
+### 12.2 执行 CPU / 内存调整
 
 ```http
 PUT /services/{service_name}/resource
@@ -653,9 +716,9 @@ mock-server 要求至少传入 `platformAuto`、`cpu`、`memoryGB` 之一。
 
 返回：更新后的服务详情对象。
 
-## 11. 存储调整预检与执行
+## 13. 存储调整预检与执行
 
-### 11.1 data / log 容量调整预检
+### 13.1 data / log 容量调整预检
 
 ```http
 POST /api/v1/prechecks/service-storage-update
@@ -720,7 +783,7 @@ ai-agent 会校验响应必须包含：
 - `metrics`
 - `blocking_errors`
 
-### 11.2 执行 data / log 容量调整
+### 13.2 执行 data / log 容量调整
 
 ```http
 PUT /services/{service_name}/storage
@@ -757,9 +820,9 @@ mock-server 要求至少传入 `platformAuto` 或 `storage`。
 
 返回：更新后的服务详情对象。
 
-## 12. 镜像升级接口
+## 14. 镜像升级接口
 
-### 12.1 查询镜像升级候选
+### 14.1 查询镜像升级候选
 
 ```http
 GET /image-upgrade-capabilities?serviceName={service_name}&childServiceType={child_service_type}
@@ -791,7 +854,7 @@ Query 参数：
 }
 ```
 
-### 12.2 创建镜像升级任务
+### 14.2 创建镜像升级任务
 
 ```http
 POST /services/{service_name}/image-upgrade
@@ -828,9 +891,9 @@ ai-agent 请求：
 
 ai-agent 会将该 `taskId` 记录为当前 Session 下的 `TaskRecord`，前端通过 ai-agent 的任务接口查看和订阅。
 
-## 13. 手动备份接口
+## 15. 手动备份接口
 
-### 13.1 查询备份发起能力
+### 15.1 查询备份发起能力
 
 ```http
 GET /backup-task-capabilities?serviceType={service_type}&serviceName={service_name}&unitName={unit_name}
@@ -889,7 +952,7 @@ Query 参数：
 - Agent 判断必填参数和枚举值。
 - `runtimeHints.backupRunning` 只作为提示，不作为 precheck 阻断。
 
-### 13.2 创建手动备份任务
+### 15.2 创建手动备份任务
 
 ```http
 POST /services/{service_name}/backup
@@ -930,9 +993,9 @@ ai-agent 请求：
 }
 ```
 
-## 14. DBAAS 异步任务接口
+## 16. DBAAS 异步任务接口
 
-### 14.1 查询任务详情
+### 16.1 查询任务详情
 
 ```http
 GET /tasks/{task_id}
@@ -989,7 +1052,7 @@ ai-agent 会将 DBAAS 原始状态折叠为前端任务状态：
 | `CANCELED` / `CANCELLED` | `canceled` |
 | 其他未知值 | `unknown` |
 
-## 15. ai-agent 数据缓存与刷新语义
+## 17. ai-agent 数据缓存与刷新语义
 
 ai-agent 不会每次 Agent 问答都直接打 DBAAS 全量接口，而是维护本地快照和 TTL。
 
@@ -1000,6 +1063,7 @@ ai-agent 不会每次 Agent 问答都直接打 DBAAS 全量接口，而是维护
 | 服务列表 | `GET /services` | `services.admin.v1` / `services.user.v1` |
 | 主机资产 | `GET /hosts` | `hosts.v1` |
 | 集群资产 | `GET /clusters` | `clusters.v1` |
+| 网段资产 | `GET /network-segments` | `networkSegments.v1` |
 | 备份列表 | `GET /backups` | `backups.v1` |
 | 最新监控 | `GET /metrics/latest` | metric catalog 决定字段含义 |
 | 历史监控 | `GET /units/{unit_name}/metrics/history` | metric catalog 决定字段含义 |
@@ -1008,7 +1072,7 @@ ai-agent 不会每次 Agent 问答都直接打 DBAAS 全量接口，而是维护
 
 - 管理员 services 和 hosts 由后台任务周期刷新。
 - 普通用户 services 在用户会话活跃时续约，并由后台任务刷新。
-- clusters、backups 和 metrics 按查询时 lazy refresh。
+- clusters、networkSegments、backups 和 metrics 按查询时 lazy refresh。
 - task 状态由 ai-agent 当前 Session 任务接口 lazy refresh。
 
 DBAAS 正式实现需要保证：

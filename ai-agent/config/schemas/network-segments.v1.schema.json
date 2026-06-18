@@ -1,0 +1,122 @@
+{
+  "$id": "networkSegments.v1",
+  "title": "NetworkSegmentsV1",
+  "description": "DBAAS 管理员网段列表快照。顶层为网段记录数组。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "name",
+      "description",
+      "siteId",
+      "siteName",
+      "clusterId",
+      "clusterName",
+      "startIpv4",
+      "endIpv4",
+      "gatewayIpv4",
+      "ipv4MaskLength",
+      "ipv4TotalCount",
+      "ipv4UsedCount",
+      "ipv4UsagePercent",
+      "startIpv6",
+      "endIpv6",
+      "gatewayIpv6",
+      "ipv6MaskLength",
+      "ipv6TotalCount",
+      "ipv6UsedCount",
+      "ipv6UsagePercent",
+      "vlanId",
+      "enabled",
+      "createdAt",
+      "createdBy",
+      "createdByName"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "siteId": {
+        "type": "string"
+      },
+      "siteName": {
+        "type": "string"
+      },
+      "clusterId": {
+        "type": "string"
+      },
+      "clusterName": {
+        "type": "string"
+      },
+      "startIpv4": {
+        "type": "string"
+      },
+      "endIpv4": {
+        "type": "string"
+      },
+      "gatewayIpv4": {
+        "type": "string"
+      },
+      "ipv4MaskLength": {
+        "type": "integer"
+      },
+      "ipv4TotalCount": {
+        "type": "integer"
+      },
+      "ipv4UsedCount": {
+        "type": "integer"
+      },
+      "ipv4UsagePercent": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "startIpv6": {
+        "type": "string"
+      },
+      "endIpv6": {
+        "type": "string"
+      },
+      "gatewayIpv6": {
+        "type": "string"
+      },
+      "ipv6MaskLength": {
+        "type": "integer"
+      },
+      "ipv6TotalCount": {
+        "type": "integer"
+      },
+      "ipv6UsedCount": {
+        "type": "integer"
+      },
+      "ipv6UsagePercent": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "vlanId": {
+        "type": "integer"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "createdAt": {
+        "type": "string"
+      },
+      "createdBy": {
+        "type": "string"
+      },
+      "createdByName": {
+        "type": "string"
+      }
+    }
+  }
+}

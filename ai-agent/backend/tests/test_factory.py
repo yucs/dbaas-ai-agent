@@ -270,9 +270,14 @@ class BuildRuntimeArtifactsTests(unittest.TestCase):
         self.assertNotIn('kind="hosts"', user_prompt)
         self.assertNotIn("query_dbaas_cluster_data_tool", user_prompt)
         self.assertNotIn('kind="clusters"', user_prompt)
+        self.assertNotIn("query_dbaas_network_segment_data_tool", user_prompt)
+        self.assertNotIn('kind="networkSegments"', user_prompt)
         self.assertIn("query_dbaas_host_data_tool", admin_prompt)
         self.assertIn("query_dbaas_cluster_data_tool", admin_prompt)
-        self.assertIn("hosts/clusters", admin_prompt)
+        self.assertIn("query_dbaas_network_segment_data_tool", admin_prompt)
+        self.assertIn('kind="networkSegments"', admin_prompt)
+        self.assertIn("siteId/siteName", admin_prompt)
+        self.assertIn("hosts/clusters/networkSegments", admin_prompt)
 
     def test_load_system_prompt_requires_role_extend_prompt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
